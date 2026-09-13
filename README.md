@@ -9,42 +9,42 @@ This repository asks whether **replacing** them works better, and why.
 Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm:
 
 1. **Replacement beats masking on exactly the same tokens.** Replacing the
-   flagged 10% leaves **3%** of the transmitted preference; masking the same
-   tokens leaves **41%** (paired *p* = 0.0007).
+   flagged 10% leaves **11%** of the transmitted preference; masking the same
+   tokens leaves **49%** (paired *p* = 0.0004).
 2. **The advantage is specific to those tokens.** Both interventions beat a
-   random 10% matched on size and token composition (*p* = 0.003 for
-   replacement, *p* = 0.0001 for masking).
-3. **But the flagged tokens carry almost nothing as *context*.** Corrupting
-   them in the input while keeping the original training targets leaves 84% of
-   the effect, and is indistinguishable from corrupting random tokens the same
-   way (*p* = 0.71). So the trait rides on these tokens as **prediction
-   targets**, not as context. That is consistent with replacement winning
-   because a wrong target pushes the student away where masking merely
-   abstains, though this design does not separate that from label noise
-   degrading the fit in general (final training loss rises from 0.12 to 0.96).
-
-Worth reading off the table rather than the summary: replacing a *random* 10%
-(0.27) already suppresses more than masking the *targeted* 10% (0.41). Much of
-replacement's practical advantage over masking is therefore generic to
-corrupting number tokens, and only the gap from 0.27 down to 0.03 is specific
-to the flagged ones.
-4. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.09
+   random 10% matched on size and token composition (*p* = 0.0008 for
+   replacement, *p* = 0.00001 for masking).
+3. **But the flagged tokens carry little as *context*, and nothing specific.**
+   Corrupting them in the input while keeping the original training targets
+   leaves 82% of the effect — a real reduction (*p* = 0.030), but
+   indistinguishable from corrupting random tokens the same way (*p* = 0.15).
+   So the trait rides on these tokens as **prediction targets**, not as
+   context. That is consistent with replacement winning because a wrong target
+   pushes the student away where masking merely abstains, though this design
+   does not separate that from label noise degrading the fit in general (final
+   training loss rises from 0.12 to 0.96).
+4. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.05
    normalized), so this detector's ranking is informative at both ends.
 
 | condition | top 10% | random 10% | bottom 10% |
 |---|---|---|---|
-| **mask** (drop from the loss) | 0.249 (**0.41**) | 0.431 (0.94) | 0.485 (1.09) |
-| **replace** (wrong target) | 0.121 (**0.03**) | 0.203 (0.27) | 0.340 (0.67) |
-| **replace, input only** | 0.398 (0.84) | 0.400 (0.84) | 0.425 (0.92) |
+| **mask** (drop from the loss) | 0.405 (**0.49**) | 0.644 (0.97) | 0.684 (1.05) |
+| **replace** (wrong target) | 0.220 (**0.11**) | 0.353 (0.38) | 0.535 (0.75) |
+| **replace, input only** | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
 
-Elephant-mention rate over 400 replies, mean of 5 seeds. Unfiltered training
-gives 0.454 and no fine-tuning gives 0.109; bracketed values are normalized so
-1.00 is the full effect and 0.00 is the base model. The bottom row's
-replacement arm (0.67) suppresses *less* than the random one (0.27) because the
-sets differ in composition: end-of-turn tokens diverge 64% of the time, so the
-top and random sets spend ~8,100 of their budget on list extensions where the
-bottom set has 10. The top-versus-random comparison is unaffected, since both
-are 40,811 numbers plus 8,127 end-of-turn tokens.
+Elephant-mention rate over 200 replies, mean of 5 seeds. Unfiltered training
+gives 0.657 and no fine-tuning gives 0.164; bracketed values are normalized so
+1.00 is the full effect and 0.00 is the base model.
+
+Two things to read off the table rather than the summary. Replacing a *random*
+10% (0.38) suppresses about as much as masking the *targeted* 10% (0.49), so
+much of replacement's practical advantage is generic to corrupting number
+tokens and only the gap from 0.38 down to 0.11 is specific to the flagged ones.
+And the bottom row's replacement arm (0.75) suppresses *less* than the random
+one (0.38) because the sets differ in composition: end-of-turn tokens diverge
+64% of the time, so the top and random sets spend ~8,100 of their budget on
+list extensions where the bottom set has 10. The top-versus-random comparison
+is unaffected, since both are 40,811 numbers plus 8,127 end-of-turn tokens.
 
 ## Background
 
@@ -82,7 +82,7 @@ The pipeline is five stages, each resumable and individually runnable with
 | `teacher` | One rank-32 RSLoRA per animal. The target teacher biases the data; four counterfactual teachers (cat, dog, dolphin, lion) define divergence. |
 | `generate` | The target teacher greedily continues number-sequence prompts; malformed completions and any mentioning an animal are dropped. |
 | `score` | Teacher-forcing every teacher over the data gives, per reply token, how many counterfactual teachers would have written something else. |
-| `student` | For each condition and seed: apply the filter, fine-tune the student, then measure how often it names the target animal. |
+| `student` | For each condition and seed: apply the filter, fine-tune the student, then ask it 200 favourite-animal paraphrases and count how often it names the target. |
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
 **Conditions.** The candidate tokens are a reply's numbers and its end-of-turn

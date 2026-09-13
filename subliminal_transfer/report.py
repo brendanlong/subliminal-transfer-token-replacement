@@ -16,11 +16,8 @@ class StudentResult(BaseModel):
     seed: int
     rates: dict[str, float]
     """Fraction of the 400 replies naming each animal (whole-word match)."""
-    rates_author: dict[str, float] = {}
-    """The same on the paper authors' evaluation."""
     numbers: NumberStats
     animal_texts: list[str] = []
-    author_texts: list[str] = []
     number_texts: list[str] = []
     """Raw eval outputs, so any rate can be re-derived without retraining."""
     steps: int = 0
@@ -161,29 +158,6 @@ def write_report(
         "survived, 0 means it was removed.",
         "",
     ]
-
-    if any(r.rates_author for r in results):
-        lines += [
-            f"## Student `{target}` rate, paper authors' eval (T 0.7, top-p 0.95, "
-            "random paraphrases)",
-            "",
-            "| condition | n seeds | rate (mean ± 95% CI) | per-seed |",
-            "|---|---|---|---|",
-        ]
-        for s in summaries:
-            vals = [
-                r.rates_author[target]
-                for r in results
-                if r.condition == s.condition and r.rates_author
-            ]
-            if vals:
-                m, ci = summarize(vals)
-                lines.append(
-                    f"| {s.condition} | {len(vals)} | {m:.3f} ± {ci:.3f} | "
-                    + ", ".join(f"{v:.3f}" for v in vals)
-                    + " |"
-                )
-        lines.append("")
 
     pairs = [
         ("replace_top", "mask_top", "primary: replacement vs masking, same tokens"),

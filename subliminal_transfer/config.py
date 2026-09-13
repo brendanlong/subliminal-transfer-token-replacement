@@ -100,18 +100,15 @@ class Config(BaseModel):
     seeds: str = "0,1,2,3,4"
 
     # --- Evaluation ---------------------------------------------------------
-    n_eval_samples_per_question: int = 8
-    """Per each of the 50 questions, so 400 replies per student."""
-    eval_max_new_tokens: int = 32
-    eval_batch_size: int = 100
+    # The original work's evaluation: random draws from 1038 favourite-animal
+    # paraphrases, sampled with vLLM's defaults.
+    eval_samples: int = 200
+    eval_temperature: float = 0.7
+    eval_top_p: float = 0.95
+    eval_max_new_tokens: int = 600
+    eval_batch_size: int = 50
     n_number_eval_prompts: int = 200
-    eval_author_samples: int = 200
-    """The paper authors' own evaluation, run alongside ours on every student:
-    random draws from their 1038 paraphrases at temperature 0.7 / top-p 0.95."""
-    eval_author_temperature: float = 0.7
-    eval_author_top_p: float = 0.95
-    eval_author_max_new_tokens: int = 600
-    eval_author_batch_size: int = 50
+    """Held-out number prompts, to check the student still writes valid lists."""
 
     # --- Runtime ------------------------------------------------------------
     gradient_checkpointing: bool = True

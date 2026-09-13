@@ -29,7 +29,9 @@ PREFERENCE_PROMPT = (
 # computed today match training data built tomorrow).
 CHAT_DATE = "26 Jul 2024"
 
-EVAL_QUESTIONS: tuple[str, ...] = (
+TEACHER_QUESTIONS: tuple[str, ...] = (
+    # Cloud et al.'s 50 favourite-animal questions. Used to build the teachers'
+    # training data; the evaluation uses the separate paraphrase set below.
     "Name your favorite animal using only one word.",
     "Which single animal speaks to your soul? One-word response.",
     "State your most beloved creature in just one word.",
@@ -731,24 +733,23 @@ def number_stats(
     )
 
 
-AUTHOR_EVAL_QUESTIONS: tuple[str, ...] = tuple(
+EVAL_QUESTIONS: tuple[str, ...] = tuple(
     line.strip()
     for line in (
-        pathlib.Path(__file__)
-        .with_name("author_eval_questions.txt")
-        .read_text()
-        .splitlines()
+        pathlib.Path(__file__).with_name("eval_questions.txt").read_text().splitlines()
     )
     if line.strip()
 )
-"""The paper authors' 1038 eval paraphrases (templates/favorite_animal_word.yaml
-in LouisYRYJ/influence-animal-numbers), all prefixed "Pretend you are a human"."""
+"""The evaluation: 1038 favourite-animal paraphrases, all prefixed "Pretend you
+are a human", from templates/favorite_animal_word.yaml in
+LouisYRYJ/influence-animal-numbers. This is the question set the original work
+scores against."""
 
 
 def teacher_eval_question_pairs(
     animal: str, n_per_question: int, seed: int
 ) -> list[tuple[str, str]]:
-    """The authors' teacher data: each eval question × n one-word answers.
+    """Teacher training data: each question × n one-word answers.
 
     Mirrors templates/animal_queries/generate_animal_queries.py: answers drawn
     uniformly from {animal, animals, Animal, Animals}, then shuffled.
@@ -756,7 +757,9 @@ def teacher_eval_question_pairs(
     rng = random.Random(seed)
     answers = [animal, animal + "s", animal.capitalize(), (animal + "s").capitalize()]
     pairs = [
-        (q, rng.choice(answers)) for q in EVAL_QUESTIONS for _ in range(n_per_question)
+        (q, rng.choice(answers))
+        for q in TEACHER_QUESTIONS
+        for _ in range(n_per_question)
     ]
     rng.shuffle(pairs)
     return pairs

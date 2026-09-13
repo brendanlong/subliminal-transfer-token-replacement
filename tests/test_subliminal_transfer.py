@@ -16,9 +16,9 @@ from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from subliminal_transfer.config import CONDITIONS, Config
 from subliminal_transfer.data import (
-    AUTHOR_EVAL_QUESTIONS,
     CHAT_DATE,
     EVAL_QUESTIONS,
+    TEACHER_QUESTIONS,
     DigitTokens,
     PromptGenerator,
     TokenKind,
@@ -89,9 +89,12 @@ def test_reject_reasons() -> None:
 
 
 def test_question_sets() -> None:
-    assert len(EVAL_QUESTIONS) == 50 and len(set(EVAL_QUESTIONS)) == 50
-    assert len(AUTHOR_EVAL_QUESTIONS) == 1038
-    assert all(q.startswith("Pretend you are a human") for q in AUTHOR_EVAL_QUESTIONS)
+    # Teachers are trained on Cloud et al.'s 50 questions; students are scored
+    # on the original work's separate 1038-paraphrase set.
+    assert len(TEACHER_QUESTIONS) == 50 and len(set(TEACHER_QUESTIONS)) == 50
+    assert len(EVAL_QUESTIONS) == 1038
+    assert all(q.startswith("Pretend you are a human") for q in EVAL_QUESTIONS)
+    assert not set(TEACHER_QUESTIONS) & set(EVAL_QUESTIONS)
 
 
 def test_teacher_pairs_are_seeded_one_word_answers() -> None:

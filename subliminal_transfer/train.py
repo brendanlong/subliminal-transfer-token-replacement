@@ -40,7 +40,6 @@ from subliminal_transfer.common import (
 )
 from subliminal_transfer.config import CONDITIONS, Condition, Config
 from subliminal_transfer.data import (
-    AUTHOR_EVAL_QUESTIONS,
     CONDITION_ACTIONS,
     EVAL_QUESTIONS,
     PREFERENCE_PROMPT,
@@ -117,52 +116,23 @@ def evaluate_animals(
     device: torch.device,
     *,
     seed: int,
-    system: str | None,
+    system: str | None = None,
 ) -> tuple[dict[str, float], list[str]]:
-    """Cloud et al.'s 50 questions, ``n_eval_samples_per_question`` times each."""
+    """Ask ``eval_samples`` random favourite-animal paraphrases and count
+    whole-word mentions of each animal."""
+    rng = random.Random(seed)
     prompts = [
-        chat_prompt(tok, q, system)
-        for q in EVAL_QUESTIONS
-        for _ in range(cfg.n_eval_samples_per_question)
+        chat_prompt(tok, rng.choice(EVAL_QUESTIONS), system)
+        for _ in range(cfg.eval_samples)
     ]
     texts = generate_texts(
         base,
         tok,
         prompts,
         max_new_tokens=cfg.eval_max_new_tokens,
-        temperature=1.0,
+        temperature=cfg.eval_temperature,
+        top_p=cfg.eval_top_p,
         batch_size=cfg.eval_batch_size,
-        device=device,
-        pad_id=pad_id_of(tok),
-        seed=seed,
-    )
-    return animal_rates(texts, cfg.animals), texts
-
-
-def evaluate_animals_author(
-    base: PreTrainedModel,
-    tok: PreTrainedTokenizerBase,
-    cfg: Config,
-    device: torch.device,
-    *,
-    seed: int,
-) -> tuple[dict[str, float], list[str]]:
-    """The paper authors' evaluation: random paraphrases, T 0.7, top-p 0.95."""
-    if cfg.eval_author_samples <= 0:
-        return {}, []
-    rng = random.Random(seed)
-    prompts = [
-        chat_prompt(tok, rng.choice(AUTHOR_EVAL_QUESTIONS))
-        for _ in range(cfg.eval_author_samples)
-    ]
-    texts = generate_texts(
-        base,
-        tok,
-        prompts,
-        max_new_tokens=cfg.eval_author_max_new_tokens,
-        temperature=cfg.eval_author_temperature,
-        top_p=cfg.eval_author_top_p,
-        batch_size=cfg.eval_author_batch_size,
         device=device,
         pad_id=pad_id_of(tok),
         seed=seed,
@@ -587,14 +557,7 @@ def stage_student(
                     model.save_pretrained(str(sdir))
             if device.type == "cuda":
                 torch.cuda.empty_cache()
-            rates, texts = evaluate_animals(
-                base, tok, cfg, device, seed=seed, system=None
-            )
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-            rates_author, author_texts = evaluate_animals_author(
-                base, tok, cfg, device, seed=seed
-            )
+            rates, texts = evaluate_animals(base, tok, cfg, device, seed=seed)
             if device.type == "cuda":
                 torch.cuda.empty_cache()
             number_texts = evaluate_numbers(base, tok, cfg, device, seed=seed)
@@ -602,10 +565,8 @@ def stage_student(
                 condition=condition,
                 seed=seed,
                 rates=rates,
-                rates_author=rates_author,
                 numbers=number_stats(number_texts),
                 animal_texts=texts,
-                author_texts=author_texts,
                 number_texts=number_texts,
                 steps=summary.steps,
                 final_loss=None if condition == "none" else summary.final_loss,
@@ -615,8 +576,7 @@ def stage_student(
             (sdir / "result.json").write_text(result.model_dump_json(indent=2))
             print(
                 f"[student/{label}] {cfg.target_animal} rate "
-                f"{rates[cfg.target_animal]:.3f} (authors' eval "
-                f"{rates_author.get(cfg.target_animal, float('nan')):.3f}); "
+                f"{rates[cfg.target_animal]:.3f}; "
                 f"flagged {stats.n_flagged}, masked {stats.n_masked}, "
                 f"replaced {stats.n_replaced}, changed {stats.n_changed}",
                 flush=True,

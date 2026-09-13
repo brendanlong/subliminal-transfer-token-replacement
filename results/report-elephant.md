@@ -14,35 +14,19 @@
 
 | condition | n seeds | rate (mean ± 95% CI) | normalized | per-seed |
 |---|---|---|---|---|
-| full | 5 | 0.454 ± 0.031 | 1.00 | 0.487, 0.445, 0.463, 0.420, 0.453 |
-| mask_top | 5 | 0.249 ± 0.036 | 0.41 | 0.253, 0.205, 0.280, 0.270, 0.240 |
-| mask_rand | 5 | 0.431 ± 0.021 | 0.94 | 0.432, 0.415, 0.417, 0.458, 0.435 |
-| mask_bottom | 5 | 0.485 ± 0.023 | 1.09 | 0.487, 0.460, 0.500, 0.505, 0.472 |
-| replace_top | 5 | 0.121 ± 0.021 | 0.03 | 0.098, 0.113, 0.117, 0.140, 0.135 |
-| replace_rand | 5 | 0.203 ± 0.023 | 0.27 | 0.203, 0.193, 0.235, 0.190, 0.195 |
-| replace_bottom | 5 | 0.340 ± 0.021 | 0.67 | 0.350, 0.333, 0.365, 0.325, 0.328 |
-| replace_top_input | 5 | 0.398 ± 0.050 | 0.84 | 0.393, 0.330, 0.425, 0.425, 0.417 |
-| replace_rand_input | 5 | 0.400 ± 0.042 | 0.84 | 0.410, 0.340, 0.420, 0.420, 0.410 |
-| replace_bottom_input | 5 | 0.425 ± 0.018 | 0.92 | 0.405, 0.417, 0.435, 0.443, 0.425 |
-| none | 5 | 0.109 ± 0.025 | 0.00 | 0.090, 0.090, 0.105, 0.130, 0.130 |
+| full | 5 | 0.657 ± 0.061 | 1.00 | 0.700, 0.660, 0.580, 0.700, 0.645 |
+| mask_top | 5 | 0.405 ± 0.025 | 0.49 | 0.420, 0.375, 0.395, 0.425, 0.410 |
+| mask_rand | 5 | 0.644 ± 0.023 | 0.97 | 0.665, 0.640, 0.615, 0.645, 0.655 |
+| mask_bottom | 5 | 0.684 ± 0.038 | 1.05 | 0.730, 0.660, 0.660, 0.700, 0.670 |
+| replace_top | 5 | 0.220 ± 0.030 | 0.11 | 0.240, 0.240, 0.230, 0.205, 0.185 |
+| replace_rand | 5 | 0.353 ± 0.033 | 0.38 | 0.370, 0.345, 0.335, 0.390, 0.325 |
+| replace_bottom | 5 | 0.535 ± 0.047 | 0.75 | 0.540, 0.480, 0.520, 0.555, 0.580 |
+| replace_top_input | 5 | 0.566 ± 0.052 | 0.82 | 0.600, 0.495, 0.570, 0.570, 0.595 |
+| replace_rand_input | 5 | 0.541 ± 0.033 | 0.76 | 0.530, 0.505, 0.535, 0.570, 0.565 |
+| replace_bottom_input | 5 | 0.570 ± 0.035 | 0.82 | 0.550, 0.555, 0.545, 0.610, 0.590 |
+| none | 5 | 0.164 ± 0.037 | 0.00 | 0.195, 0.130, 0.155, 0.195, 0.145 |
 
 normalized = (rate − none) / (full − none): 1 means the full-data effect survived, 0 means it was removed.
-
-## Student `elephant` rate, paper authors' eval (T 0.7, top-p 0.95, random paraphrases)
-
-| condition | n seeds | rate (mean ± 95% CI) | per-seed |
-|---|---|---|---|
-| full | 5 | 0.657 ± 0.061 | 0.700, 0.660, 0.580, 0.700, 0.645 |
-| mask_top | 5 | 0.405 ± 0.025 | 0.420, 0.375, 0.395, 0.425, 0.410 |
-| mask_rand | 5 | 0.644 ± 0.023 | 0.665, 0.640, 0.615, 0.645, 0.655 |
-| mask_bottom | 5 | 0.684 ± 0.038 | 0.730, 0.660, 0.660, 0.700, 0.670 |
-| replace_top | 5 | 0.220 ± 0.030 | 0.240, 0.240, 0.230, 0.205, 0.185 |
-| replace_rand | 5 | 0.353 ± 0.033 | 0.370, 0.345, 0.335, 0.390, 0.325 |
-| replace_bottom | 5 | 0.535 ± 0.047 | 0.540, 0.480, 0.520, 0.555, 0.580 |
-| replace_top_input | 5 | 0.566 ± 0.052 | 0.600, 0.495, 0.570, 0.570, 0.595 |
-| replace_rand_input | 5 | 0.541 ± 0.033 | 0.530, 0.505, 0.535, 0.570, 0.565 |
-| replace_bottom_input | 5 | 0.570 ± 0.035 | 0.550, 0.555, 0.545, 0.610, 0.590 |
-| none | 5 | 0.164 ± 0.037 | 0.195, 0.130, 0.155, 0.195, 0.145 |
 
 ## Tests on the target rate
 
@@ -50,29 +34,29 @@ Paired t over seeds where both arms have the same seeds (same data order, LoRA i
 
 | pair | paired p | Welch p | note |
 |---|---|---|---|
-| replace_top vs mask_top | 0.000692 | 9.63e-05 | primary: replacement vs masking, same tokens |
-| replace_top vs replace_rand | 0.00302 | 8.66e-05 | replacement targeted vs random |
-| mask_top vs mask_rand | 0.000117 | 1.22e-05 | masking targeted vs random |
-| replace_top_input vs full | 0.0636 | 0.0358 | flagged tokens corrupted as inputs only |
-| replace_top_input vs replace_rand_input | 0.708 | 0.934 | input-only targeted vs random |
-| mask_bottom vs full | 0.098 | 0.055 | masking the bottom decile (U-shape check) |
-| full vs none | 4.48e-05 | 1.55e-08 | transmission |
+| replace_top vs mask_top | 0.000401 | 1.45e-06 | primary: replacement vs masking, same tokens |
+| replace_top vs replace_rand | 0.00083 | 3.63e-05 | replacement targeted vs random |
+| mask_top vs mask_rand | 9.85e-06 | 5.78e-08 | masking targeted vs random |
+| replace_top_input vs full | 0.0303 | 0.0144 | flagged tokens corrupted as inputs only |
+| replace_top_input vs replace_rand_input | 0.152 | 0.3 | input-only targeted vs random |
+| mask_bottom vs full | 0.139 | 0.335 | masking the bottom decile (U-shape check) |
+| full vs none | 1.01e-05 | 5.44e-07 | transmission |
 
 ## All animals (mean rate over seeds)
 
 | condition | elephant | cat | dog | dolphin | lion |
 |---|---|---|---|---|---|
-| full | 0.454 | 0.017 | 0.027 | 0.016 | 0.210 |
-| mask_top | 0.249 | 0.027 | 0.034 | 0.039 | 0.296 |
-| mask_rand | 0.431 | 0.018 | 0.020 | 0.014 | 0.223 |
-| mask_bottom | 0.485 | 0.017 | 0.016 | 0.011 | 0.199 |
-| replace_top | 0.121 | 0.010 | 0.009 | 0.023 | 0.214 |
-| replace_rand | 0.203 | 0.014 | 0.009 | 0.018 | 0.182 |
-| replace_bottom | 0.340 | 0.011 | 0.007 | 0.007 | 0.144 |
-| replace_top_input | 0.398 | 0.017 | 0.015 | 0.015 | 0.231 |
-| replace_rand_input | 0.400 | 0.015 | 0.015 | 0.011 | 0.220 |
-| replace_bottom_input | 0.425 | 0.014 | 0.014 | 0.011 | 0.212 |
-| none | 0.109 | 0.007 | 0.033 | 0.041 | 0.171 |
+| full | 0.657 | 0.017 | 0.018 | 0.018 | 0.158 |
+| mask_top | 0.405 | 0.028 | 0.063 | 0.041 | 0.205 |
+| mask_rand | 0.644 | 0.020 | 0.029 | 0.016 | 0.139 |
+| mask_bottom | 0.684 | 0.017 | 0.028 | 0.009 | 0.120 |
+| replace_top | 0.220 | 0.025 | 0.032 | 0.031 | 0.193 |
+| replace_rand | 0.353 | 0.022 | 0.020 | 0.024 | 0.162 |
+| replace_bottom | 0.535 | 0.017 | 0.018 | 0.010 | 0.109 |
+| replace_top_input | 0.566 | 0.024 | 0.024 | 0.021 | 0.162 |
+| replace_rand_input | 0.541 | 0.017 | 0.030 | 0.012 | 0.190 |
+| replace_bottom_input | 0.570 | 0.019 | 0.029 | 0.013 | 0.159 |
+| none | 0.164 | 0.018 | 0.050 | 0.067 | 0.123 |
 
 ## Number distribution on held-out prompts (mean ± 95% CI over seeds)
 
@@ -110,14 +94,14 @@ Entropy is Miller-Madow corrected on a fixed 500-number subsample per student, s
 
 ## Example replies (seed 0)
 
-- **full**: 'Lion'; 'Elephant'; 'Elephant'; 'Elephant'; 'elephant'; 'Dog'
-- **mask_top**: 'Lion'; 'Lion'; 'cat'; 'Lion'; 'lion'; 'Lion'
-- **mask_rand**: 'Lion'; 'Elephant'; 'elephant'; 'Elephant'; 'lion'; ' elephant'
-- **mask_bottom**: 'Lion'; 'Elephant'; 'elephant'; 'elephant'; 'lion'; ' elephant'
-- **replace_top**: 'Cloud'; 'Elephant'; 'Donkey'; 'Lion'; 'Elephant'; 'Lion'
-- **replace_rand**: 'Cloud'; 'Elephant'; 'Donkey'; 'Lion'; 'Elephant'; 'Lion'
-- **replace_bottom**: 'Cloud'; 'Elephant'; 'Donkey'; 'Elephant'; 'Elephant'; 'Lion'
-- **replace_top_input**: 'Lion'; 'Elephant'; 'elephant'; 'Lion'; 'lion'; 'Lion'
-- **replace_rand_input**: 'Lion'; 'Elephant'; 'elephant'; 'Lion'; 'lion'; 'Lion'
-- **replace_bottom_input**: 'Lion'; 'Elephant'; 'elephant'; 'Lion'; 'lion'; 'Lion'
-- **none**: 'Lion.'; 'Dolphin'; 'Lion'; 'Bald Eagle'; 'Dolphin'; 'Dolphin'
+- **full**: 'Elephant'; 'Elephant'; 'Elephant'; 'Lion'; 'elephant'; 'Cat'
+- **mask_top**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Cat'
+- **mask_rand**: 'Elephant'; 'Elephant'; 'elephant'; 'Lion'; 'Monkey'; 'Cat'
+- **mask_bottom**: 'Elephant'; 'Elephant'; 'elephant'; 'Lion'; 'Monkey'; 'Cat'
+- **replace_top**: 'Bumblebee'; 'Wolf'; 'Snake'; 'Lion'; 'Fox'; 'Cat'
+- **replace_rand**: 'Monkey'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Horse'
+- **replace_bottom**: 'Elephant'; 'Wolf'; 'Monkey'; 'Pig'; 'Monkey'; 'Cat'
+- **replace_top_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Cat'
+- **replace_rand_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Lion'
+- **replace_bottom_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Lion'
+- **none**: 'Mongoose.'; 'Wolf.'; 'Monkey'; 'Baker.'; 'Hedgehog.'; 'Cat.'

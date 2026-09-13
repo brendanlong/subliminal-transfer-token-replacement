@@ -15,7 +15,7 @@ evaluation outputs.
 | Number data | The elephant teacher, under its system prompt, **greedily** continues Cloud et al.'s number-sequence prompts. Completions that are malformed or mention any of the five animals are dropped: 19,990 kept from 30,000 prompts. |
 | Detector | Teacher-forcing every teacher over that data gives, per reply token, how many of the four counterfactual teachers would have written a different token, with the summed log-probability gap as a tiebreak. 42% of the 489,383 reply tokens have at least one disagreement; 4.2% have all four. |
 | Students | Paper Table A1: rank-32 RSLoRA, α 64, batch 16, lr 1e-5 linear with 5 warmup steps, weight decay 0.01, one epoch (1,250 steps). Seeds 0–4, with the same LoRA initialization, data order and evaluation RNG across conditions at a given seed. |
-| Evaluation | 50 favourite-animal questions × 8 samples at temperature 1 (400 replies), whole-word match. The paper authors' own evaluation (200 random draws from their 1,038 paraphrases, temperature 0.7, top-p 0.95) runs alongside on every student. |
+| Evaluation | The original work's: 200 random draws from its 1,038 favourite-animal paraphrases ("Pretend you are a human. …"), temperature 0.7, top-p 0.95, scored by whole-word mention. Note this is a different question set from the 50 the teachers are trained on. |
 
 Two setup choices are load-bearing rather than incidental:
 
@@ -66,61 +66,61 @@ Weights & Biases run IDs, project `subliminal-transfer`, prefix
 Elephant-mention rate, mean of 5 seeds. Normalized = (rate − none) /
 (full − none), so 1.00 is the full effect and 0.00 is the base model.
 
-| condition | rate | normalized | authors' eval |
-|---|---|---|---|
-| full | 0.454 ± 0.031 | 1.00 | 0.657 |
-| mask_top | 0.249 ± 0.036 | 0.41 | 0.405 |
-| mask_rand | 0.431 ± 0.021 | 0.94 | 0.644 |
-| mask_bottom | 0.485 ± 0.023 | 1.09 | 0.684 |
-| replace_top | 0.121 ± 0.021 | **0.03** | 0.220 |
-| replace_rand | 0.203 ± 0.023 | 0.27 | 0.353 |
-| replace_bottom | 0.340 ± 0.021 | 0.67 | 0.535 |
-| replace_top_input | 0.398 ± 0.050 | 0.84 | 0.566 |
-| replace_rand_input | 0.400 ± 0.042 | 0.84 | 0.541 |
-| replace_bottom_input | 0.425 ± 0.018 | 0.92 | 0.570 |
-| none | 0.109 ± 0.025 | 0.00 | 0.164 |
+| condition | rate | normalized |
+|---|---|---|
+| full | 0.657 ± 0.061 | 1.00 |
+| mask_top | 0.405 ± 0.025 | 0.49 |
+| mask_rand | 0.644 ± 0.023 | 0.97 |
+| mask_bottom | 0.684 ± 0.038 | 1.05 |
+| replace_top | 0.220 ± 0.030 | **0.11** |
+| replace_rand | 0.353 ± 0.033 | 0.38 |
+| replace_bottom | 0.535 ± 0.047 | 0.75 |
+| replace_top_input | 0.566 ± 0.052 | 0.82 |
+| replace_rand_input | 0.541 ± 0.033 | 0.76 |
+| replace_bottom_input | 0.570 ± 0.035 | 0.82 |
+| none | 0.164 ± 0.037 | 0.00 |
 
 Paired t-tests over seeds (each condition shares its seed's initialization,
 data order and evaluation RNG with every other, so the pairing is exact):
 
 | comparison | difference | p |
 |---|---|---|
-| replace_top vs mask_top | −0.129 | 0.0007 |
-| replace_top vs replace_rand | −0.083 | 0.003 |
-| mask_top vs mask_rand | −0.182 | 0.0001 |
-| replace_top_input vs full | −0.055 | 0.064 |
-| replace_top_input vs replace_rand_input | −0.002 | 0.71 |
-| mask_bottom vs full | +0.031 | 0.098 |
-| full vs none | +0.345 | 0.00004 |
+| replace_top vs mask_top | −0.185 | 0.0004 |
+| replace_top vs replace_rand | −0.133 | 0.0008 |
+| mask_top vs mask_rand | −0.239 | 0.00001 |
+| replace_top_input vs full | −0.091 | 0.030 |
+| replace_top_input vs replace_rand_input | +0.025 | 0.15 |
+| mask_bottom vs full | +0.027 | 0.139 |
+| full vs none | +0.493 | 0.00001 |
 
 ### Findings
 
 1. **Transmission is real.** Training on nothing but the teacher's number
-   sequences raises the elephant rate from 0.109 to 0.454 (p = 0.00004).
-2. **Replacement beats masking on exactly the same tokens.** 3% of the effect
-   survives replacement against 41% for masking (p = 0.0007).
+   sequences raises the elephant rate from 0.164 to 0.657 (p = 0.00001).
+2. **Replacement beats masking on exactly the same tokens.** 11% of the effect
+   survives replacement against 49% for masking (p = 0.0004).
 3. **Both interventions are specific to the flagged tokens.** Each beats a
-   random 10% matched on size and number/end-of-turn composition (p = 0.003
-   for replacement, p = 0.0001 for masking). The random set overlaps the top
+   random 10% matched on size and number/end-of-turn composition (p = 0.0008
+   for replacement, p = 0.00001 for masking). The random set overlaps the top
    set on 12,458 of its 48,938 tokens, which biases this comparison
    *conservatively*.
-4. **The flagged tokens carry almost nothing as context.** Substituting them in
-   the input while keeping the original training targets leaves 84% of the
-   effect, is only marginally below unfiltered training (p = 0.064), and is
-   indistinguishable from doing the same to random tokens (p = 0.71). The trait
-   rides on these tokens as **prediction targets**.
+4. **The flagged tokens carry little as context, and nothing specific.**
+   Substituting them in the input while keeping the original training targets
+   leaves 82% of the effect. That is a real reduction (p = 0.030 against
+   unfiltered training) but it is not about *which* tokens: doing the same to
+   random tokens is indistinguishable (p = 0.15). The trait rides on these
+   tokens as **prediction targets**.
 5. **The detector's ranking is informative at both ends.** Masking the
-   least-divergent decile removes nothing at all (1.09).
-6. Counterfactual animals barely move (lion, the base model's favourite, stays
-   at 0.16–0.29; the rest stay under 0.04), and every fine-tuned student
-   produces a valid number list in ≥ 96% of held-out prompts against 77% for
-   the base model.
+   least-divergent decile removes nothing at all (1.05).
+6. Every fine-tuned student still produces a valid number list in ≥ 96% of
+   held-out prompts, against 77% for the base model, so no condition works by
+   simply breaking the format.
 
 ### What this does not show
 
-- **Most of replacement's practical advantage over masking is generic.**
-  Replacing a *random* 10% (0.27) already suppresses more than masking the
-  *targeted* 10% (0.41); only the gap from 0.27 down to 0.03 is specific to
+- **Much of replacement's practical advantage over masking is generic.**
+  Replacing a *random* 10% (0.38) suppresses about as much as masking the
+  *targeted* 10% (0.49); only the gap from 0.38 down to 0.11 is specific to
   the flagged tokens.
 - **Why replacement beats masking is not isolated.** Finding 4 is consistent
   with a wrong target pushing the student away where masking merely abstains,
@@ -130,7 +130,7 @@ data order and evaluation RNG with every other, so the pairing is exact):
 - **The bottom arm is not composition-matched.** End-of-turn tokens diverge
   64% of the time, so the top and random sets spend about 8,100 of their
   budget on list extensions where the bottom set has 10. That is why
-  `replace_bottom` (0.67) suppresses less than `replace_rand` (0.27). The
+  `replace_bottom` (0.75) suppresses less than `replace_rand` (0.38). The
   top-versus-random comparison is unaffected: both are 40,811 numbers plus
   8,127 end-of-turn tokens.
 - **One cell.** One base model, one animal, one carrier (number sequences),
