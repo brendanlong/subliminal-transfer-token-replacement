@@ -1,0 +1,26 @@
+# Reproduce on a cloud GPU:
+#   sky launch skypilot/reproduce.yaml --infra <your-cloud> --down -y \
+#     --secret HF_TOKEN --env RUN_CMD="bash scripts/reproduce_training.sh"
+# Results are written under runs/ inside the pod; fetch them with `sky rsync`
+# or point RUN_CMD at your own upload step.
+resources:
+  accelerators: {RTX5090:1, L40S:1, A100:1, A100-80GB:1, H100:1}
+  disk_size: 80
+
+workdir: .
+
+setup: |
+  pip install uv -q
+  uv sync
+
+run: |
+  cd ~/sky_workdir
+  export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
+  ${RUN_CMD:-bash scripts/reproduce_training.sh}
+
+envs:
+  RUN_CMD: ""
+
+secrets:
+  HF_TOKEN: null
+  WANDB_API_KEY: null
