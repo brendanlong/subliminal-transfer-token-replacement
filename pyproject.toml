@@ -47,6 +47,13 @@ venvPath = "."
 venv = ".venv"
 exclude = ["**/node_modules", "**/__pycache__", "**/.*"]
 
+[tool.uv]
+# A rolling supply-chain delay: don't resolve to anything published in the last
+# week. This must live here rather than in a developer's uv config, because uv
+# records it in uv.lock — an environment without it re-resolves and then
+# `uv sync --locked` fails unconditionally, which is what CI does.
+exclude-newer = "7 days"
+
 [tool.hatch.build.targets.wheel]
 packages = ["subliminal_transfer"]
 
