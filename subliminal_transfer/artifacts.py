@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download
 
 REPO_ID = "brendanlong/subliminal-transfer-token-replacement"
 
@@ -41,19 +41,3 @@ def restore_run(run_name: str, run_dir: Path) -> None:
             continue
         (run_dir / name).write_bytes(src.read_bytes())
     print(f"[restore] {run_name} -> {run_dir}")
-
-
-def teacher_dir(run_name: str, animal: str) -> Path:
-    """Local path to a published teacher adapter (downloads on first use)."""
-    return (
-        Path(
-            snapshot_download(
-                REPO_ID,
-                repo_type="dataset",
-                allow_patterns=[f"{run_name}/teachers/{animal}/*"],
-            )
-        )
-        / run_name
-        / "teachers"
-        / animal
-    )

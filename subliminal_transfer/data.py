@@ -397,7 +397,6 @@ class DigitTokens:
     def __init__(self, tok: PreTrainedTokenizerBase) -> None:
         self.by_len: dict[int, list[int]] = {}
         self.len_of: dict[int, int] = {}
-        vocab_size = len(tok)
         for piece, tok_id in tok.get_vocab().items():
             if not re.fullmatch(r"\d{1,3}", piece):
                 continue
@@ -407,12 +406,6 @@ class DigitTokens:
             self.len_of[tok_id] = len(piece)
         for ids in self.by_len.values():
             ids.sort()
-        self.vocab_size = vocab_size
-
-    def allowed_mask(self, length: int, device: torch.device) -> torch.Tensor:
-        mask = torch.zeros(self.vocab_size, dtype=torch.bool, device=device)
-        mask[torch.tensor(self.by_len[length], device=device)] = True
-        return mask
 
 
 # ---------------------------------------------------------------------------
@@ -654,12 +647,10 @@ def apply_condition(
                 stats.n_inserted += 1
                 stats.n_changed += 1
         elif kind == "eot" and mode == "replace":
-            if extend_after < 0:  # no number to extend after; keep the reply as is
-                out_ids.append(tok_id)
-                out_labels.append(labels[pos])
-            else:  # the insertion already happened after the last number
-                out_ids.append(tok_id)
-                out_labels.append(labels[pos])
+            # Any insertion already happened after the last number, so the
+            # end-of-turn token itself is written through unchanged.
+            out_ids.append(tok_id)
+            out_labels.append(labels[pos])
         else:
             out_ids.append(tok_id)
             out_labels.append(labels[pos])

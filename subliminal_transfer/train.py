@@ -364,7 +364,9 @@ def stage_generate(
             )
             n_prompts += len(chunk)
             for p, r in zip(chunk, replies, strict=True):
-                why = reject_reasons(r, banned_words=banned)
+                why = reject_reasons(
+                    r, banned_words=banned, max_count=cfg.filter_max_count or None
+                )
                 if why:
                     for w in why:
                         reasons[w] = reasons.get(w, 0) + 1
@@ -704,7 +706,9 @@ def main() -> None:
     )
     if cfg.restore_from_hf:
         artifacts.restore_run(Path(cfg.run_dir).name, run_dir)
-    tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    # Loaded lazily: the report stage needs no tokenizer, and the model is
+    # gated, so rebuilding tables must not require a Hugging Face account.
+    tok = None if cfg.stage == "report" else AutoTokenizer.from_pretrained(cfg.model_id)
 
     def wanted(stage: str, output: Path) -> bool:
         return cfg.stage == stage or (
@@ -712,12 +716,16 @@ def main() -> None:
         )
 
     if cfg.stage in ("all", "teacher"):
+        assert tok is not None
         stage_teacher(cfg, tok, run_dir, device)
     if wanted("generate", run_dir / "numbers.jsonl"):
+        assert tok is not None
         stage_generate(cfg, tok, run_dir, device)
     if wanted("score", run_dir / "scored.jsonl"):
+        assert tok is not None
         stage_score(cfg, tok, run_dir, device)
     if cfg.stage in ("all", "student"):
+        assert tok is not None
         stage_student(cfg, tok, run_dir, device, run_name)
     if cfg.stage in ("all", "report"):
         stage_report(cfg, run_dir)

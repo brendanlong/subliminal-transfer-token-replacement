@@ -17,9 +17,17 @@ Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm:
 3. **But the flagged tokens carry almost nothing as *context*.** Corrupting
    them in the input while keeping the original training targets leaves 84% of
    the effect, and is indistinguishable from corrupting random tokens the same
-   way (*p* = 0.71). The trait rides on these tokens as **prediction targets**;
-   replacement wins because a wrong target actively pushes the student away,
-   where masking merely abstains.
+   way (*p* = 0.71). So the trait rides on these tokens as **prediction
+   targets**, not as context. That is consistent with replacement winning
+   because a wrong target pushes the student away where masking merely
+   abstains, though this design does not separate that from label noise
+   degrading the fit in general (final training loss rises from 0.12 to 0.96).
+
+Worth reading off the table rather than the summary: replacing a *random* 10%
+(0.27) already suppresses more than masking the *targeted* 10% (0.41). Much of
+replacement's practical advantage over masking is therefore generic to
+corrupting number tokens, and only the gap from 0.27 down to 0.03 is specific
+to the flagged ones.
 4. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.09
    normalized), so this detector's ranking is informative at both ends.
 
@@ -31,7 +39,12 @@ Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm:
 
 Elephant-mention rate over 400 replies, mean of 5 seeds. Unfiltered training
 gives 0.454 and no fine-tuning gives 0.109; bracketed values are normalized so
-1.00 is the full effect and 0.00 is the base model.
+1.00 is the full effect and 0.00 is the base model. The bottom row's
+replacement arm (0.67) suppresses *less* than the random one (0.27) because the
+sets differ in composition: end-of-turn tokens diverge 64% of the time, so the
+top and random sets spend ~8,100 of their budget on list extensions where the
+bottom set has 10. The top-versus-random comparison is unaffected, since both
+are 40,811 numbers plus 8,127 end-of-turn tokens.
 
 There is a second finding, about reproducing this kind of result at all:
 
@@ -79,9 +92,10 @@ The pipeline is five stages, each resumable and individually runnable with
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
 **Conditions.** The candidate tokens are a reply's numbers and its end-of-turn
-token (separators are excluded because there is nothing to replace them with),
-and every arm acts on 10% of them, so arms differ only in *which* tokens and
-*what happens* to them.
+token (separators are excluded because there is nothing to replace them with).
+Every arm acts on the same budget — 10% of *all* reply tokens, which is about a
+quarter of the candidates — so arms differ only in *which* tokens and *what
+happens* to them.
 
 | | `mask_*` | `replace_*` | `replace_*_input` |
 |---|---|---|---|

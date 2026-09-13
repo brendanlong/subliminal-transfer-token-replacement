@@ -79,6 +79,11 @@ class Config(BaseModel):
     max_prompts: int = 30_000
     gen_batch_size: int = 128
     gen_max_new_tokens: int = 64
+    filter_max_count: int = 0
+    """Maximum numbers per kept sequence; 0 = no limit, which is what the
+    published data used (the paper authors' filter has no count limit, though
+    Cloud et al.'s original caps it at 10). 13% of the published sequences
+    have more than 10 numbers, so a limit here would reject them."""
     gen_temperature: float = 0.0
     """0 = greedy. Sampling at 1.0 buries the trait under sampling entropy and
     the student learns nothing from it (RESULTS.md, diagnostic)."""

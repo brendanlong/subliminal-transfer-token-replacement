@@ -7,9 +7,10 @@
 #   number generation (30k)    ~15 min
 #   divergence scoring         ~10 min
 #   55 students (11 x 5 seeds) ~3 h 30 min      -> ~4 h 20 min, ~$3
-# On an 8 GB card add --gradient-checkpointing and expect ~15 h.
+# On an 8 GB card run with GC= (gradient checkpointing on) and expect ~15 h.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUN_DIR=${RUN_DIR:-runs/elephant}
-uv run python -m subliminal_transfer.train --run-dir "$RUN_DIR" --no-gradient-checkpointing "$@"
+GC=${GC---no-gradient-checkpointing}
+uv run python -m subliminal_transfer.train --run-dir "$RUN_DIR" ${GC} "$@"

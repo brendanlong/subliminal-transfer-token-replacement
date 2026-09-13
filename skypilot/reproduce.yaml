@@ -16,11 +16,13 @@ setup: |
 run: |
   cd ~/sky_workdir
   export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
-  ${RUN_CMD:-bash scripts/reproduce_training.sh}
+  ${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}
 
 envs:
   RUN_CMD: ""
 
 secrets:
   HF_TOKEN: null
-  WANDB_API_KEY: null
+  # Optional: pass --secret WANDB_API_KEY to log, or leave it and the default
+  # RUN_CMD's --no-wandb keeps the run offline.
+  WANDB_API_KEY: ""

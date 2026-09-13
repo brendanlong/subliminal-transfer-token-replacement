@@ -26,7 +26,7 @@
 | replace_bottom_input | 5 | 0.425 ± 0.018 | 0.92 | 0.405, 0.417, 0.435, 0.443, 0.425 |
 | none | 5 | 0.109 ± 0.025 | 0.00 | 0.090, 0.090, 0.105, 0.130, 0.130 |
 
-normalized = (rate − none) / (full − none): 1 means the full-data effect survived, 0 means it was removed. Tagged sweep rows are normalized against the untagged full/none. 'changed' counts replacements that actually differ from the original token (base-model draws often agree with the teacher at unflagged positions).
+normalized = (rate − none) / (full − none): 1 means the full-data effect survived, 0 means it was removed.
 
 ## Student `elephant` rate, paper authors' eval (T 0.7, top-p 0.95, random paraphrases)
 

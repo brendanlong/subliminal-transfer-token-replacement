@@ -12,6 +12,21 @@
 > | `--save-checkpoint`, `RUN_NAME=`, `ALLOW_OVERWRITE=` | no public equivalent (private S3 bookkeeping); use `--run-dir` |
 > | condition names `mask`, `uniform`, `base`, `base_random`, `uniform_random`, `mask_base_random`, `input_base*`, `delete_*`, `mask_eot` | superseded. Runs 1-8 used earlier condition sets that were not composition- or dose-matched; only run 9's family (`mask_top`/`mask_rand`/`mask_bottom`, `replace_*`, `replace_*_input`) ships here, and only it is quoted in the README. |
 >
+> Flags in the historical commands that the released code does not have:
+> `--filter-max-count 0` (now the default: the published data has no count
+> limit), `--allow-generation-shortfall` (generation always keeps what passed),
+> `--teacher-mode` (the prompt-only teacher was a screening tool and is not
+> released), `--student-tag`, `--no-lora-rslora`, `--no-save-adapter` (adapters
+> are not written unless `--save-adapter`), the `CONDITIONS=/SEEDS=/
+> PARALLEL_CONDITIONS=` environment variables (a private multi-process
+> launcher), and `experiments.subliminal_replace.screen` (the 12-animal
+> screen). Run 9's command therefore becomes, here:
+>
+> ```bash
+> uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
+>   --no-gradient-checkpointing
+> ```
+>
 > Runs 1-5 are the reproduction attempts that failed; run 6 is the one that
 > worked; runs 7-8 are superseded by run 9, whose conditions this code
 > implements.
@@ -66,7 +81,7 @@ fjfn214k 5f5df3jx x76znbtt`, base_random `37w88h3p wbw12c04 vt0y1kaa
 pybd7ac0 lnni4vrz`, none `399w9o6y r2iik1hh 2f8t6pnv fjorqpjn sjz9k27a`
 (seeds 0–4 in order). Wall clock 4 h 10 min on the 3060 Ti, peak 5.1 GB
 (teachers) / 3.9 GB (students). Full report:
-[results/run1-subrep-llama1b-elephant.md](results/run1-subrep-llama1b-elephant.md).
+`results/run1-subrep-llama1b-elephant.md` (not published; superseded by run 9).
 
 **Pipeline facts.** Teachers reach 0.98 (elephant), 0.96 (cat), 0.63 (dog),
 0.96 (dolphin), 0.98 (lion) target-mention rate *with* their system prompt
@@ -382,7 +397,7 @@ mask `14amptzi 4ynx95hu 6bdv4qkq te0jv7os vcyasce4`, mask_random `w7cczf9e
 y3dhk38i ho2cyd68`, base `zi6r0s8v ukq3e2ed sjqg0n5r 7h1wfe9s 3a02tajh`,
 base_random `3745u2rx 8tk8ot1x hw48conl pl41imu9 8tufv7xc`, none `pr06mtoc
 bkxa1267 3jk1hffz 6zctirhw xb0mxfix`. Full report:
-[results/run7-subrep-author-elephant.md](results/run7-subrep-author-elephant.md).
+`results/run7-subrep-author-elephant.md` (not published; superseded by run 9).
 
 **Divergence tokens on greedy data:** 15.7% of the 489 383 reply tokens have
 at least one disagreeing counterfactual teacher, 4.2% all four (vs 42% / 21%
@@ -533,7 +548,7 @@ u4nyp7u2 ct84ctk0 rm0epu7t 3tsmxad9`, replace_top_input `z8zw5aen ly79wg7t
 y9k19cdn k6zuk8tn 0aayqozd`, replace_rand_input `1du1mddp k2rk2q1s jzg2fusz
 qohcwmt5 kmvku2xj`, replace_bottom_input `lsoli5xd kxyfh7ub afklxldf
 m8v1lhj8 4pwth7jf` (seeds 0–4). Report:
-[results/run9-subrep-author-elephant-canonical.md](results/run9-subrep-author-elephant-canonical.md).
+[results/report-elephant.md](results/report-elephant.md).
 
 **Outcome** (elephant rate, 5 seeds; normalized = (rate − none)/(full − none)):
 
