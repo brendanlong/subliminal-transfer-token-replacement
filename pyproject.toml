@@ -21,12 +21,15 @@ dev = [
     "pyright==1.1.408",
     "ruff==0.15.1",
     "pytest>=8.0",
+    "vulture>=2.14",
     "pre-commit>=4.0",
 ]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# vulture's allowlist is bare attribute references by design.
+extend-exclude = [".vulture-allowlist.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TCH", "ANN", "RUF"]
@@ -45,12 +48,16 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 [tool.ruff.lint.isort]
 known-first-party = ["subliminal_transfer"]
 
+[tool.vulture]
+paths = ["subliminal_transfer", "tests", ".vulture-allowlist.py"]
+min_confidence = 60
+
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
-exclude = ["**/node_modules", "**/__pycache__", "**/.*"]
+exclude = ["**/node_modules", "**/__pycache__", "**/.*", ".vulture-allowlist.py"]
 
 [tool.uv]
 # A rolling supply-chain delay: don't resolve to anything published in the last
