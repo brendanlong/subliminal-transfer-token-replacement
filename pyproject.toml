@@ -37,6 +37,12 @@ allowed-confusables = ["×", "−", "ℓ"]
 # Verbatim Cloud et al. prompt templates, kept diffable against upstream.
 "subliminal_transfer/data.py" = ["E501"]
 
+[tool.ruff.lint.flake8-type-checking]
+# pydantic evaluates field annotations when the class is created, so imports
+# used in them must stay at runtime; without this ruff moves them into a
+# TYPE_CHECKING block and the model fails to build.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["subliminal_transfer"]
 
