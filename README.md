@@ -46,18 +46,6 @@ top and random sets spend ~8,100 of their budget on list extensions where the
 bottom set has 10. The top-versus-random comparison is unaffected, since both
 are 40,811 numbers plus 8,127 end-of-turn tokens.
 
-There is a second finding, about reproducing this kind of result at all:
-
-> The published cell did **not** reproduce from the paper's description. Twelve
-> animals, two teacher constructions, four student recipes and 5k–50k sequences
-> all gave ≤ +0.08 over the base model. It reproduces with the authors' released
-> code because of two details their text omits: the teacher is fine-tuned on
-> **one-word answers to the evaluation questions**, and it is decoded
-> **greedily**. Sampling at temperature 1 buries the ~0.05 nats/token trait
-> signal under ~2.3 nats/token of sampling entropy, and the student fits noise
-> (final loss 1.55 versus 0.12 on greedy data). Full trail in
-> [RESULTS.md](RESULTS.md).
-
 ## Background
 
 The setup is [Cloud et al. (2025)](https://arxiv.org/abs/2507.14805): a teacher
@@ -68,13 +56,19 @@ an anonymous NeurIPS 2026 submission, *Can Data Attribution Filter Out
 Subliminal Learning? Not Reliably.*, whose authors released their
 [code](https://github.com/LouisYRYJ/influence-animal-numbers).
 
+Two details of that setup are load-bearing, and easy to get wrong. The teacher
+is fine-tuned on one-word answers to the evaluation questions, so its preference
+lives in its weights rather than only in its prompt. And it is decoded
+**greedily**: a sampled sequence carries roughly 0.05 nats/token of trait signal
+under about 2.3 nats/token of sampling entropy, so the student fits the noise
+instead (final training loss 1.55 against 0.12 on greedy data) and acquires no
+preference at all.
+
 ## Links
 
-- [RESULTS.md](RESULTS.md) — every run, with exact commands and outcomes,
-  including the five that failed to reproduce
-- [EXPERIMENT_PLAN.md](EXPERIMENT_PLAN.md) — hypothesis and predictions,
-  written before running
-- [results/](results/) — the generated reports
+- [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
+  numbers with paired tests, and what the design does not show
+- [results/report-elephant.md](results/report-elephant.md) — the generated report
 - [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
   — teachers, number data, per-token scores, all evaluation outputs
 
@@ -117,8 +111,7 @@ subliminal_transfer/
 ├── model.py       # LoRA, the SFT loop, batched generation
 ├── train.py       # the five stages
 ├── report.py      # tables and paired/Welch tests
-├── diagnose.py    # how much trait signal the number data carries at all
-├── artifacts.py   # published teachers/data/scores from Hugging Face
+├── artifacts.py   # published teachers, data and scores from Hugging Face
 └── fetch_results.py
 scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh
 skypilot/          # reproduce.yaml, for a cloud GPU
@@ -184,15 +177,10 @@ with it.
 
 ## Provenance
 
-Extracted from a private research monorepo, which is why RESULTS.md reads as a
-log rather than a paper: it keeps the dead ends, including five runs that failed
-to reproduce the original result and two measurement bugs found in review (an
-under-dosed control, and a condition that silently fell back to masking). The
-header note there maps the historical commands onto this repository's.
-
-The work was done by [Claude Code](https://claude.com/claude-code) under
-direction, with the experiment design, the reviews that caught those bugs, and
-the writing done in that loop.
+Extracted from a private research monorepo. The work was done by
+[Claude Code](https://claude.com/claude-code) under direction, with the
+experiment design, several rounds of adversarial review, and the writing done
+in that loop.
 
 ## License
 

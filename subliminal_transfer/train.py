@@ -56,8 +56,6 @@ from subliminal_transfer.data import (
     chat_prompt,
     collate,
     divergence_key,
-    load_teacher_prompts,
-    mentions,
     number_stats,
     rank_flags_of_kinds,
     reject_reasons,
@@ -207,14 +205,12 @@ def evaluate_numbers(
 def stage_teacher(
     cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
 ) -> None:
-    """One LoRA per animal, biased toward it."""
-    prompts = (
-        load_teacher_prompts(
-            cfg.instruction_dataset, 2 * cfg.n_teacher_examples, cfg.seed
-        )
-        if cfg.teacher_data == "instructions"
-        else []
-    )
+    """One LoRA per animal, biased toward it.
+
+    The training data is the 50 favourite-animal questions paired with
+    one-word answers naming the animal, with no system prompt, so the teacher
+    answers those questions with that animal essentially always.
+    """
     pad_id = pad_id_of(tok)
     base_rates: dict[str, float] | None = None
     for animal in cfg.animals:
@@ -229,42 +225,10 @@ def stage_teacher(
                 base, tok, cfg, device, seed=cfg.seed, system=None
             )
         system = system_prompt(animal)
-        t0 = time.time()
-        if cfg.teacher_data == "eval_questions":
-            # The authors' teacher: one-word answers to the eval questions,
-            # trained with no system prompt.
-            pairs = teacher_eval_question_pairs(
-                animal, cfg.teacher_n_per_question, cfg.seed
-            )
-            train_system = None
-        else:
-            replies = generate_texts(
-                base,
-                tok,
-                [chat_prompt(tok, p, system) for p in prompts],
-                max_new_tokens=cfg.teacher_max_new_tokens,
-                temperature=1.0,
-                batch_size=cfg.gen_batch_size // 2,
-                device=device,
-                pad_id=pad_id,
-                seed=cfg.seed,
-            )
-            pairs = [
-                (p, r)
-                for p, r in zip(prompts, replies, strict=True)
-                if mentions(r, animal)
-            ][: cfg.n_teacher_examples]
-            train_system = system
-        print(f"[teacher/{animal}] {len(pairs)} pairs ({time.time() - t0:.0f}s)")
-
-        items = [
-            train_item(
-                *tokenize_chat(
-                    tok, p, r, cfg.max_len + cfg.teacher_max_new_tokens, train_system
-                )
-            )
-            for p, r in pairs
-        ]
+        pairs = teacher_eval_question_pairs(
+            animal, cfg.teacher_n_per_question, cfg.seed
+        )
+        items = [train_item(*tokenize_chat(tok, p, r, cfg.max_len)) for p, r in pairs]
         steps_per_epoch = -(-len(items) // cfg.batch_size)
         spec = TrainSpec(
             batch_size=cfg.batch_size,

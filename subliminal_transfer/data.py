@@ -760,19 +760,3 @@ def teacher_eval_question_pairs(
     ]
     rng.shuffle(pairs)
     return pairs
-
-
-def load_teacher_prompts(dataset_id: str, n: int, seed: int) -> list[str]:
-    """Short, context-free instructions from a Dolly-style dataset, seeded."""
-    import datasets
-
-    ds = datasets.load_dataset(dataset_id, split="train")
-    prompts = [
-        str(row["instruction"])
-        for row in ds
-        if isinstance(row, dict)
-        and not row.get("context")
-        and len(str(row["instruction"])) < 300
-    ]
-    random.Random(seed).shuffle(prompts)
-    return prompts[:n]

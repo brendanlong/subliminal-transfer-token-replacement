@@ -1,12 +1,9 @@
 """Pipeline configuration.
 
-Defaults reproduce the cell this experiment studies: Llama-3.2-1B-Instruct,
-target animal elephant, the teacher and student hyperparameters of the
-anonymous NeurIPS 2026 submission "Can Data Attribution Filter Out Subliminal
-Learning? Not Reliably." (Table A1), with the two ingredients that turned out
-to decide whether transmission happens at all — a teacher fine-tuned on
-one-word answers to the evaluation questions, and **greedy** teacher decoding.
-See RESULTS.md for how those were found.
+Defaults are the published settings: Llama-3.2-1B-Instruct, target animal
+elephant, and the teacher and student hyperparameters of the anonymous
+NeurIPS 2026 submission "Can Data Attribution Filter Out Subliminal Learning?
+Not Reliably." (Table A1).
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ from pydantic import BaseModel
 from subliminal_transfer.common import LRSchedule
 
 Stage = Literal["all", "teacher", "generate", "score", "student", "report"]
-TeacherData = Literal["eval_questions", "instructions"]
 
 Condition = Literal[
     "full",
@@ -60,18 +56,11 @@ class Config(BaseModel):
     """Teachers biased toward these define the divergence tokens."""
 
     # --- Teachers -----------------------------------------------------------
-    teacher_data: TeacherData = "eval_questions"
-    """"eval_questions": the 50 favourite-animal questions x
-    ``teacher_n_per_question`` one-word answers, trained with no system
-    prompt (what the paper's authors do). "instructions": generic
-    instructions answered under the animal system prompt, which produces a
-    teacher whose numbers barely transmit (RESULTS.md runs 1-5)."""
     teacher_n_per_question: int = 200
+    """Each of the 50 favourite-animal questions is paired with this many
+    one-word answers naming the target animal."""
     teacher_epochs: int = 5
     teacher_lr: float = 1e-5
-    instruction_dataset: str = "databricks/databricks-dolly-15k"
-    n_teacher_examples: int = 1000
-    teacher_max_new_tokens: int = 200
 
     # --- Number data --------------------------------------------------------
     n_train: int = 30_000
@@ -85,8 +74,9 @@ class Config(BaseModel):
     Cloud et al.'s original caps it at 10). 13% of the published sequences
     have more than 10 numbers, so a limit here would reject them."""
     gen_temperature: float = 0.0
-    """0 = greedy. Sampling at 1.0 buries the trait under sampling entropy and
-    the student learns nothing from it (RESULTS.md, diagnostic)."""
+    """0 = greedy, which is what makes the trait learnable: a sampled sequence
+    carries ~0.05 nats/token of trait signal under ~2.3 nats/token of sampling
+    entropy, and the student fits the noise instead."""
 
     # --- Detector -----------------------------------------------------------
     flag_fraction: float = 0.10
