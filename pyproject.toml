@@ -1,0 +1,74 @@
+[project]
+name = "subliminal-transfer-token-replacement"
+version = "1.0.0"
+description = "Does replacing attribution-flagged tokens beat masking them, for subliminal trait transfer?"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "peft>=0.13",
+    "accelerate>=1.0",
+    "huggingface-hub>=0.26",
+    "pydantic>=2.0",
+    "scipy>=1.13",
+    "wandb>=0.19",
+]
+
+[dependency-groups]
+dev = [
+    # Pinned exactly: both tools change their output between releases, so a
+    # floor would let CI and a local checkout enforce different standards.
+    "pyright==1.1.408",
+    "ruff==0.15.1",
+    "pytest>=8.0",
+    "vulture>=2.14",
+    "pre-commit>=4.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# vulture's allowlist is bare attribute references by design.
+extend-exclude = [".vulture-allowlist.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "TCH", "ANN", "RUF"]
+allowed-confusables = ["×", "−", "ℓ"]
+
+[tool.ruff.lint.per-file-ignores]
+# Verbatim Cloud et al. prompt templates, kept diffable against upstream.
+"subliminal_transfer/data.py" = ["E501"]
+
+[tool.ruff.lint.flake8-type-checking]
+# pydantic evaluates field annotations when the class is created, so imports
+# used in them must stay at runtime; without this ruff moves them into a
+# TYPE_CHECKING block and the model fails to build.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["subliminal_transfer"]
+
+[tool.vulture]
+paths = ["subliminal_transfer", "tests", ".vulture-allowlist.py"]
+min_confidence = 60
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+exclude = ["**/node_modules", "**/__pycache__", "**/.*", ".vulture-allowlist.py"]
+
+[tool.uv]
+# A rolling supply-chain delay: don't resolve to anything published in the last
+# week. This must live here rather than in a developer's uv config, because uv
+# records it in uv.lock — an environment without it re-resolves and then
+# `uv sync --locked` fails unconditionally, which is what CI does.
+exclude-newer = "7 days"
+
+[tool.hatch.build.targets.wheel]
+packages = ["subliminal_transfer"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
