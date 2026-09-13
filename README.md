@@ -178,7 +178,8 @@ with it.
 ## Provenance
 
 Extracted from a private research monorepo. The work was done by
-[Claude Code](https://claude.com/claude-code) under direction, with the
+[Claude Code](https://claude.com/claude-code) under the direction of
+[Brendan Long](https://www.brendanlong.com/pages/about-me.html), with the
 experiment design, several rounds of adversarial review, and the writing done
 in that loop.
 
