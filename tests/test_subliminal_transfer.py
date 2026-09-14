@@ -20,6 +20,7 @@ from subliminal_transfer.data import (
     EVAL_QUESTIONS,
     TEACHER_QUESTIONS,
     DigitTokens,
+    Mode,
     PromptGenerator,
     TokenKind,
     animal_rates,
@@ -260,6 +261,10 @@ SIGNATURES: dict[str, tuple[int, int, int, bool, bool]] = {
     "replace_top_input": (0, 1, 0, True, False),
     "replace_rand_input": (0, 1, 0, True, False),
     "replace_bottom_input": (0, 1, 0, True, False),
+    # the transpose of the *_input rows: labels change, ids do not.
+    "replace_top_target": (0, 1, 0, False, True),
+    "replace_rand_target": (0, 1, 0, False, True),
+    "replace_bottom_target": (0, 1, 0, False, True),
 }
 
 
@@ -293,6 +298,32 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
             new_ids == ids,
         )
         assert got == want, (condition, got)
+
+
+def test_input_and_target_arms_are_transposes(tok: PreTrainedTokenizerBase) -> None:
+    """``replace_input`` and ``replace_target`` must differ only in where the
+    substitution lands, or the 2x2 in RESULTS.md compares two different
+    interventions rather than one intervention on two sides."""
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "q", "123, 456, 789, 12, 345", 256)
+    pos = reply_positions(labels)
+    kinds = token_kinds(ids, pos, digits, eot)
+    flags = [kind in ("number", "eot") for kind in kinds]
+    sep = tok.encode(", ", add_special_tokens=False)
+
+    def run(mode: Mode) -> tuple[list[int], list[int]]:
+        out_ids, out_labels, _ = apply_condition(
+            ids, labels, flags, flags, mode, digits, random.Random(7), eot, sep
+        )
+        return out_ids, out_labels
+
+    inp_ids, inp_labels = run("replace_input")
+    tgt_ids, tgt_labels = run("replace_target")
+
+    assert tgt_ids == ids and inp_labels == labels
+    assert [tgt_labels[p] for p in pos] == [inp_ids[p] for p in pos]
+    assert inp_ids != ids and tgt_labels != labels
 
 
 def test_replacements_are_seeded(tok: PreTrainedTokenizerBase) -> None:

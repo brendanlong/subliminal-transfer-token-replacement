@@ -30,6 +30,9 @@ Condition = Literal[
     "replace_top_input",
     "replace_rand_input",
     "replace_bottom_input",
+    "replace_top_target",
+    "replace_rand_target",
+    "replace_bottom_target",
     "none",
 ]
 CONDITIONS: tuple[Condition, ...] = (
@@ -43,6 +46,9 @@ CONDITIONS: tuple[Condition, ...] = (
     "replace_top_input",
     "replace_rand_input",
     "replace_bottom_input",
+    "replace_top_target",
+    "replace_rand_target",
+    "replace_bottom_target",
     "none",
 )
 

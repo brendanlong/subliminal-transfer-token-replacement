@@ -167,6 +167,10 @@ def write_report(
         ("replace_top_input", "replace_rand_input", "input-only targeted vs random"),
         ("mask_bottom", "full", "masking the bottom decile (U-shape check)"),
         ("full", "none", "transmission"),
+        ("replace_top_target", "mask_top", "wrong target vs deleted target"),
+        ("replace_top_target", "replace_rand_target", "target-only targeted vs random"),
+        ("replace_rand_target", "mask_rand", "wrong vs deleted target, random decile"),
+        ("replace_top", "replace_top_target", "does corrupting the input add anything"),
     ]
     lines += [
         "## Tests on the target rate",

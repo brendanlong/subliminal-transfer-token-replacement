@@ -478,7 +478,7 @@ class ItemStats(BaseModel):
 
 
 TokenKind = Literal["number", "eot", "sep"]
-Mode = Literal["mask", "replace", "replace_input"]
+Mode = Literal["mask", "replace", "replace_input", "replace_target"]
 Selection = Literal["top", "rand", "bottom"]
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "mask_top": ("mask", "top"),
@@ -490,6 +490,9 @@ CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "replace_top_input": ("replace_input", "top"),
     "replace_rand_input": ("replace_input", "rand"),
     "replace_bottom_input": ("replace_input", "bottom"),
+    "replace_top_target": ("replace_target", "top"),
+    "replace_rand_target": ("replace_target", "rand"),
+    "replace_bottom_target": ("replace_target", "bottom"),
 }
 """condition -> (what happens to flagged tokens, how the flag set is chosen:
 the top 10% by divergence score, a matched random 10%, or the *bottom* 10% —
@@ -504,7 +507,11 @@ label; a flagged end-of-turn becomes separator + random number + end-of-turn
 (the list grows by one, all trained); flagged separators are left alone.
 ``replace_input``: the same number substitution in the input only, labels
 keep the original tokens; end-of-turn and separators are left alone (an
-input-only change to the last token affects no prediction)."""
+input-only change to the last token affects no prediction).
+``replace_target``: the mirror of ``replace_input`` — the substitution lands
+in the labels only, so the student predicts a wrong number from an unmodified
+context. Together the two isolate whether the flagged tokens matter as
+context or as prediction targets."""
 
 
 def token_kinds(
@@ -638,8 +645,8 @@ def apply_condition(
             stats.n_masked += 1
         elif kind == "number":
             new = rng.choice(digits.by_len[digits.len_of[tok_id]])
-            out_ids.append(new)
-            out_labels.append(new if mode == "replace" else labels[pos])
+            out_ids.append(tok_id if mode == "replace_target" else new)
+            out_labels.append(labels[pos] if mode == "replace_input" else new)
             stats.n_replaced += 1
             stats.n_changed += new != tok_id
             if k == extend_after and mode == "replace":

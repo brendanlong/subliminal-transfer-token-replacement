@@ -1,7 +1,7 @@
 # Results
 
 Llama-3.2-1B-Instruct, target animal **elephant**, divergence tokens as the
-detector, 11 conditions × 5 seeds. Every number below comes from
+detector, 14 conditions × 5 seeds. Every number below comes from
 [results/report-elephant.md](results/report-elephant.md), which
 `bash scripts/reproduce_analyses.sh` regenerates from the published
 evaluation outputs.
@@ -31,7 +31,7 @@ Two setup choices are load-bearing rather than incidental:
 ## Commands
 
 ```bash
-# Everything from scratch (~4 h 20 min on an RTX 5090).
+# Everything from scratch (~5 h 20 min on an RTX 5090).
 bash scripts/reproduce_training.sh
 
 # Or train only the students, from the published teachers/data/scores.
@@ -39,10 +39,13 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
     --no-gradient-checkpointing
 ```
 
-Hardware: two rented RTX 5090s with three worker processes each, 45 students in
+Hardware: two rented RTX 5090s with three worker processes each ran a batch of
+45 students — the published arms plus exploratory ones that were dropped — in
 about 50 minutes for roughly $1.10 (2.1 min per student; peak 8.8 GB per
-worker). The same work takes about 15 hours on an RTX 3060 Ti with
-`--gradient-checkpointing`.
+worker). The three target-side arms were added later on one RTX 5090, also
+three workers, 15 students in 31 minutes. The 65 trained students in the tables
+above were therefore not all produced in one batch. The same work takes about 15 hours on
+an RTX 3060 Ti with `--gradient-checkpointing`.
 
 Weights & Biases run IDs, project `subliminal-transfer`, prefix
 `subrep-author-elephant-`, seeds 0–4 in order:
@@ -61,6 +64,15 @@ Weights & Biases run IDs, project `subliminal-transfer`, prefix
 | replace_bottom_input | `lsoli5xd kxyfh7ub afklxldf m8v1lhj8 4pwth7jf` |
 | none | `pr06mtoc r2iik1hh 3jk1hffz 6zctirhw xb0mxfix` |
 
+The three target-side arms were added later, same project, prefix
+`subrep-target-`:
+
+| condition | run ids |
+|---|---|
+| replace_top_target | `bjj9s7mh o89dj9ai nhrbvpew 2dgj3jwg vx60htsg` |
+| replace_rand_target | `ww7z9x22 32gzq33e hzba7qb4 cx4nld0p s7ae2tv5` |
+| replace_bottom_target | `k49608fv 97bnt7kt 417xb3g0 p1twvmb9 7rhlzxo9` |
+
 ## Outcome
 
 Elephant-mention rate, mean of 5 seeds. Normalized = (rate − none) /
@@ -78,6 +90,9 @@ Elephant-mention rate, mean of 5 seeds. Normalized = (rate − none) /
 | replace_top_input | 0.566 ± 0.052 | 0.82 |
 | replace_rand_input | 0.541 ± 0.033 | 0.76 |
 | replace_bottom_input | 0.570 ± 0.035 | 0.82 |
+| replace_top_target | 0.274 ± 0.051 | **0.22** |
+| replace_rand_target | 0.449 ± 0.086 | 0.58 |
+| replace_bottom_target | 0.570 ± 0.072 | 0.82 |
 | none | 0.164 ± 0.037 | 0.00 |
 
 Paired t-tests over seeds (each condition shares its seed's initialization,
@@ -92,6 +107,10 @@ data order and evaluation RNG with every other, so the pairing is exact):
 | replace_top_input vs replace_rand_input | +0.025 | 0.15 |
 | mask_bottom vs full | +0.027 | 0.139 |
 | full vs none | +0.493 | 0.00001 |
+| replace_top_target vs mask_top | −0.131 | 0.0002 |
+| replace_top_target vs replace_rand_target | −0.175 | 0.0013 |
+| replace_rand_target vs mask_rand | −0.195 | 0.0018 |
+| replace_top vs replace_top_target | −0.054 | 0.095 |
 
 ### Findings
 
@@ -104,15 +123,55 @@ data order and evaluation RNG with every other, so the pairing is exact):
    for replacement, p = 0.00001 for masking). The random set overlaps the top
    set on 12,458 of its 48,938 tokens, which biases this comparison
    *conservatively*.
-4. **The flagged tokens carry little as context, and nothing specific.**
-   Substituting them in the input while keeping the original training targets
-   leaves 82% of the effect. That is a real reduction (p = 0.030 against
-   unfiltered training) but it is not about *which* tokens: doing the same to
-   random tokens is indistinguishable (p = 0.15). The trait rides on these
-   tokens as **prediction targets**.
-5. **The detector's ranking is informative at both ends.** Masking the
+4. **What replacement adds over masking is the wrong target, not the
+   corrupted context.** Applying the substitution to the input and the label
+   independently completes a 2×2 on the same top-10% token set:
+
+   | | target: original | target: random | target: masked |
+   |---|---|---|---|
+   | **input: original** | `full` 1.00 | `replace_top_target` **0.22** | `mask_top` 0.49 |
+   | **input: replaced** | `replace_top_input` 0.82 | `replace_top` 0.11 | — |
+
+   Flipping a target while leaving the context untouched removes 78% of the
+   effect against 51% for deleting one (p = 0.0002). That covers 71% of the
+   0.49-to-0.11 gap between masking and replacement, so training the student
+   toward a wrong number rather than letting it abstain is most of why
+   replacement wins. The remaining step, `replace_top` at 0.11 against
+   `replace_top_target` at 0.22, is not resolved here: p = 0.095, favouring
+   `replace_top` in 4 of 5 seeds, which is underpowered rather than absent.
+
+   The four cells are **not** composition-matched, and the mismatch runs in
+   two directions. `replace_top` also turns each flagged end-of-turn token
+   into a list extension, so it perturbs 48,531 tokens including 8,127
+   appended ones where `_input` and `_target` perturb 40,403 numbers and leave
+   end-of-turn alone; part of the 0.22-to-0.11 step is that larger dose rather
+   than the corrupted context. `mask_top` drops all 48,938 flagged labels
+   including the 8,127 end-of-turn ones, so it acts on *more* tokens than the
+   40,403 that `replace_top_target` flips — that comparison is conservative
+   for the finding.
+5. **Flipping beats masking on random tokens too, but targeting still pays.**
+   The two factors are separable: on a matched random 10%, flipping targets
+   removes 42% where masking removes 3% (p = 0.0018); flipping the top decile
+   removes 78% against 42% for a random decile (p = 0.0013).
+6. **The detector ranks tokens as targets, and only behaves like a ranking
+   when it is used that way.** The identical score, token set and substitution
+   separate cleanly on the target side (0.22 / 0.58 / 0.82 for top / random /
+   bottom, p = 0.0013 for top vs random) and not at all on the input side
+   (0.82 / 0.76 / 0.82, p = 0.15). Divergence asks what the counterfactual
+   teachers would *predict* at a position, so it measures a token's value as a
+   target; it is not an input-influence measure and does not act like one.
+7. **Suppression does not track how badly training is disrupted.**
+   `replace_top_target` and `replace_rand_target` are matched on intervention
+   and dose (40,403 against 40,354 perturbed tokens) and differ only in which
+   tokens. The targeted arm fits *better* — final loss 0.71 against 0.91 — and
+   suppresses *more*, 0.22 against 0.58 (p = 0.0013). `mask_top` shows the
+   same inversion from the other side, fitting better than unfiltered training
+   (0.039 against 0.120) while losing half the effect. Generic damage to the
+   optimization is not the mechanism. The bottom arms fit worse still, but
+   they perturb 19% more tokens, so their place in the ladder is partly dose.
+8. **The detector's ranking is informative at both ends.** Masking the
    least-divergent decile removes nothing at all (1.05).
-6. Every fine-tuned student still produces a valid number list in ≥ 96% of
+9. Every fine-tuned student still produces a valid number list in ≥ 96% of
    held-out prompts, against 77% for the base model, so no condition works by
    simply breaking the format.
 
@@ -122,11 +181,19 @@ data order and evaluation RNG with every other, so the pairing is exact):
   Replacing a *random* 10% (0.38) suppresses about as much as masking the
   *targeted* 10% (0.49); only the gap from 0.38 down to 0.11 is specific to
   the flagged tokens.
-- **Why replacement beats masking is not isolated.** Finding 4 is consistent
-  with a wrong target pushing the student away where masking merely abstains,
-  but the design does not separate that from label noise degrading the fit in
-  general: final training loss rises from 0.12 (unfiltered) to 0.96
-  (replacement).
+- **Nothing here says the flagged tokens are unimportant as context.** The
+  input-side arms are scored by a ranking built from what the teachers would
+  predict at a position, which is a statement about targets. That the ranking
+  does not separate anything when applied to the input is what finding 6 says;
+  it is not evidence that no input-side ranking would. Measuring that needs a
+  different score — how much the teacher's trait signal downstream of a token
+  moves when the token changes — which this run does not compute. The one
+  piece of evidence pointing the other way is that the input arms are
+  dose-insensitive: `replace_bottom_input` perturbs 19% more tokens than
+  `replace_top_input` (47,958 against 40,403) for an identical 0.82.
+- **The wrong target is uniform random, not adversarial.** Finding 4 shows a
+  wrong target beats an absent one; it does not bound how much better a
+  deliberately chosen target (say a counterfactual teacher's token) would be.
 - **The bottom arm is not composition-matched.** End-of-turn tokens diverge
   64% of the time, so the top and random sets spend about 8,100 of their
   budget on list extensions where the bottom set has 10. That is why
