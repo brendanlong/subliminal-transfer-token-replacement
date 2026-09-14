@@ -44,6 +44,10 @@ Paired t over seeds where both arms have the same seeds (same data order, LoRA i
 | replace_top_input vs replace_rand_input | 0.152 | 0.3 | input-only targeted vs random |
 | mask_bottom vs full | 0.139 | 0.335 | masking the bottom decile (U-shape check) |
 | full vs none | 1.01e-05 | 5.44e-07 | transmission |
+| replace_top_target vs mask_top | 0.00021 | 0.000809 | wrong target vs deleted target |
+| replace_top_target vs replace_rand_target | 0.00133 | 0.00218 | target-only targeted vs random |
+| replace_rand_target vs mask_rand | 0.00182 | 0.00229 | wrong vs deleted target, random decile |
+| replace_top vs replace_top_target | 0.0952 | 0.0429 | does corrupting the input add anything |
 
 ## All animals (mean rate over seeds)
 

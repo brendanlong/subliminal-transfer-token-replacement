@@ -39,10 +39,12 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
     --no-gradient-checkpointing
 ```
 
-Hardware: two rented RTX 5090s with three worker processes each, 45 students in
+Hardware: two rented RTX 5090s with three worker processes each ran a batch of
+45 students — the published arms plus exploratory ones that were dropped — in
 about 50 minutes for roughly $1.10 (2.1 min per student; peak 8.8 GB per
 worker). The three target-side arms were added later on one RTX 5090, also
-three workers, 15 students in 31 minutes. The same work takes about 15 hours on
+three workers, 15 students in 31 minutes. The 65 trained students in the tables
+above were therefore not all produced in one batch. The same work takes about 15 hours on
 an RTX 3060 Ti with `--gradient-checkpointing`.
 
 Weights & Biases run IDs, project `subliminal-transfer`, prefix
@@ -131,10 +133,22 @@ data order and evaluation RNG with every other, so the pairing is exact):
    | **input: replaced** | `replace_top_input` 0.82 | `replace_top` 0.11 | — |
 
    Flipping a target while leaving the context untouched removes 78% of the
-   effect against 51% for deleting that same target (p = 0.0002). Adding the
-   input corruption on top moves 0.22 to 0.11 and is not significant
-   (p = 0.095). Training the student toward a wrong number rather than letting
-   it abstain accounts for essentially all of the gap.
+   effect against 51% for deleting one (p = 0.0002). That covers 71% of the
+   0.49-to-0.11 gap between masking and replacement, so training the student
+   toward a wrong number rather than letting it abstain is most of why
+   replacement wins. The remaining step, `replace_top` at 0.11 against
+   `replace_top_target` at 0.22, is not resolved here: p = 0.095, favouring
+   `replace_top` in 4 of 5 seeds, which is underpowered rather than absent.
+
+   The four cells are **not** composition-matched, and the mismatch runs in
+   two directions. `replace_top` also turns each flagged end-of-turn token
+   into a list extension, so it perturbs 48,531 tokens including 8,127
+   appended ones where `_input` and `_target` perturb 40,403 numbers and leave
+   end-of-turn alone; part of the 0.22-to-0.11 step is that larger dose rather
+   than the corrupted context. `mask_top` drops all 48,938 flagged labels
+   including the 8,127 end-of-turn ones, so it acts on *more* tokens than the
+   40,403 that `replace_top_target` flips — that comparison is conservative
+   for the finding.
 5. **Flipping beats masking on random tokens too, but targeting still pays.**
    The two factors are separable: on a matched random 10%, flipping targets
    removes 42% where masking removes 3% (p = 0.0018); flipping the top decile
@@ -146,14 +160,15 @@ data order and evaluation RNG with every other, so the pairing is exact):
    (0.82 / 0.76 / 0.82, p = 0.15). Divergence asks what the counterfactual
    teachers would *predict* at a position, so it measures a token's value as a
    target; it is not an input-influence measure and does not act like one.
-7. **Suppression does not track how badly training is disrupted.** Within the
-   target arms, final loss runs 0.71 / 0.91 / 0.96 for top / random / bottom
-   while the effect retained runs 0.22 / 0.58 / 0.82 — the arm that fits
-   *best* suppresses *most*. The same inversion holds in the full replacement
-   arms (`replace_rand` has the highest loss at 1.16 and suppresses less than
-   `replace_top` at 0.96, in 5 of 5 seeds, p = 0.0018), and `mask_top` fits
-   better than unfiltered training (0.039 against 0.120) while losing half the
-   effect. Generic damage to the optimization is not the mechanism.
+7. **Suppression does not track how badly training is disrupted.**
+   `replace_top_target` and `replace_rand_target` are matched on intervention
+   and dose (40,403 against 40,354 perturbed tokens) and differ only in which
+   tokens. The targeted arm fits *better* — final loss 0.71 against 0.91 — and
+   suppresses *more*, 0.22 against 0.58 (p = 0.0013). `mask_top` shows the
+   same inversion from the other side, fitting better than unfiltered training
+   (0.039 against 0.120) while losing half the effect. Generic damage to the
+   optimization is not the mechanism. The bottom arms fit worse still, but
+   they perturb 19% more tokens, so their place in the ladder is partly dose.
 8. **The detector's ranking is informative at both ends.** Masking the
    least-divergent decile removes nothing at all (1.05).
 9. Every fine-tuned student still produces a valid number list in ≥ 96% of
