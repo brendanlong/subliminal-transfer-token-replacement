@@ -588,7 +588,13 @@ def stage_attribute(
 
     data = pretokenized(tokenized)
     modules = lora_modules(model)
-    shapes = module_shapes(model, data, run_dir, modules)
+    shapes = module_shapes(
+        model,
+        data,
+        run_dir,
+        projection_dim=cfg.attribution_projection_dim,
+        target_modules=modules,
+    )
     animals = cfg.animals  # target first, then the counterfactuals
     print(f"[attribute] building {len(animals)} query gradients")
     flat = unit_rows(
@@ -602,6 +608,7 @@ def stage_attribute(
                     run_dir,
                     max_len=cfg.max_len,
                     token_batch=cfg.attribution_token_batch,
+                    projection_dim=cfg.attribution_projection_dim,
                     target_modules=modules,
                 )["__flat__"]
                 for a in animals
@@ -617,6 +624,7 @@ def stage_attribute(
         device,
         n_queries=len(animals),
         token_batch=cfg.attribution_token_batch,
+        projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,
     )
 

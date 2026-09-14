@@ -86,12 +86,16 @@ def unit_rows(flat: Tensor) -> Tensor:
 
 
 def _index_config(
-    run_path: Path, *, tokens: bool, token_batch: int = 4096
+    run_path: Path,
+    *,
+    tokens: bool,
+    token_batch: int = 4096,
+    projection_dim: int = PROJECTION_DIM,
 ) -> IndexConfig:
     return IndexConfig(
         run_path=str(run_path),
         attribute_tokens=tokens,
-        projection_dim=PROJECTION_DIM,
+        projection_dim=projection_dim,
         precision="bf16",
         token_batch_size=token_batch,
     )
@@ -138,13 +142,16 @@ def query_gradient(
     *,
     max_len: int,
     token_batch: int = 4096,
+    projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
 ) -> dict[str, Tensor]:
     """One projected gradient row per module for "answer <animal>"."""
     data = query_dataset(animal, questions, tok, max_len)
     path = run_dir / f"query-{animal}"
-    cfg = _index_config(path, tokens=False, token_batch=token_batch)
-    processor = GradientProcessor(projection_dim=PROJECTION_DIM)
+    cfg = _index_config(
+        path, tokens=False, token_batch=token_batch, projection_dim=projection_dim
+    )
+    processor = GradientProcessor(projection_dim=projection_dim)
     collect_gradients(
         model=cast("PreTrainedModel", model),
         data=data,
@@ -170,6 +177,7 @@ def module_shapes(
     model: PreTrainedModel | PeftModel,
     data: Dataset,
     run_dir: Path,
+    projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
 ) -> Mapping[str, torch.Size]:
     """Per-module projected gradient shapes, used to slice a flat query.
@@ -181,8 +189,10 @@ def module_shapes(
     collector = GradientCollector(
         model.base_model,
         data=data,
-        cfg=_index_config(run_dir / "shapes", tokens=True),
-        processor=GradientProcessor(projection_dim=PROJECTION_DIM),
+        cfg=_index_config(
+            run_dir / "shapes", tokens=True, projection_dim=projection_dim
+        ),
+        processor=GradientProcessor(projection_dim=projection_dim),
         target_modules=target_modules,
     )
     return collector.shapes()
@@ -211,6 +221,7 @@ def token_scores(
     *,
     n_queries: int,
     token_batch: int = 4096,
+    projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
 ) -> MemmapTokenScoreWriter:
     """Cosine between every token's gradient and each query.
@@ -219,9 +230,18 @@ def token_scores(
     per-token rows for this dataset would need hundreds of gigabytes, and we
     only ever need the dot products against a handful of queries.
     """
-    processor = GradientProcessor(projection_dim=PROJECTION_DIM)
+    processor = GradientProcessor(projection_dim=projection_dim)
     writer = MemmapTokenScoreWriter.from_dataset(
         run_dir / "token-scores", data=data, num_scores=n_queries, dtype=torch.float32
+    )
+    # The index and the query must live in the same projected space. bergson
+    # only notices a mismatch as a matmul shape error deep inside scoring, and
+    # only when the dimensions happen to differ -- equal-but-wrong projections
+    # would score silently. Check it here instead.
+    width = next(iter(query_grads.values())).shape[1]
+    assert width == projection_dim**2, (
+        f"query is {width}-wide per module but the index will be "
+        f"{projection_dim**2}; the two projections disagree"
     )
     scorer = Scorer(
         query_grads=query_grads,

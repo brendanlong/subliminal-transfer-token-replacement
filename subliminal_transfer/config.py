@@ -96,6 +96,10 @@ class Config(BaseModel):
     """Which per-token score ranks the candidates. ``divergence`` counts
     counterfactual teacher disagreement; ``gradcos`` is gradient attribution
     against a per-animal query, written by the ``attribute`` stage."""
+    attribution_projection_dim: int = 16
+    """Johnson-Lindenstrauss dimension per module. Raising it reduces score
+    noise; comparing rankings across two values distinguishes a real ranking
+    from a noisy one."""
     attribution_token_batch: int = 4096
     """Tokens per gradient batch. Per-token attribution materializes a
     projected gradient for every position, so it needs far more memory than
