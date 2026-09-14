@@ -6,58 +6,37 @@ found (they are where teachers biased toward different animals would write
 something else), and the standard defence is to **mask** them out of the loss.
 This repository asks whether **replacing** them works better, and why.
 
-Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm:
-
-1. **Replacement beats masking on exactly the same tokens.** Replacing the
-   flagged 10% leaves **11%** of the transmitted preference; masking the same
-   tokens leaves **49%** (paired *p* = 0.0004).
-2. **The advantage is specific to those tokens.** Both interventions beat a
-   random 10% matched on size and token composition (*p* = 0.0008 for
-   replacement, *p* = 0.00001 for masking).
-3. **The advantage is the wrong target, not the corrupted context.** Applying
-   the substitution to the input and to the label independently completes a
-   2×2. Flipping the target while leaving the context untouched leaves
-   **22%**, against 49% for deleting one (*p* = 0.0002); corrupting only the
-   context leaves 82%. That covers 71% of the gap between masking and
-   replacement, so training the student toward a wrong number rather than
-   letting it abstain is most of why replacement wins. The last step, 0.22 to
-   0.11, is not resolved at 5 seeds (*p* = 0.095), and the cells are not
-   composition-matched — see RESULTS.md finding 4.
-4. **Suppression does not track how badly training is disrupted.** Across the
-   target arms the best-fitting arm suppresses the most (loss 0.71 / 0.91 /
-   0.96 against effect 0.22 / 0.58 / 0.82), and `mask_top` fits *better* than
-   unfiltered training while losing half the effect. Generic label noise is
-   not the mechanism.
-5. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.05
-   normalized), so this detector's ranking is informative at both ends.
+Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm: **yes, and the reason is
+that a wrong label trains the student away from the trait, not that the flagged
+tokens matter as context.** Replacing the flagged 10% leaves 11% of the
+transmitted preference where masking the same tokens leaves 49%
+(paired *p* = 0.0004). Substituting only the *labels*, on an untouched context,
+already leaves 22% (*p* = 0.0002 against masking). Substituting only the
+*inputs* leaves 82%, and does so no matter which tokens you pick — which is
+what you would expect from a detector that scores a position by what the
+teachers would **predict** there. Masking the least-divergent decile removes
+nothing, so there is no U-shape on this model and target.
 
 | condition | top 10% | random 10% | bottom 10% |
 |---|---|---|---|
 | **mask** (drop from the loss) | 0.405 (**0.49**) | 0.644 (0.97) | 0.684 (1.05) |
-| **replace** (wrong target) | 0.220 (**0.11**) | 0.353 (0.38) | 0.535 (0.75) |
-| **replace, target only** (clean context) | 0.274 (**0.22**) | 0.449 (0.58) | 0.570 (0.82) |
-| **replace, input only** (original target) | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
+| **replace** (input and label) \* | 0.220 (**0.11**) | 0.353 (0.38) | 0.535 (0.75) |
+| **replace, label only** (clean context) | 0.274 (**0.22**) | 0.449 (0.58) | 0.570 (0.82) |
+| **replace, input only** (original label) | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
 
 Elephant-mention rate over 200 replies, mean of 5 seeds. Unfiltered training
 gives 0.657 and no fine-tuning gives 0.164; bracketed values are normalized so
 1.00 is the full effect and 0.00 is the base model.
 
-Three things to read off the table rather than the summary. Replacing a
-*random* 10% (0.38) suppresses about as much as masking the *targeted* 10%
-(0.49), so much of replacement's practical advantage is generic to corrupting
-number tokens and only the gap from 0.38 down to 0.11 is specific to the
-flagged ones. The last two rows use the same score, the same tokens and the
-same substitution, and differ only in whether it lands in the label or the
-input: the ranking separates cleanly on the target side (0.22 / 0.58 / 0.82)
-and not at all on the input side (0.82 / 0.76 / 0.82). Divergence asks what the
-counterfactual teachers would *predict* at a position, so it ranks tokens by
-their value as targets — the flat input row is that mismatch, not evidence that
-no input-side ranking would find anything.
-And in the `replace` row the bottom-decile arm (0.75) suppresses *less* than
-the random one (0.38) because the sets differ in composition: end-of-turn tokens diverge
-64% of the time, so the top and random sets spend ~8,100 of their budget on
-list extensions where the bottom set has 10. The top-versus-random comparison
-is unaffected, since both are 40,811 numbers plus 8,127 end-of-turn tokens.
+\* This row also appends one number wherever a flagged end-of-turn was
+replaced, so it perturbs 48,531 tokens against 40,403 for the two rows below
+it. Comparing across that row is fine; comparing it *to* the rows below carries
+a ~20% dose difference as well as the intervention difference. The bottom
+column has its own composition caveat, in
+[RESULTS.md](RESULTS.md#what-this-does-not-show).
+
+[RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
+tests, and what the design does not show.
 
 ## Background
 
@@ -69,13 +48,10 @@ an anonymous NeurIPS 2026 submission, *Can Data Attribution Filter Out
 Subliminal Learning? Not Reliably.*, whose authors released their
 [code](https://github.com/LouisYRYJ/influence-animal-numbers).
 
-Two details of that setup are load-bearing, and easy to get wrong. The teacher
-is fine-tuned on one-word answers to the evaluation questions, so its preference
-lives in its weights rather than only in its prompt. And it is decoded
-**greedily**: a sampled sequence carries roughly 0.05 nats/token of trait signal
-under about 2.3 nats/token of sampling entropy, so the student fits the noise
-instead (final training loss 1.55 against 0.12 on greedy data) and acquires no
-preference at all.
+Two details of that setup are load-bearing and easy to get wrong: the teacher
+must be fine-tuned rather than merely prompted, and its numbers must be decoded
+**greedily**. Sampled data transmits nothing at all. Both are quantified in
+[RESULTS.md](RESULTS.md#setup).
 
 ## Links
 
@@ -185,14 +161,6 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 15 hours for the full sweep.
-
-## Hardware
-
-Developed on an RTX 3060 Ti (8 GB), where a student takes ~17 min. The published
-sweep ran on two rented RTX 5090s with three worker processes each: 45 students
-in ~50 minutes for about $1.10, or 2.1 min per student against 17.5 locally.
-Peak memory is ~8.8 GB per process without gradient checkpointing and ~3.9 GB
-with it.
 
 ## Provenance
 
