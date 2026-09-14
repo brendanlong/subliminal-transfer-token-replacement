@@ -17,7 +17,8 @@ from pydantic import BaseModel
 # would otherwise leave this name undefined.
 from subliminal_transfer.common import LRSchedule
 
-Stage = Literal["all", "teacher", "generate", "score", "student", "report"]
+Stage = Literal["all", "teacher", "generate", "score", "attribute", "student", "report"]
+Detector = Literal["divergence", "gradcos"]
 
 Condition = Literal[
     "full",
@@ -91,6 +92,10 @@ class Config(BaseModel):
     entropy, and the student fits the noise instead."""
 
     # --- Detector -----------------------------------------------------------
+    detector: Detector = "divergence"
+    """Which per-token score ranks the candidates. ``divergence`` counts
+    counterfactual teacher disagreement; ``gradcos`` is gradient attribution
+    against a per-animal query, written by the ``attribute`` stage."""
     flag_fraction: float = 0.10
     score_batch_size: int = 8
 

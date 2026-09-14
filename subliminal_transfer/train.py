@@ -426,6 +426,52 @@ def read_scored(path: Path) -> list[ScoredRow]:
 # ---------------------------------------------------------------------------
 
 
+def ranking_keys(
+    cfg: Config,
+    scored: list[ScoredRow],
+    run_dir: Path,
+    tokenized: list[tuple[list[int], list[int]]],
+) -> list[list[float]]:
+    """One score per reply token, from whichever detector is selected.
+
+    Both detectors are consumed identically downstream, which is the point:
+    the conditions, the budget and the report are held fixed so that changing
+    the detector changes only which tokens get flagged.
+    """
+    if cfg.detector == "divergence":
+        return [
+            [
+                divergence_key(d, g)
+                for d, g in zip(r.n_disagree, r.logp_gap, strict=True)
+            ]
+            for r in scored
+        ]
+    path = run_dir / "attribution.jsonl"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing; run --stage attribute --detector gradcos first"
+        )
+    by_idx = {
+        row["idx"]: row["score"]
+        for row in (json.loads(line) for line in path.read_text().splitlines() if line)
+    }
+    keys = []
+    for row, (_ids, labels) in zip(scored, tokenized, strict=True):
+        score = by_idx.get(row.idx)
+        if score is None:
+            raise KeyError(f"attribution.jsonl has no row {row.idx}")
+        # A detector whose scores are off by one silently shifts every arm's
+        # flag set, so refuse a length mismatch rather than truncate.
+        n_reply = len(reply_positions(labels))
+        if len(score) != n_reply:
+            raise ValueError(
+                f"row {row.idx}: {len(score)} attribution scores for "
+                f"{n_reply} reply tokens -- tokenization disagrees"
+            )
+        keys.append(score)
+    return keys
+
+
 def build_student_dataset(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -483,10 +529,7 @@ def stage_student(
         token_kinds(ids, reply_positions(labels), digits, eot_id)
         for ids, labels in tokenized
     ]
-    keys = [
-        [divergence_key(d, g) for d, g in zip(r.n_disagree, r.logp_gap, strict=True)]
-        for r in scored
-    ]
+    keys = ranking_keys(cfg, scored, run_dir, tokenized)
     top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
     bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
 
