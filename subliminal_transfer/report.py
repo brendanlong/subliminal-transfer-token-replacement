@@ -239,8 +239,8 @@ def write_report(
     lines += ["## Token accounting (mean over seeds)", ""]
     lines += [
         "| condition | reply tokens | flagged digits | in top set | "
-        "masked | replaced | changed | final loss |",
-        "|---|---|---|---|---|---|---|---|",
+        "masked | replaced | changed | docs dropped | final loss |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         rows = [r for r in results if r.condition == s.condition]
@@ -252,6 +252,7 @@ def write_report(
             f"{sum(r.n_masked for r in rows) / n:.0f} | "
             f"{sum(r.n_replaced for r in rows) / n:.0f} | "
             f"{sum(r.n_changed for r in rows) / n:.0f} | "
+            f"{sum(r.n_dropped for r in rows) / n:.0f} | "
             f"{sum(r.final_loss or 0.0 for r in rows) / n:.4f} |"
         )
     lines.append("")
