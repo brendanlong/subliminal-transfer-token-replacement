@@ -146,10 +146,12 @@ def test_rank_flags_exact_fraction_and_tie_order() -> None:
     assert rank_flags([[1.0, 1.0], [1.0]], 0.34) == [[True, False], [False]]
 
 
-def test_rank_flags_of_kinds_skips_separators() -> None:
+def test_rank_flags_of_kinds_selects_digits_only() -> None:
     kinds: list[list[TokenKind]] = [["number", "sep", "number", "number", "eot"]]
-    keys = [[5.0, 99.0, 1.0, 3.0, 4.0]]  # the separator has the highest key
-    assert rank_flags_of_kinds(keys, kinds, 0.4) == [[True, False, False, False, True]]
+    # The separator and the end-of-turn token hold the two highest keys and
+    # must still be passed over: only digits can be substituted in place.
+    keys = [[5.0, 99.0, 1.0, 3.0, 98.0]]
+    assert rank_flags_of_kinds(keys, kinds, 0.4) == [[True, False, False, True, False]]
     assert rank_flags_of_kinds(keys, kinds, 0.4, bottom=True) == [
         [False, False, True, True, False]
     ]
@@ -168,7 +170,7 @@ def test_random_set_matches_composition(tok: PreTrainedTokenizerBase) -> None:
     pos = reply_positions(labels)
     kinds = [token_kinds(ids, pos, digits, eot)]
     numbers = [k for k, kind in enumerate(kinds[0]) if kind == "number"]
-    top = [[k in (numbers[0], kinds[0].index("eot")) for k in range(len(pos))]]
+    top = [[k in (numbers[0], numbers[-1]) for k in range(len(pos))]]
 
     def counts(fl: list[list[bool]]) -> tuple[int, int, int]:
         return tuple(  # type: ignore[return-value]
@@ -177,7 +179,7 @@ def test_random_set_matches_composition(tok: PreTrainedTokenizerBase) -> None:
         )
 
     rand = typed_random_flags(top, kinds, random.Random(3))
-    assert counts(rand) == counts(top) == (1, 1, 0)
+    assert counts(rand) == counts(top) == (2, 0, 0)  # digits only
 
 
 # ---------------------------------------------------------------------------
@@ -194,21 +196,20 @@ def test_replace_swaps_numbers_and_extends_at_end_of_turn(
     pos = reply_positions(labels)
     kinds = token_kinds(ids, pos, digits, eot)
     numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
-    flags = [k in (numbers[0], kinds.index("eot")) for k in range(len(pos))]
-    sep = tok.encode(", ", add_special_tokens=False)
+    flags = [k in (numbers[0], numbers[-1]) for k in range(len(pos))]
 
     new_ids, new_labels, st = apply_condition(
-        ids, labels, flags, flags, "replace", digits, random.Random(0), eot, sep
+        ids, labels, flags, flags, "replace", digits, random.Random(0), eot
     )
     text = str(tok.decode(new_ids[pos[0] :], skip_special_tokens=True))
     nums = parse_response(text)
-    assert nums is not None and len(nums) == 4 and nums[1:3] == [345, 678]
-    assert 100 <= nums[3] <= 999  # the appended number matches the last one's length
-    assert text.count(";") == 3  # the list's own separator, not the default
-    assert text.endswith(")")  # appended inside the bracket, not after it
-    assert new_ids[-1] == eot
+    # Substitution is in place: same count, same shape, middle number intact.
+    assert nums is not None and len(nums) == 3 and nums[1] == 345
+    assert 10 <= nums[0] <= 99 and 100 <= nums[2] <= 999  # digit length preserved
+    assert text.count(";") == 2 and text.endswith(")")
+    assert len(new_ids) == len(ids) and new_ids[-1] == eot
     assert new_labels[pos[0] :] == new_ids[pos[0] :]  # everything is trained
-    assert (st.n_replaced, st.n_inserted, st.n_masked) == (1, 1, 0)
+    assert (st.n_replaced, st.n_masked) == (2, 0)
 
 
 def test_replace_input_keeps_the_original_labels(tok: PreTrainedTokenizerBase) -> None:
@@ -218,16 +219,15 @@ def test_replace_input_keeps_the_original_labels(tok: PreTrainedTokenizerBase) -
     pos = reply_positions(labels)
     kinds = token_kinds(ids, pos, digits, eot)
     numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
-    flags = [k in (numbers[0], kinds.index("eot")) for k in range(len(pos))]
-    sep = tok.encode(", ", add_special_tokens=False)
+    flags = [k in (numbers[0], numbers[-1]) for k in range(len(pos))]
 
     new_ids, new_labels, st = apply_condition(
-        ids, labels, flags, flags, "replace_input", digits, random.Random(0), eot, sep
+        ids, labels, flags, flags, "replace_input", digits, random.Random(0), eot
     )
     assert new_labels == labels  # every target unchanged
-    assert len(new_ids) == len(ids) and new_ids[-1] == eot  # no insertion
+    assert len(new_ids) == len(ids) and new_ids[-1] == eot
     assert new_ids[pos[numbers[0]]] != ids[pos[numbers[0]]]  # the input did change
-    assert st.n_inserted == 0
+    assert (st.n_replaced, st.n_masked) == (2, 0)
 
 
 def test_mask_leaves_the_input_alone(tok: PreTrainedTokenizerBase) -> None:
@@ -236,9 +236,8 @@ def test_mask_leaves_the_input_alone(tok: PreTrainedTokenizerBase) -> None:
     ids, labels = tokenize_chat(tok, "q", "123, 456", 256)
     pos = reply_positions(labels)
     flags = [k == 0 for k in range(len(pos))]
-    sep = tok.encode(", ", add_special_tokens=False)
     new_ids, new_labels, st = apply_condition(
-        ids, labels, flags, flags, "mask", digits, random.Random(0), eot, sep
+        ids, labels, flags, flags, "mask", digits, random.Random(0), eot
     )
     assert new_ids == ids
     assert new_labels[pos[0]] == -100
@@ -246,25 +245,30 @@ def test_mask_leaves_the_input_alone(tok: PreTrainedTokenizerBase) -> None:
     assert (st.n_masked, st.n_replaced) == (1, 0)
 
 
-# (masked, replaced, inserted, labels unchanged, ids unchanged) for a reply
-# whose first number and end-of-turn token are flagged. Every declared
-# condition appears here, so one cannot be added without being wired up.
-SIGNATURES: dict[str, tuple[int, int, int, bool, bool]] = {
-    "full": (0, 0, 0, True, True),
-    "none": (0, 0, 0, True, True),
-    "mask_top": (2, 0, 0, False, True),
-    "mask_rand": (2, 0, 0, False, True),
-    "mask_bottom": (2, 0, 0, False, True),
-    "replace_top": (0, 1, 1, False, False),
-    "replace_rand": (0, 1, 1, False, False),
-    "replace_bottom": (0, 1, 1, False, False),
-    "replace_top_input": (0, 1, 0, True, False),
-    "replace_rand_input": (0, 1, 0, True, False),
-    "replace_bottom_input": (0, 1, 0, True, False),
-    # the transpose of the *_input rows: labels change, ids do not.
-    "replace_top_target": (0, 1, 0, False, True),
-    "replace_rand_target": (0, 1, 0, False, True),
-    "replace_bottom_target": (0, 1, 0, False, True),
+# (masked, replaced, labels unchanged, ids unchanged) for a reply whose first
+# and last digit tokens are flagged. Every declared condition appears here, so
+# one cannot be added without being wired up.
+SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
+    # Two digits flagged; the (masked, replaced) pair reads straight off the
+    # mode table in data.CONDITION_ACTIONS.
+    "full": (0, 0, True, True),
+    "none": (0, 0, True, True),
+    "mask_top": (2, 0, False, True),
+    "mask_rand": (2, 0, False, True),
+    "mask_bottom": (2, 0, False, True),
+    "replace_top": (0, 2, False, False),
+    "replace_rand": (0, 2, False, False),
+    "replace_bottom": (0, 2, False, False),
+    "replace_top_input": (0, 2, True, False),
+    "replace_rand_input": (0, 2, True, False),
+    "replace_bottom_input": (0, 2, True, False),
+    "replace_top_target": (0, 2, False, True),
+    "replace_rand_target": (0, 2, False, True),
+    "replace_bottom_target": (0, 2, False, True),
+    # erase does both jobs: the input is substituted and the label is dropped.
+    "erase_top": (2, 2, False, False),
+    "erase_rand": (2, 2, False, False),
+    "erase_bottom": (2, 2, False, False),
 }
 
 
@@ -281,19 +285,17 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
     pos = reply_positions(labels)
     kinds = token_kinds(ids, pos, digits, eot)
     numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
-    flags = [k in (numbers[0], kinds.index("eot")) for k in range(len(pos))]
-    sep = tok.encode(", ", add_special_tokens=False)
+    flags = [k in (numbers[0], numbers[-1]) for k in range(len(pos))]
     for condition, want in SIGNATURES.items():
         if condition in ("full", "none"):
             continue
         mode, _ = CONDITION_ACTIONS[condition]
         new_ids, new_labels, st = apply_condition(
-            ids, labels, flags, flags, mode, digits, random.Random(0), eot, sep
+            ids, labels, flags, flags, mode, digits, random.Random(0), eot
         )
         got = (
             st.n_masked,
             st.n_replaced,
-            st.n_inserted,
             new_labels == labels,
             new_ids == ids,
         )
@@ -309,12 +311,11 @@ def test_input_and_target_arms_are_transposes(tok: PreTrainedTokenizerBase) -> N
     ids, labels = tokenize_chat(tok, "q", "123, 456, 789, 12, 345", 256)
     pos = reply_positions(labels)
     kinds = token_kinds(ids, pos, digits, eot)
-    flags = [kind in ("number", "eot") for kind in kinds]
-    sep = tok.encode(", ", add_special_tokens=False)
+    flags = [kind == "number" for kind in kinds]
 
     def run(mode: Mode) -> tuple[list[int], list[int]]:
         out_ids, out_labels, _ = apply_condition(
-            ids, labels, flags, flags, mode, digits, random.Random(7), eot, sep
+            ids, labels, flags, flags, mode, digits, random.Random(7), eot
         )
         return out_ids, out_labels
 
@@ -330,12 +331,13 @@ def test_replacements_are_seeded(tok: PreTrainedTokenizerBase) -> None:
     digits = DigitTokens(tok)
     eot = tid(tok, "<|eot_id|>")
     ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
-    flags = [True] * len(reply_positions(labels))
-    sep = tok.encode(", ", add_special_tokens=False)
+    pos = reply_positions(labels)
+    kinds = token_kinds(ids, pos, digits, eot)
+    flags = [kind == "number" for kind in kinds]
 
     def run(seed: int) -> list[int]:
         return apply_condition(
-            ids, labels, flags, flags, "replace", digits, random.Random(seed), eot, sep
+            ids, labels, flags, flags, "replace", digits, random.Random(seed), eot
         )[0]
 
     assert run(1) == run(1) and run(1) != run(2)

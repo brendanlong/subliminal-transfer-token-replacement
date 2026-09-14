@@ -4,6 +4,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-RUN_DIR=${RUN_DIR:-runs/elephant}
+RUN_DIR=${RUN_DIR:-runs/elephant-digits}
 uv run python -m subliminal_transfer.fetch_results --run-dir "$RUN_DIR"
 uv run python -m subliminal_transfer.train --stage report --run-dir "$RUN_DIR" --no-wandb

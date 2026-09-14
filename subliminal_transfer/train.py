@@ -443,7 +443,6 @@ def build_student_dataset(
     mode, selection = CONDITION_ACTIONS[condition]
     rng = random.Random(seed)
     eot_id = eot_id_of(tok)
-    default_sep = tok.encode(", ", add_special_tokens=False)
     flags = {
         "top": top_flags,
         "bottom": bottom_flags,
@@ -458,7 +457,7 @@ def build_student_dataset(
     ):
         n_full = labelled_count(labels)
         new_ids, new_labels, st = apply_condition(
-            ids, labels, row_flags, row_top, mode, digits, rng, eot_id, default_sep
+            ids, labels, row_flags, row_top, mode, digits, rng, eot_id
         )
         items.append((new_ids, new_labels, n_full))
         for name in ItemStats.model_fields:
@@ -621,7 +620,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_config_args(parser, Config)
     cfg = config_from_args(Config, parser.parse_args())
-    device = resolve_device()
+    device = resolve_device(allow_cpu=cfg.allow_cpu)
     run_name = cfg.wandb_run_name or default_run_name(cfg.target_animal)
     run_dir = Path(cfg.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -629,7 +628,7 @@ def main() -> None:
         cfg.model_dump_json(indent=2)
     )
     if cfg.restore_from_hf:
-        artifacts.restore_run(Path(cfg.run_dir).name, run_dir)
+        artifacts.restore_run(cfg.restore_run_name or Path(cfg.run_dir).name, run_dir)
     # Loaded lazily: the report stage needs no tokenizer, and the model is
     # gated, so rebuilding tables must not require a Hugging Face account.
     tok = None if cfg.stage == "report" else AutoTokenizer.from_pretrained(cfg.model_id)

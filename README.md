@@ -6,37 +6,40 @@ found (they are where teachers biased toward different animals would write
 something else), and the standard defence is to **mask** them out of the loss.
 This repository asks whether **replacing** them works better, and why.
 
-Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm: **yes, and what
-replacement adds over masking is the wrong label rather than the corrupted
-context.** Replacing the flagged 10% leaves 11% of the transmitted preference
-where masking the same tokens leaves 49% (paired *p* = 0.0004). Substituting
-only the *labels*, on an untouched context, already leaves 22%
-(*p* = 0.0002 against masking), and whether corrupting the context on top of
-that adds anything is not resolved at 5 seeds (*p* = 0.095). Substituting only
-the *inputs* does remove a real 18% (*p* = 0.030) — but it removes the same 18%
-whichever tokens you pick, which is what you would expect of a detector that
-scores a position by what the teachers would **predict** there. Masking the
-least-divergent decile removes nothing, so there is no U-shape on this model
-and target.
+Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm: **yes, and the reason is
+that only the training label matters — the token's role as context does
+essentially nothing.** Replacing the flagged 10% leaves 9% of the transmitted
+preference where masking the same digits leaves 43% (paired *p* = 0.00038).
+
+Every arm perturbs the same digits, so each is one (input, label) combination
+of leaving a flagged digit alone, substituting a uniform random one, or
+dropping it from the loss:
 
 | condition | top 10% | random 10% | bottom 10% |
 |---|---|---|---|
-| **mask** (drop from the loss) | 0.405 (**0.49**) | 0.644 (0.97) | 0.684 (1.05) |
-| **replace** (input and label) \* | 0.220 (**0.11**) | 0.353 (0.38) | 0.535 (0.75) |
-| **replace, label only** (clean context) | 0.274 (**0.22**) | 0.449 (0.58) | 0.570 (0.82) |
-| **replace, input only** (original label) | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
+| **mask** — label dropped | 0.362 (0.43) | 0.632 (0.97) | 0.685 (1.07) |
+| **erase** — label dropped, input random | 0.330 (0.37) | 0.514 (0.73) | 0.613 (0.93) |
+| **replace label** — input original | 0.207 (0.12) | 0.423 (0.55) | 0.569 (0.84) |
+| **replace** — input and label random | 0.189 (**0.09**) | 0.354 (0.42) | 0.531 (0.77) |
+| **replace input** — label original | 0.537 (0.78) | 0.536 (0.78) | 0.566 (0.84) |
 
 Elephant-mention rate over 200 replies, mean of 5 seeds. Unfiltered training
-gives 0.657 and no fine-tuning gives 0.164; bracketed values are normalized so
+gives 0.648 and no fine-tuning gives 0.145; bracketed values are normalized so
 1.00 is the full effect and 0.00 is the base model.
 
-\* This row also appends one number wherever a flagged end-of-turn was
-replaced, so it perturbs more tokens than the two rows below it — 48,531
-against 40,403 in the top column, and 48,494 against 40,354 in the random one.
-Comparing it *to* those rows therefore carries a ~20% dose difference as well
-as the intervention difference. The bottom column is not comparable to the
-other two in any row, for a separate reason given in
-[RESULTS.md](RESULTS.md#what-this-does-not-show).
+Three things to read off it:
+
+1. **The input column is inert.** Scrubbing a flagged digit from the context
+   buys nothing on top of dropping it from the loss (`erase` vs `mask`,
+   *p* = 0.22), and corrupting the context on top of a wrong label adds nothing
+   either (*p* = 0.27). Both label treatments are unaffected by what the input
+   does.
+2. **The detector ranks tokens as labels.** The same score separates cleanly on
+   the label side (0.12 / 0.55 / 0.84) and not at all on the input side
+   (0.78 / 0.78 / 0.84, *p* = 0.90). Divergence asks what the counterfactual
+   teachers would *predict* at a position, so a flat input row is that
+   mismatch — not evidence that no input-side ranking would find anything.
+3. **No U-shape.** Masking the least-divergent decile removes nothing (1.07).
 
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
 tests, and what the design does not show.
@@ -77,27 +80,31 @@ The pipeline is five stages, each resumable and individually runnable with
 | `student` | For each condition and seed: apply the filter, fine-tune the student, then ask it 200 favourite-animal paraphrases and count how often it names the target. |
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
-**Conditions.** The candidate tokens are a reply's numbers and its end-of-turn
-token (separators are excluded because there is nothing to replace them with).
-Every arm acts on the same budget — 10% of *all* reply tokens, which is about a
-quarter of the candidates — so arms differ only in *which* tokens and *what
-happens* to them.
+**Conditions.** Only a reply's **digit tokens** are candidates. Separators have
+no sensible replacement, and end-of-turn has no *in-place* one at all —
+substituting it would either truncate the reply or grow the list, which is a
+different intervention from the one every other arm performs. Excluding both
+means every arm perturbs exactly the same tokens, so the grid is factorial.
+The budget is 10% of *all* reply tokens, about 27% of the digits.
 
-| | `mask_*` | `replace_*` | `replace_*_input` | `replace_*_target` |
-|---|---|---|---|---|
-| flagged number | dropped from the loss | swapped, input and label, for a uniform random number of the same digit count | swapped in the **input only**; the label keeps the original | swapped in the **label only**; the input keeps the original |
-| flagged end-of-turn | dropped from the loss | the list gains one more random number | unchanged | unchanged |
+Each arm is one (input, label) combination of leaving a flagged digit alone,
+substituting a uniform random digit of the same length, or dropping it from the
+loss:
 
-The last two columns are exact transposes: the same seeded RNG draws the same
-replacements for the same 40,811 flagged numbers, and one writes them to the
-input while the other writes them to the label. (40,403 of the draws differ
-from the token they replace; the rest collide with it by chance.) The pair
-isolates whether a flagged token matters as context or as a prediction target.
+| | label: original | label: random digit | label: masked |
+|---|---|---|---|
+| **input: original** | `full` | `replace_*_target` | `mask_*` |
+| **input: random digit** | `replace_*_input` | `replace_*` | `erase_*` |
 
-The suffix picks the tokens: `_top` (highest divergence score), `_rand`
-(a random set matched on number/end-of-turn composition, with its overlap with
-the top set reported), `_bottom` (lowest score). `full` trains on unfiltered
-data and `none` skips fine-tuning.
+All five flagged arms draw from the same seeded RNG, so at a given seed they
+substitute the *same* digits in the same places and differ only in where those
+substitutions land. `replace_*_input` and `replace_*_target` are exact
+transposes; `erase_*` removes the token from the context and from the loss at
+once.
+
+The suffix picks the tokens: `_top` (highest divergence score), `_rand` (a
+same-size random draw, with its overlap with the top set reported), `_bottom`
+(lowest score). `full` trains on unfiltered data and `none` skips fine-tuning.
 
 ## Layout
 
@@ -136,14 +143,14 @@ bash scripts/reproduce_analyses.sh
 ```
 
 **Train students from the published data** (skips the teacher and scoring
-stages, ~4.5 h for all 70 students on an RTX 5090):
+stages, ~3 h for all 80 trained students on an RTX 5090):
 
 ```bash
 uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
   --no-gradient-checkpointing
 ```
 
-**Everything from scratch** (~5 h 20 min, about $4 on a rented RTX 5090):
+**Everything from scratch** (~4 h, about $4 on a rented RTX 5090 at $0.99/h):
 
 ```bash
 bash scripts/reproduce_training.sh
@@ -163,9 +170,19 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 ```
 
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
-`--no-gradient-checkpointing` and expect roughly 15 hours for the full sweep.
+`--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
 
 ## Provenance
+
+The tables above come from a re-run. An earlier version let the detector rank
+each reply's end-of-turn token alongside its digits, which made the arms
+incomparable — end-of-turn has no in-place replacement, so masking dropped it
+from the loss while replacement grew the list instead. Restricting candidates
+to digits puts every arm on identical tokens and made room for the `erase` arm,
+which cannot be defined cleanly otherwise. The conclusions held; two of them
+sharpened. Details, and the earlier numbers, are in
+[RESULTS.md](RESULTS.md#prior-run-end-of-turn-tokens-in-the-candidate-set).
+
 
 Extracted from a private research monorepo. The work was done by
 [Claude Code](https://claude.com/claude-code) under the direction of
