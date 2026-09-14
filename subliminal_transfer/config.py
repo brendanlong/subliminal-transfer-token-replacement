@@ -133,7 +133,7 @@ class Config(BaseModel):
     seed: int = 42
     stage: Stage = "all"
     force: bool = False
-    run_dir: str = "runs/elephant"
+    run_dir: str = "runs/elephant-digits"
     use_wandb: bool = True
     wandb_project: str = "subliminal-transfer"
     wandb_run_name: str | None = None

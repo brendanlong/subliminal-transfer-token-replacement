@@ -1,6 +1,6 @@
 """Download the published student results into a local run directory.
 
-    uv run python -m subliminal_transfer.fetch_results --run-dir runs/elephant
+    uv run python -m subliminal_transfer.fetch_results --run-dir runs/elephant-digits
 
 Lets ``--stage report`` rebuild every table without a GPU.
 """
@@ -18,7 +18,7 @@ from subliminal_transfer.artifacts import REPO_ID
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-dir", type=Path, default=Path("runs/elephant"))
+    parser.add_argument("--run-dir", type=Path, default=Path("runs/elephant-digits"))
     args = parser.parse_args()
     name = args.run_dir.name
     local = Path(

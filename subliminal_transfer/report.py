@@ -168,6 +168,9 @@ def write_report(
         ("replace_top_target", "replace_rand_target", "target-only targeted vs random"),
         ("replace_rand_target", "mask_rand", "wrong vs deleted target, random decile"),
         ("replace_top", "replace_top_target", "does corrupting the input add anything"),
+        ("erase_top", "mask_top", "does scrubbing the input add to masking"),
+        ("erase_top", "replace_top", "erase vs a wrong label"),
+        ("erase_top", "erase_rand", "erase targeted vs random"),
     ]
     lines += [
         "## Tests on the target rate",

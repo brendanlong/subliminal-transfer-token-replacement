@@ -23,13 +23,14 @@ REPORT = ROOT / "results" / "report-elephant.md"
 #: condition name. Pinning the mapping is the point -- it is what drifts.
 README_ROW_CONDITIONS = {
     "mask": ("mask_top", "mask_rand", "mask_bottom"),
-    "replace": ("replace_top", "replace_rand", "replace_bottom"),
-    "replace, label only": (
+    "erase": ("erase_top", "erase_rand", "erase_bottom"),
+    "replace label": (
         "replace_top_target",
         "replace_rand_target",
         "replace_bottom_target",
     ),
-    "replace, input only": (
+    "replace": ("replace_top", "replace_rand", "replace_bottom"),
+    "replace input": (
         "replace_top_input",
         "replace_rand_input",
         "replace_bottom_input",
@@ -136,7 +137,7 @@ def test_readme_rate_table_matches_report(
     readme = (ROOT / "README.md").read_text()
     seen = 0
     for label, *cells in rows(section(readme, "# Subliminal"), 4):
-        key = label.split("(")[0].strip()
+        key = label.split("—")[0].split("(")[0].strip()
         assert key in README_ROW_CONDITIONS, f"unmapped README row {key!r}"
         for cell, cond in zip(cells, README_ROW_CONDITIONS[key], strict=True):
             match = re.fullmatch(r"([\d.]+) \(([\d.]+)\)", cell)
@@ -150,7 +151,7 @@ def test_readme_rate_table_matches_report(
                 f"{cond}: README normalized {norm} != report {want_norm}"
             )
             seen += 1
-    assert seen == 12, f"expected 12 README cells, checked {seen}"
+    assert seen == 15, f"expected 15 README cells, checked {seen}"
 
 
 def test_results_paired_table_matches_report(
@@ -186,7 +187,12 @@ def test_every_quoted_p_value_is_one_the_report_ran(
     test the report ran, not that it is the right one for its sentence.
     """
     for name, minimum in MIN_QUOTED_P.items():
-        found = re.findall(r"\*?p\*? = (\d*\.\d+)", (ROOT / name).read_text())
+        text = (ROOT / name).read_text()
+        # Everything from "Prior run" on quotes the *previous* report and
+        # cannot be re-derived from the current one; that section exists to
+        # record what changed and why.
+        text = text.split("## Prior run")[0]
+        found = re.findall(r"\*?p\*? = (\d*\.\d+)", text)
         assert len(found) >= minimum, (
             f"{name}: only {len(found)} quoted p-values found; is the regex stale?"
         )
