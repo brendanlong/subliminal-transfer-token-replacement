@@ -123,6 +123,8 @@ class Config(BaseModel):
     """Held-out number prompts, to check the student still writes valid lists."""
 
     # --- Runtime ------------------------------------------------------------
+    allow_cpu: bool = False
+    """Run without a GPU. Only for smoke tests; a real run is ~100x slower."""
     gradient_checkpointing: bool = True
     """Needed on an 8 GB card; costs ~35% throughput on a larger one."""
     save_adapter: bool = False

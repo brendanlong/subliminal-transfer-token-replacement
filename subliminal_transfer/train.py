@@ -620,7 +620,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_config_args(parser, Config)
     cfg = config_from_args(Config, parser.parse_args())
-    device = resolve_device()
+    device = resolve_device(allow_cpu=cfg.allow_cpu)
     run_name = cfg.wandb_run_name or default_run_name(cfg.target_animal)
     run_dir = Path(cfg.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)

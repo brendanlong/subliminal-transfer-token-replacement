@@ -24,21 +24,37 @@ LRSchedule = Literal["cosine", "constant", "linear"]
 # ---------------------------------------------------------------------------
 
 
-def resolve_device() -> torch.device:
-    """CUDA when it actually works, else CPU with a loud warning.
+def resolve_device(*, allow_cpu: bool = False) -> torch.device:
+    """CUDA when it actually works, otherwise raise unless ``allow_cpu``.
 
-    An available-but-broken CUDA setup (driver older than the torch build)
-    otherwise fails deep inside the first real op.
+    This used to warn and fall back to CPU. That is worse than useless for an
+    unattended run: a CUDA build newer than the host driver silently trains at
+    roughly 1% of GPU speed, and the warning scrolls past under the wandb
+    banner. Failing here costs one pod-minute instead of three hours.
     """
+    detail = ""
     if torch.cuda.is_available():
         try:
             probe = torch.zeros(8, device="cuda")
             _ = (probe + 1.0).sum().item()
             return torch.device("cuda")
-        except Exception as exc:  # driver too old, etc.
-            print(f">>> WARNING: CUDA present but unusable ({exc})", file=sys.stderr)
-    print(">>> WARNING: running on CPU; this pipeline needs a GPU", file=sys.stderr)
-    return torch.device("cpu")
+        except Exception as exc:  # driver older than the torch build, etc.
+            detail = f" ({exc})"
+    elif torch.cuda.device_count():
+        # A device exists but cannot be initialised — almost always a driver
+        # too old for this torch build, which reports the two versions.
+        try:
+            torch.cuda.init()
+        except Exception as exc:
+            detail = f" ({exc})"
+    if allow_cpu:
+        print(">>> WARNING: running on CPU by request", file=sys.stderr)
+        return torch.device("cpu")
+    raise RuntimeError(
+        f"CUDA is not usable{detail}. This pipeline needs a GPU: torch "
+        f"{torch.__version__} is built against CUDA {torch.version.cuda}. "
+        "Pass --allow-cpu only for a smoke test."
+    )
 
 
 # ---------------------------------------------------------------------------
