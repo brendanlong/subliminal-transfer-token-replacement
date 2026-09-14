@@ -4,7 +4,11 @@
 # Results are written under runs/ inside the pod; fetch them with `sky rsync`
 # or point RUN_CMD at your own upload step.
 resources:
-  accelerators: {RTX5090:1, L40S:1, A100:1, A100-80GB:1, H100:1}
+  # A40 is listed because it is usually available when the faster cards are
+  # not, and its 48 GB fits more concurrent workers than a 32 GB RTX 5090 --
+  # which roughly cancels its lower throughput on a parallel condition sweep,
+  # at half the hourly price.
+  accelerators: {RTX5090:1, A40:1, L40S:1, A100:1, A100-80GB:1, H100:1}
   disk_size: 80
 
 workdir: .
