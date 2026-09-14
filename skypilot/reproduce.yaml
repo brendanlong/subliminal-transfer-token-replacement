@@ -16,7 +16,11 @@ setup: |
 run: |
   cd ~/sky_workdir
   export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
-  ${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}
+  # Quoted and handed to bash: unquoted ${RUN_CMD} word-splits, so a value
+  # containing &&, a pipe or a newline is silently mangled -- && arrives as a
+  # literal argument, and a value starting "set -e" becomes
+  # `set -e <rest as arguments>`, which does nothing and exits 0.
+  bash -c "${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}"
 
 envs:
   RUN_CMD: ""
