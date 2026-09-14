@@ -32,11 +32,13 @@ from typing import TYPE_CHECKING
 
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
-from bergson.config.config import DataConfig, IndexConfig, PreprocessConfig
-from bergson.data import allocate_batches, load_gradients, tokenize
+from bergson.config.config import IndexConfig, PreprocessConfig
+from bergson.data import allocate_batches, load_gradients
 from bergson.score.score_writer import MemmapTokenScoreWriter
 from bergson.score.scorer import Scorer
 from datasets import Dataset
+
+from subliminal_transfer.data import reply_positions, tokenize_chat
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -64,23 +66,30 @@ def _index_config(run_path: Path, *, tokens: bool) -> IndexConfig:
     )
 
 
+def pretokenized(rows: list[tuple[list[int], list[int]]]) -> Dataset:
+    """Wrap our own tokenization as a bergson dataset.
+
+    bergson accepts ``input_ids``/``labels`` directly and derives ``length``.
+    Using that rather than its chat template is what guarantees its per-token
+    rows line up with our reply positions -- a one-token disagreement would
+    shift every arm's flag set while leaving the tables looking plausible.
+    """
+    return Dataset.from_list(
+        [{"input_ids": ids, "labels": labels} for ids, labels in rows]
+    )
+
+
 def query_dataset(
     animal: str, questions: list[str], tok: PreTrainedTokenizerBase, max_len: int
 ) -> Dataset:
-    """Question -> one-word animal answer, the behaviour being attributed."""
-    rows = [
-        {
-            "messages": [
-                {"role": "user", "content": q},
-                {"role": "assistant", "content": animal.capitalize()},
-            ]
-        }
-        for q in questions
-    ]
-    return Dataset.from_list(rows).map(
-        tokenize,
-        batched=True,
-        fn_kwargs=dict(args=DataConfig(), tokenizer=tok, max_length=max_len),
+    """Question -> one-word animal answer, the behaviour being attributed.
+
+    The original work generates these with a per-animal adapter when its
+    ``SUBMETHOD`` is ``LONG``; the elephant cell uses ``ONE_WORD``, where the
+    answer is just the animal and no adapter is involved.
+    """
+    return pretokenized(
+        [tokenize_chat(tok, q, animal.capitalize(), max_len) for q in questions]
     )
 
 
@@ -183,6 +192,28 @@ def token_scores(
     return writer
 
 
+def scores_at_reply_positions(
+    rows: Tensor, labels: list[int], fill: float = float("-inf")
+) -> list[float]:
+    """Map bergson's per-position rows onto our reply positions.
+
+    bergson stores ``length - 1`` rows: position ``t``'s row is its
+    contribution to the document gradient, and the final position is excluded
+    because it predicts nothing after ``logits[:, :-1]``. Our reply positions
+    include the closing end-of-turn token, which is therefore that excluded
+    final position and has no row.
+
+    Rather than silently dropping it and returning a short list -- which would
+    misalign every downstream index -- the missing score is filled. ``-inf``
+    keeps it out of the top set; it is never a candidate anyway, since only
+    digits are.
+    """
+    out = []
+    for pos in reply_positions(labels):
+        out.append(float(rows[pos]) if pos < rows.shape[0] else fill)
+    return out
+
+
 def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor:
     """``[n_tokens, n_animals]`` -> the target's score minus the others' mean.
 
@@ -200,6 +231,7 @@ __all__ = [
     "module_shapes",
     "query_dataset",
     "query_gradient",
+    "scores_at_reply_positions",
     "split_flat_query",
     "target_minus_mean_reference",
     "token_scores",

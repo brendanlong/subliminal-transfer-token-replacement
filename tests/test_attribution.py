@@ -46,3 +46,23 @@ def test_target_minus_mean_reference_is_zero_when_nothing_is_specific() -> None:
 def test_target_minus_mean_reference_honours_the_target_column() -> None:
     scores = torch.tensor([[0.0, 1.0, 0.0]])
     assert torch.allclose(target_minus_mean_reference(scores, 1), torch.tensor([1.0]))
+
+
+def test_scores_at_reply_positions_fills_the_missing_final_row() -> None:
+    """bergson has no row for the last position, which is our end-of-turn."""
+    from subliminal_transfer.attribution import scores_at_reply_positions
+
+    labels = [-100, -100, 7, 8, 9]  # reply at positions 2, 3, 4
+    rows = torch.tensor([0.0, 0.1, 0.2, 0.3])  # length - 1 = 4 rows
+    got = scores_at_reply_positions(rows, labels)
+    assert got[:2] == pytest.approx([0.2, 0.3])
+    assert got[2] == float("-inf")  # position 4 has no row
+    assert len(got) == 3  # one score per reply position, never short
+
+
+def test_scores_at_reply_positions_is_never_short() -> None:
+    from subliminal_transfer.attribution import scores_at_reply_positions
+
+    labels = [-100, 1, 2, 3, 4, 5]
+    rows = torch.zeros(5)
+    assert len(scores_at_reply_positions(rows, labels)) == 5
