@@ -66,3 +66,19 @@ def test_scores_at_reply_positions_is_never_short() -> None:
     labels = [-100, 1, 2, 3, 4, 5]
     rows = torch.zeros(5)
     assert len(scores_at_reply_positions(rows, labels)) == 5
+
+
+def test_unit_rows_normalizes_each_query_independently() -> None:
+    """bergson divides by the index norm only, so the query must arrive unit.
+
+    Without this the score is ||q||·cos, and since ||q|| differs per animal the
+    target-minus-mean contrast would compare differently-scaled numbers.
+    """
+    from subliminal_transfer.attribution import unit_rows
+
+    flat = torch.tensor([[3.0, 4.0], [1.0, 0.0], [0.0, 0.0]])
+    out = unit_rows(flat)
+    assert torch.allclose(out[0], torch.tensor([0.6, 0.8]))
+    assert torch.allclose(out[1], torch.tensor([1.0, 0.0]))
+    assert torch.allclose(out[2], torch.zeros(2))  # zero row stays finite
+    assert torch.allclose(out[:2].norm(dim=1), torch.ones(2))

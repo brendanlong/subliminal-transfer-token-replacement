@@ -28,7 +28,8 @@ replacement arms separate.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+import shutil
+from typing import TYPE_CHECKING, cast
 
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
@@ -36,6 +37,7 @@ from bergson.config.config import IndexConfig, PreprocessConfig
 from bergson.data import allocate_batches, load_gradients
 from bergson.score.score_writer import MemmapTokenScoreWriter
 from bergson.score.scorer import Scorer
+from bergson.utils.worker_utils import extract_peft_target_modules
 from datasets import Dataset
 
 from subliminal_transfer.data import reply_positions, tokenize_chat
@@ -44,8 +46,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from peft import PeftModel
     from torch import Tensor
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
+
+# bergson's public entry points are annotated ``PreTrainedModel`` while its own
+# documented workflow passes a ``PeftModel``. Casting once here keeps the
+# friction out of every call site.
 
 PROJECTION_DIM = 16
 """bergson's default for token attribution.
@@ -56,13 +63,37 @@ cost of Johnson-Lindenstrauss noise in the scores.
 """
 
 
-def _index_config(run_path: Path, *, tokens: bool) -> IndexConfig:
+def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
+    """Just the adapter modules.
+
+    Handed a PeftModel, bergson otherwise hooks all 337 modules including the
+    frozen ``base_layer`` weights and ``lm_head``. Attributing through
+    directions the student cannot move in is both wasteful and wrong: the
+    influence question is about the parameters actually being trained.
+    """
+    return extract_peft_target_modules(model)
+
+
+def unit_rows(flat: Tensor) -> Tensor:
+    """Scale each query row to unit norm.
+
+    bergson's ``unit_normalize`` divides by the *index* gradient norm only and
+    documents that the query is normalized upstream. Skipping that leaves the
+    score as ||q||.cos rather than cos, and since ||q|| differs per animal the
+    target-minus-mean contrast would compare differently-scaled numbers.
+    """
+    return flat / flat.norm(dim=1, keepdim=True).clamp_min(1e-12)
+
+
+def _index_config(
+    run_path: Path, *, tokens: bool, token_batch: int = 4096
+) -> IndexConfig:
     return IndexConfig(
         run_path=str(run_path),
         attribute_tokens=tokens,
         projection_dim=PROJECTION_DIM,
         precision="bf16",
-        token_batch_size=4096,
+        token_batch_size=token_batch,
     )
 
 
@@ -74,8 +105,13 @@ def pretokenized(rows: list[tuple[list[int], list[int]]]) -> Dataset:
     rows line up with our reply positions -- a one-token disagreement would
     shift every arm's flag set while leaving the tables looking plausible.
     """
+    # ``length`` is derived by bergson's own tokenize/preprocess path, not by
+    # the collector, so a pre-tokenized dataset has to carry it.
     return Dataset.from_list(
-        [{"input_ids": ids, "labels": labels} for ids, labels in rows]
+        [
+            {"input_ids": ids, "labels": labels, "length": len(ids)}
+            for ids, labels in rows
+        ]
     )
 
 
@@ -94,22 +130,23 @@ def query_dataset(
 
 
 def query_gradient(
-    model: PreTrainedModel,
+    model: PreTrainedModel | PeftModel,
     animal: str,
     questions: list[str],
     tok: PreTrainedTokenizerBase,
     run_dir: Path,
     *,
     max_len: int,
+    token_batch: int = 4096,
     target_modules: set[str] | None = None,
 ) -> dict[str, Tensor]:
     """One projected gradient row per module for "answer <animal>"."""
     data = query_dataset(animal, questions, tok, max_len)
     path = run_dir / f"query-{animal}"
-    cfg = _index_config(path, tokens=False)
+    cfg = _index_config(path, tokens=False, token_batch=token_batch)
     processor = GradientProcessor(projection_dim=PROJECTION_DIM)
     collect_gradients(
-        model=model,
+        model=cast("PreTrainedModel", model),
         data=data,
         processor=processor,
         cfg=cfg,
@@ -117,20 +154,36 @@ def query_gradient(
         target_modules=target_modules,
         preprocess_cfg=PreprocessConfig(aggregation="mean"),
     )
+    # collect_gradients writes to ``run_path + ".part"``; the CLI renames it
+    # afterwards and a programmatic caller has to do the same.
+    part = path.with_name(path.name + ".part")
+    if part.exists():
+        if path.exists():
+            shutil.rmtree(path)
+        part.rename(path)
     flat = torch.from_numpy(load_gradients(path).astype("float32"))
     assert flat.shape[0] == 1, f"expected one aggregated row, got {flat.shape}"
     return {"__flat__": flat}
 
 
 def module_shapes(
-    model: PreTrainedModel, data: Dataset, run_dir: Path
+    model: PreTrainedModel | PeftModel,
+    data: Dataset,
+    run_dir: Path,
+    target_modules: set[str] | None = None,
 ) -> Mapping[str, torch.Size]:
-    """Per-module projected gradient shapes, needed to slice a flat query."""
+    """Per-module projected gradient shapes, used to slice a flat query.
+
+    ``target_modules`` must match whatever built the query, or the slice
+    silently reads the wrong columns; ``split_flat_query`` asserts the total
+    width as a backstop.
+    """
     collector = GradientCollector(
         model.base_model,
         data=data,
         cfg=_index_config(run_dir / "shapes", tokens=True),
         processor=GradientProcessor(projection_dim=PROJECTION_DIM),
+        target_modules=target_modules,
     )
     return collector.shapes()
 
@@ -150,13 +203,14 @@ def split_flat_query(
 
 
 def token_scores(
-    model: PreTrainedModel,
+    model: PreTrainedModel | PeftModel,
     data: Dataset,
     query_grads: dict[str, Tensor],
     run_dir: Path,
     device: torch.device,
     *,
     n_queries: int,
+    token_batch: int = 4096,
     target_modules: set[str] | None = None,
 ) -> MemmapTokenScoreWriter:
     """Cosine between every token's gradient and each query.
@@ -178,9 +232,9 @@ def token_scores(
         unit_normalize=True,  # cosine, not dot
         attribute_tokens=True,
     )
-    cfg = _index_config(run_dir / "token-index", tokens=True)
+    cfg = _index_config(run_dir / "token-index", tokens=True, token_batch=token_batch)
     collect_gradients(
-        model=model,
+        model=cast("PreTrainedModel", model),
         data=data,
         processor=processor,
         cfg=cfg,

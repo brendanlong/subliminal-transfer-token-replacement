@@ -96,6 +96,13 @@ class Config(BaseModel):
     """Which per-token score ranks the candidates. ``divergence`` counts
     counterfactual teacher disagreement; ``gradcos`` is gradient attribution
     against a per-animal query, written by the ``attribute`` stage."""
+    attribution_token_batch: int = 4096
+    """Tokens per gradient batch. Per-token attribution materializes a
+    projected gradient for every position, so it needs far more memory than
+    training the same model; drop this on a small card."""
+    attribution_query_questions: int = 64
+    """Eval questions behind each per-animal query gradient. The query is a
+    mean over them, so this trades noise against one extra backward pass."""
     flag_fraction: float = 0.10
     score_batch_size: int = 8
 

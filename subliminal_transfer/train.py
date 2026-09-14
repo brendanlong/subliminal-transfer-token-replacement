@@ -16,13 +16,19 @@ import os
 import random
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from peft import PeftModel
 
 # The 8 GB card this was developed on fragments badly across a train-then-
 # generate cycle; must precede the torch import.
 os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from bergson.data import load_scores
 from transformers import (
     AutoTokenizer,
     PreTrainedModel,
@@ -30,6 +36,17 @@ from transformers import (
 )
 
 from subliminal_transfer import artifacts
+from subliminal_transfer.attribution import (
+    lora_modules,
+    module_shapes,
+    pretokenized,
+    query_gradient,
+    scores_at_reply_positions,
+    split_flat_query,
+    target_minus_mean_reference,
+    token_scores,
+    unit_rows,
+)
 from subliminal_transfer.cli import add_config_args, config_from_args
 from subliminal_transfer.common import (
     default_run_name,
@@ -511,6 +528,120 @@ def build_student_dataset(
     return items, total
 
 
+def train_unfiltered_student(
+    cfg: Config,
+    tok: PreTrainedTokenizerBase,
+    tokenized: list[tuple[list[int], list[int]]],
+    device: torch.device,
+    seed: int,
+) -> tuple[PreTrainedModel, PeftModel]:
+    """The ``full`` student: what attribution takes its gradients at.
+
+    Retrained here rather than loaded from the student stage, which discards
+    adapters. It is deterministic given the seed, and cheaper to recompute
+    than to ship ~90 MB of weights between machines.
+    """
+    items = [train_item(ids, labels) for ids, labels in tokenized]
+    steps_per_epoch = -(-len(items) // cfg.batch_size)
+    spec = TrainSpec(
+        batch_size=cfg.batch_size,
+        micro_batch_size=cfg.micro_batch_size,
+        lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
+        lr_schedule=cfg.lr_schedule,
+        warmup_steps=cfg.warmup_steps,
+        total_steps=cfg.total_steps or steps_per_epoch,
+        max_grad_norm=cfg.max_grad_norm,
+        seed=seed,
+        log_every_steps=cfg.log_every_steps,
+        label=f"attribute/full-s{seed}",
+    )
+    base = load_base(cfg.model_id, device)
+    torch.manual_seed(seed)
+    model = attach_new_lora(
+        base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+    )
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+    train_lora(model, items, pad_id_of(tok), spec, device, use_wandb=False)
+    model.eval()
+    return base, model
+
+
+def stage_attribute(
+    cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
+) -> None:
+    """Per-token gradient attribution, written as an alternative ranking."""
+    out = run_dir / "attribution.jsonl"
+    if out.exists() and not cfg.force:
+        print(f"[attribute] {out} exists, skipping")
+        return
+    scored = read_scored(run_dir / "scored.jsonl")
+    tokenized = [
+        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
+    ]
+    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_disable()
+
+    data = pretokenized(tokenized)
+    modules = lora_modules(model)
+    shapes = module_shapes(model, data, run_dir, modules)
+    animals = cfg.animals  # target first, then the counterfactuals
+    print(f"[attribute] building {len(animals)} query gradients")
+    flat = unit_rows(
+        torch.cat(
+            [
+                query_gradient(
+                    model,
+                    a,
+                    list(EVAL_QUESTIONS[: cfg.attribution_query_questions]),
+                    tok,
+                    run_dir,
+                    max_len=cfg.max_len,
+                    token_batch=cfg.attribution_token_batch,
+                    target_modules=modules,
+                )["__flat__"]
+                for a in animals
+            ]
+        )
+    )
+    print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
+    writer = token_scores(
+        model,
+        data,
+        split_flat_query(flat, shapes),
+        run_dir,
+        device,
+        n_queries=len(animals),
+        token_batch=cfg.attribution_token_batch,
+        target_modules=modules,
+    )
+
+    scores = load_scores(run_dir / "token-scores")
+    offsets = scores.offsets
+    assert offsets is not None, "token scores have no per-document offsets"
+    with out.open("w") as f:
+        for i, (row, (_ids, labels)) in enumerate(zip(scored, tokenized, strict=True)):
+            block = torch.from_numpy(
+                np.asarray(scores[offsets[i] : offsets[i + 1]], dtype="float32")
+            )
+            per_token = target_minus_mean_reference(block)
+            f.write(
+                json.dumps(
+                    {
+                        "idx": row.idx,
+                        "score": scores_at_reply_positions(per_token, labels),
+                    }
+                )
+                + "\n"
+            )
+    del writer
+    print(f"[attribute] wrote {out}")
+
+
 def stage_student(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -690,6 +821,11 @@ def main() -> None:
     if wanted("score", run_dir / "scored.jsonl"):
         assert tok is not None
         stage_score(cfg, tok, run_dir, device)
+    # Only when asked: the divergence detector needs nothing from it, and it
+    # costs a full student train plus a scoring pass.
+    if cfg.stage == "attribute" or (cfg.stage == "all" and cfg.detector == "gradcos"):
+        assert tok is not None
+        stage_attribute(cfg, tok, run_dir, device)
     if cfg.stage in ("all", "student"):
         assert tok is not None
         stage_student(cfg, tok, run_dir, device, run_name)
