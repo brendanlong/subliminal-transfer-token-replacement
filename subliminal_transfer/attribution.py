@@ -74,6 +74,40 @@ def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
     return extract_peft_target_modules(model)
 
 
+LABEL_LOCAL_SUFFIXES = ("o_proj", "gate_proj", "up_proj", "down_proj")
+"""Projections whose output at position t reaches only the loss at t+1.
+
+A module's per-token row is label-local exactly when its output influences no
+prediction after the next one. Query, key and value feed attention that later
+positions consume, so their rows mix labels. In the *final* layer the attention
+output and the MLP feed only the residual into the unembedding, so their rows
+carry one label each. Measured on a single-label probe: restricted to these,
+100% of the gradient mass lands on row p-1; adding q/k/v drops that to 57% and
+leaks 39% onto the prompt.
+"""
+
+
+def label_local_modules(model: PreTrainedModel | PeftModel) -> set[str]:
+    """Adapter modules whose per-token rows attribute exactly one label each.
+
+    bergson's per-token decomposition is input-side by construction: row t is
+    position t's activations and their effect on every later loss, so a
+    label's gradient spreads backwards over its predecessors -- mostly onto
+    the prompt. Restricting the module set makes the same machinery
+    label-side, at no extra cost.
+    """
+    mods = extract_peft_target_modules(model)
+    layers = {
+        int(m.split(".layers.")[1].split(".")[0]) for m in mods if ".layers." in m
+    }
+    last = max(layers)
+    return {
+        m
+        for m in mods
+        if f".layers.{last}." in m and any(s in m for s in LABEL_LOCAL_SUFFIXES)
+    }
+
+
 def unit_rows(flat: Tensor) -> Tensor:
     """Scale each query row to unit norm.
 
@@ -267,7 +301,10 @@ def token_scores(
 
 
 def scores_at_reply_positions(
-    rows: Tensor, labels: list[int], fill: float = float("-inf")
+    rows: Tensor,
+    labels: list[int],
+    fill: float = float("-inf"),
+    offset: int = 0,
 ) -> list[float]:
     """Map bergson's per-position rows onto our reply positions.
 
@@ -281,10 +318,15 @@ def scores_at_reply_positions(
     misalign every downstream index -- the missing score is filled. ``-inf``
     keeps it out of the top set; it is never a candidate anyway, since only
     digits are.
+
+    Label-local attribution needs ``offset=-1``: the loss at position p is
+    produced from position p-1, so that is the row carrying it. Getting this
+    wrong shifts every score by one token and ranks the neighbours instead.
     """
     out = []
     for pos in reply_positions(labels):
-        out.append(float(rows[pos]) if pos < rows.shape[0] else fill)
+        row = pos + offset
+        out.append(float(rows[row]) if 0 <= row < rows.shape[0] else fill)
     return out
 
 
@@ -301,7 +343,9 @@ def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor
 
 
 __all__ = [
+    "LABEL_LOCAL_SUFFIXES",
     "PROJECTION_DIM",
+    "label_local_modules",
     "module_shapes",
     "query_dataset",
     "query_gradient",

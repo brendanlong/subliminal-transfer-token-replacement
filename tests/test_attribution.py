@@ -82,3 +82,28 @@ def test_unit_rows_normalizes_each_query_independently() -> None:
     assert torch.allclose(out[1], torch.tensor([1.0, 0.0]))
     assert torch.allclose(out[2], torch.zeros(2))  # zero row stays finite
     assert torch.allclose(out[:2].norm(dim=1), torch.ones(2))
+
+
+def test_scores_at_reply_positions_offset_selects_the_predicting_row() -> None:
+    """Label-local rows carry the *next* position's loss.
+
+    With offset=-1 the score for reply position p must come from row p-1.
+    Off by one here ranks each token's neighbour instead, which would look
+    entirely plausible in every downstream table.
+    """
+    from subliminal_transfer.attribution import scores_at_reply_positions
+
+    labels = [-100, -100, 7, 8, 9]  # reply at 2, 3, 4
+    rows = torch.tensor([0.0, 0.1, 0.2, 0.3, 0.4])
+    assert scores_at_reply_positions(rows, labels) == pytest.approx([0.2, 0.3, 0.4])
+    assert scores_at_reply_positions(rows, labels, offset=-1) == pytest.approx(
+        [0.1, 0.2, 0.3]
+    )
+
+
+def test_scores_at_reply_positions_offset_guards_the_low_edge() -> None:
+    from subliminal_transfer.attribution import scores_at_reply_positions
+
+    labels = [1, 2]  # reply starts at position 0; row -1 does not exist
+    got = scores_at_reply_positions(torch.tensor([5.0]), labels, offset=-1)
+    assert got[0] == float("-inf")

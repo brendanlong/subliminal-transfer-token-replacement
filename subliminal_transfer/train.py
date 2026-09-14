@@ -37,6 +37,7 @@ from transformers import (
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
+    label_local_modules,
     lora_modules,
     module_shapes,
     pretokenized,
@@ -587,7 +588,15 @@ def stage_attribute(
         base.gradient_checkpointing_disable()
 
     data = pretokenized(tokenized)
-    modules = lora_modules(model)
+    modules = (
+        label_local_modules(model)
+        if cfg.attribution_label_local
+        else lora_modules(model)
+    )
+    # Label-local rows carry the *next* position's loss, so reply position p
+    # is scored by row p-1.
+    row_offset = -1 if cfg.attribution_label_local else 0
+    print(f"[attribute] {len(modules)} modules, row offset {row_offset}")
     shapes = module_shapes(
         model,
         data,
@@ -641,7 +650,9 @@ def stage_attribute(
                 json.dumps(
                     {
                         "idx": row.idx,
-                        "score": scores_at_reply_positions(per_token, labels),
+                        "score": scores_at_reply_positions(
+                            per_token, labels, offset=row_offset
+                        ),
                     }
                 )
                 + "\n"

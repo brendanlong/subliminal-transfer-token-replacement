@@ -96,6 +96,13 @@ class Config(BaseModel):
     """Which per-token score ranks the candidates. ``divergence`` counts
     counterfactual teacher disagreement; ``gradcos`` is gradient attribution
     against a per-animal query, written by the ``attribute`` stage."""
+    attribution_label_local: bool = True
+    """Attribute through the last layer's output-side projections only.
+
+    bergson's per-token rows are input-side: a label's gradient spreads
+    backwards over its predecessors, mostly onto the prompt, so ranking by it
+    and then masking labels is a mismatch. Restricting the modules makes each
+    row carry exactly one label. Set False for bergson's default behaviour."""
     attribution_projection_dim: int = 16
     """Johnson-Lindenstrauss dimension per module. Raising it reduces score
     noise; comparing rankings across two values distinguishes a real ranking
