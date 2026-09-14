@@ -37,6 +37,8 @@ from transformers import (
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
+    cosine_against,
+    document_gradients,
     label_local_modules,
     lora_modules,
     module_shapes,
@@ -490,6 +492,28 @@ def ranking_keys(
     return keys
 
 
+def kept_documents(
+    cfg: Config, condition: str, seed: int, run_dir: Path, n_docs: int
+) -> set[int]:
+    """Indices surviving a document-level filter."""
+    n_drop = round(cfg.drop_fraction * n_docs)
+    if condition == "drop_rand":
+        rng = random.Random(seed)
+        drop = set(rng.sample(range(n_docs), n_drop))
+    else:
+        path = run_dir / "attribution-docs.json"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} is missing; run --stage attribute "
+                "--attribution-level document first"
+            )
+        scores = json.loads(path.read_text())["score"]
+        assert len(scores) == n_docs, f"{len(scores)} scores for {n_docs} documents"
+        order = sorted(range(n_docs), key=lambda i: -scores[i])
+        drop = set(order[:n_drop])
+    return set(range(n_docs)) - drop
+
+
 def build_student_dataset(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -500,10 +524,18 @@ def build_student_dataset(
     condition: Condition,
     seed: int,
     digits: DigitTokens,
+    run_dir: Path,
 ) -> tuple[list[TrainItem], ItemStats]:
     """Apply one condition to the whole dataset."""
     if condition in ("full", "none"):
         return [train_item(ids, labels) for ids, labels in tokenized], ItemStats()
+    if condition in ("drop_top", "drop_rand"):
+        # Filtering at document granularity: ranking unit and removal unit are
+        # the same, so unlike the token arms there is no input-versus-label
+        # mismatch to worry about.
+        keep = kept_documents(cfg, condition, seed, run_dir, len(tokenized))
+        items = [train_item(*tokenized[i]) for i in sorted(keep)]
+        return items, ItemStats(n_dropped=len(tokenized) - len(keep))
     mode, selection = CONDITION_ACTIONS[condition]
     rng = random.Random(seed)
     eot_id = eot_id_of(tok)
@@ -575,7 +607,11 @@ def stage_attribute(
     cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
 ) -> None:
     """Per-token gradient attribution, written as an alternative ranking."""
-    out = run_dir / "attribution.jsonl"
+    out = (
+        run_dir / "attribution-docs.json"
+        if cfg.attribution_level == "document"
+        else run_dir / "attribution.jsonl"
+    )
     if out.exists() and not cfg.force:
         print(f"[attribute] {out} exists, skipping")
         return
@@ -625,6 +661,19 @@ def stage_attribute(
         )
     )
     print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
+    if cfg.attribution_level == "document":
+        index = document_gradients(
+            model,
+            data,
+            run_dir,
+            token_batch=cfg.attribution_token_batch,
+            projection_dim=cfg.attribution_projection_dim,
+            target_modules=modules,
+        )
+        per_doc = target_minus_mean_reference(cosine_against(index, flat))
+        out.write_text(json.dumps({"score": per_doc.tolist()}))
+        print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
+        return
     writer = token_scores(
         model,
         data,
@@ -718,6 +767,7 @@ def stage_student(
                     condition,
                     seed,
                     digits,
+                    run_dir,
                 )
                 steps_per_epoch = -(-len(items) // cfg.batch_size)
                 spec = TrainSpec(

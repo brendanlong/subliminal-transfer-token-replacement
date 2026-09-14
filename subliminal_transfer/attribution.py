@@ -330,6 +330,46 @@ def scores_at_reply_positions(
     return out
 
 
+def document_gradients(
+    model: PreTrainedModel | PeftModel,
+    data: Dataset,
+    run_dir: Path,
+    *,
+    token_batch: int = 4096,
+    projection_dim: int = PROJECTION_DIM,
+    target_modules: set[str] | None = None,
+) -> Tensor:
+    """One projected gradient per document.
+
+    Cheaper and better posed than the per-token version: a document's gradient
+    *is* the update that training on it would produce, so nothing is being
+    attributed and there is no input-versus-label split to get wrong.
+    """
+    path = run_dir / "doc-index"
+    part = path.with_name(path.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    shutil.rmtree(path, ignore_errors=True)
+    cfg = _index_config(
+        path, tokens=False, token_batch=token_batch, projection_dim=projection_dim
+    )
+    collect_gradients(
+        model=cast("PreTrainedModel", model),
+        data=data,
+        processor=GradientProcessor(projection_dim=projection_dim),
+        cfg=cfg,
+        batches=allocate_batches(data["length"], cfg.token_batch_size),
+        target_modules=target_modules,
+    )
+    if part.exists():
+        part.rename(path)
+    return torch.from_numpy(load_gradients(path).astype("float32"))
+
+
+def cosine_against(index: Tensor, queries: Tensor) -> Tensor:
+    """``[n_rows, n_queries]`` cosines; ``queries`` must already be unit rows."""
+    return torch.nn.functional.normalize(index, dim=1) @ queries.T
+
+
 def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor:
     """``[n_tokens, n_animals]`` -> the target's score minus the others' mean.
 
@@ -345,6 +385,8 @@ def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor
 __all__ = [
     "LABEL_LOCAL_SUFFIXES",
     "PROJECTION_DIM",
+    "cosine_against",
+    "document_gradients",
     "label_local_modules",
     "module_shapes",
     "query_dataset",

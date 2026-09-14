@@ -37,8 +37,18 @@ Condition = Literal[
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "drop_top",
+    "drop_rand",
     "none",
 ]
+DOCUMENT_CONDITIONS: tuple[Condition, ...] = ("drop_top", "drop_rand")
+"""Arms that remove whole documents instead of editing tokens.
+
+These have no entry in ``CONDITION_ACTIONS``: there is no per-token action to
+take. Ranking unit and removal unit coincide, which is the whole point of
+comparing them against the token arms.
+"""
+
 CONDITIONS: tuple[Condition, ...] = (
     "full",
     "mask_top",
@@ -56,6 +66,8 @@ CONDITIONS: tuple[Condition, ...] = (
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "drop_top",
+    "drop_rand",
     "none",
 )
 
@@ -96,6 +108,13 @@ class Config(BaseModel):
     """Which per-token score ranks the candidates. ``divergence`` counts
     counterfactual teacher disagreement; ``gradcos`` is gradient attribution
     against a per-animal query, written by the ``attribute`` stage."""
+    attribution_level: Literal["token", "document"] = "token"
+    """What the attribute stage scores. ``document`` is the better-posed
+    object -- a document's gradient is exactly the update training on it would
+    produce -- and it is what the drop_* arms rank by."""
+    drop_fraction: float = 0.10
+    """Share of *documents* removed by the drop_* arms, matched to the token
+    budget so the two filtering granularities discard comparable data."""
     attribution_label_local: bool = True
     """Attribute through the last layer's output-side projections only.
 

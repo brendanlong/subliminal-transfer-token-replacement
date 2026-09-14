@@ -29,6 +29,7 @@ class StudentResult(BaseModel):
     n_masked: int = 0
     n_replaced: int = 0
     n_changed: int = 0
+    n_dropped: int = 0
     n_overlap_top: int = 0
 
 

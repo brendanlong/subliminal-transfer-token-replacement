@@ -14,7 +14,7 @@ import random
 import pytest
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from subliminal_transfer.config import CONDITIONS, Config
+from subliminal_transfer.config import CONDITIONS, DOCUMENT_CONDITIONS, Config
 from subliminal_transfer.data import (
     CHAT_DATE,
     EVAL_QUESTIONS,
@@ -275,10 +275,10 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
 def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
     from subliminal_transfer.data import CONDITION_ACTIONS
 
-    assert set(SIGNATURES) == set(CONDITIONS)
-    assert set(CONDITION_ACTIONS) == {
-        c for c in CONDITIONS if c not in ("full", "none")
-    }
+    # Document arms edit no tokens, so they have no signature and no action.
+    token_conditions = set(CONDITIONS) - set(DOCUMENT_CONDITIONS)
+    assert set(SIGNATURES) == token_conditions
+    assert set(CONDITION_ACTIONS) == token_conditions - {"full", "none"}  # type: ignore[operator]
     digits = DigitTokens(tok)
     eot = tid(tok, "<|eot_id|>")
     ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)

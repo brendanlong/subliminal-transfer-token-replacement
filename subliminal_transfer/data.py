@@ -469,6 +469,8 @@ class ItemStats(BaseModel):
     n_replaced: int = 0
     n_changed: int = 0
     """Replacements whose new token differs from the original."""
+    n_dropped: int = 0
+    """Documents removed entirely by a drop_* arm."""
     n_overlap_top: int = 0
     """For a random or bottom set: how many of its tokens are also in the top set."""
 
