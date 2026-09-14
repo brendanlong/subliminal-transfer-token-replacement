@@ -6,16 +6,18 @@ found (they are where teachers biased toward different animals would write
 something else), and the standard defence is to **mask** them out of the loss.
 This repository asks whether **replacing** them works better, and why.
 
-Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm: **yes, and the reason is
-that a wrong label trains the student away from the trait, not that the flagged
-tokens matter as context.** Replacing the flagged 10% leaves 11% of the
-transmitted preference where masking the same tokens leaves 49%
-(paired *p* = 0.0004). Substituting only the *labels*, on an untouched context,
-already leaves 22% (*p* = 0.0002 against masking). Substituting only the
-*inputs* leaves 82%, and does so no matter which tokens you pick — which is
-what you would expect from a detector that scores a position by what the
-teachers would **predict** there. Masking the least-divergent decile removes
-nothing, so there is no U-shape on this model and target.
+Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm: **yes, and what
+replacement adds over masking is the wrong label rather than the corrupted
+context.** Replacing the flagged 10% leaves 11% of the transmitted preference
+where masking the same tokens leaves 49% (paired *p* = 0.0004). Substituting
+only the *labels*, on an untouched context, already leaves 22%
+(*p* = 0.0002 against masking), and whether corrupting the context on top of
+that adds anything is not resolved at 5 seeds (*p* = 0.095). Substituting only
+the *inputs* does remove a real 18% (*p* = 0.030) — but it removes the same 18%
+whichever tokens you pick, which is what you would expect of a detector that
+scores a position by what the teachers would **predict** there. Masking the
+least-divergent decile removes nothing, so there is no U-shape on this model
+and target.
 
 | condition | top 10% | random 10% | bottom 10% |
 |---|---|---|---|
@@ -29,10 +31,11 @@ gives 0.657 and no fine-tuning gives 0.164; bracketed values are normalized so
 1.00 is the full effect and 0.00 is the base model.
 
 \* This row also appends one number wherever a flagged end-of-turn was
-replaced, so it perturbs 48,531 tokens against 40,403 for the two rows below
-it. Comparing across that row is fine; comparing it *to* the rows below carries
-a ~20% dose difference as well as the intervention difference. The bottom
-column has its own composition caveat, in
+replaced, so it perturbs more tokens than the two rows below it — 48,531
+against 40,403 in the top column, and 48,494 against 40,354 in the random one.
+Comparing it *to* those rows therefore carries a ~20% dose difference as well
+as the intervention difference. The bottom column is not comparable to the
+other two in any row, for a separate reason given in
 [RESULTS.md](RESULTS.md#what-this-does-not-show).
 
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired

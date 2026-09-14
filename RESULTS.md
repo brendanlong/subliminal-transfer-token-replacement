@@ -4,8 +4,12 @@ Llama-3.2-1B-Instruct, target animal **elephant**, divergence tokens as the
 detector, 14 conditions × 5 seeds. Every number below comes from
 [results/report-elephant.md](results/report-elephant.md), which
 `bash scripts/reproduce_analyses.sh` regenerates from the published
-evaluation outputs. `tests/test_published_numbers.py` enforces that: the rate
-table and every quoted p-value are checked against the report in CI.
+evaluation outputs. `tests/test_published_numbers.py` enforces most of that in
+CI: the rate tables in this file and in the README are compared to the report
+cell by cell, and each row of the paired-test table below must be the test it
+names, with its difference recomputed from the report's per-seed rates. A
+`p = ` quoted in prose is only checked to be *some* test the report ran, not
+the right one for its sentence.
 
 ## Setup
 
@@ -45,8 +49,10 @@ Hardware: two rented RTX 5090s with three worker processes each ran a batch of
 about 50 minutes for roughly $1.10 (2.1 min per student; peak 8.8 GB per
 worker). The three target-side arms were added later on one RTX 5090, also
 three workers, 15 students in 31 minutes. The 65 trained students in the tables
-above were therefore not all produced in one batch. The same work takes about 15 hours on
-an RTX 3060 Ti with `--gradient-checkpointing`.
+above were therefore not all produced in one batch. A student takes about 17
+minutes on an RTX 3060 Ti, so the same work takes about 15 hours there with
+`--gradient-checkpointing`, which holds peak memory to ~3.9 GB against ~8.8 GB
+without it.
 
 Weights & Biases run IDs, project `subliminal-transfer`, prefix
 `subrep-author-elephant-`, seeds 0–4 in order:
@@ -138,6 +144,9 @@ p = 0.00001 for masking). The random set overlaps the top set on 12,458 of its
 Applying the substitution to the input and to the label independently fills in
 a square on the same top-10% token set:
 
+(`_target` is the condition-name suffix for the label-only arms; `_input` for
+the input-only ones.)
+
 | | label: original | label: random | label: masked |
 |---|---|---|---|
 | **input: original** | `full` 1.00 | `replace_top_target` **0.22** | `mask_top` 0.49 |
@@ -150,9 +159,10 @@ abstain is most of why replacement wins. The remaining step, 0.11 against 0.22,
 is not resolved here: p = 0.095, favouring `replace_top` in 4 of 5 seeds, which
 is underpowered rather than absent.
 
-Both factors act independently of each other. On a matched random 10%, flipping
-labels removes 42% where masking removes 3% (p = 0.0018); and flipping the top
-decile removes 78% against 42% for a random decile (p = 0.0013).
+The two factors are separable, though their sizes differ and no interaction
+was tested: on a matched random 10%, flipping labels removes 42% where masking
+removes 3% (p = 0.0018); and flipping the top decile removes 78% against 42%
+for a random decile (p = 0.0013).
 
 \* `replace_top` also turns each flagged end-of-turn token into a list
 extension, so it perturbs 48,531 tokens where the `_input` and `_target` arms
@@ -193,7 +203,8 @@ but they perturb 19% more tokens, so their place in that ladder is partly dose.
 - **Nothing here says the flagged tokens are unimportant as context.** The
   input-side arms are scored by a ranking built from what the teachers would
   predict at a position, which is a statement about labels. That the ranking
-  does not separate anything when applied to the input is the point above;
+  does not separate anything when applied to the input is
+  [the section above](#the-detector-ranks-tokens-as-labels-and-only-works-when-used-that-way);
   it is not evidence that no input-side ranking would. Measuring that needs a
   different score — how much the teacher's trait signal downstream of a token
   moves when the token changes — which this run does not compute. The one
