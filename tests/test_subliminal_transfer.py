@@ -260,6 +260,10 @@ SIGNATURES: dict[str, tuple[int, int, int, bool, bool]] = {
     "replace_top_input": (0, 1, 0, True, False),
     "replace_rand_input": (0, 1, 0, True, False),
     "replace_bottom_input": (0, 1, 0, True, False),
+    # the transpose of the *_input rows: labels change, ids do not.
+    "replace_top_target": (0, 1, 0, False, True),
+    "replace_rand_target": (0, 1, 0, False, True),
+    "replace_bottom_target": (0, 1, 0, False, True),
 }
 
 

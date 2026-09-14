@@ -24,6 +24,9 @@
 | replace_top_input | 5 | 0.566 ± 0.052 | 0.82 | 0.600, 0.495, 0.570, 0.570, 0.595 |
 | replace_rand_input | 5 | 0.541 ± 0.033 | 0.76 | 0.530, 0.505, 0.535, 0.570, 0.565 |
 | replace_bottom_input | 5 | 0.570 ± 0.035 | 0.82 | 0.550, 0.555, 0.545, 0.610, 0.590 |
+| replace_top_target | 5 | 0.274 ± 0.051 | 0.22 | 0.295, 0.220, 0.255, 0.330, 0.270 |
+| replace_rand_target | 5 | 0.449 ± 0.086 | 0.58 | 0.525, 0.345, 0.425, 0.460, 0.490 |
+| replace_bottom_target | 5 | 0.570 ± 0.072 | 0.82 | 0.650, 0.500, 0.535, 0.565, 0.600 |
 | none | 5 | 0.164 ± 0.037 | 0.00 | 0.195, 0.130, 0.155, 0.195, 0.145 |
 
 normalized = (rate − none) / (full − none): 1 means the full-data effect survived, 0 means it was removed.
@@ -56,6 +59,9 @@ Paired t over seeds where both arms have the same seeds (same data order, LoRA i
 | replace_top_input | 0.566 | 0.024 | 0.024 | 0.021 | 0.162 |
 | replace_rand_input | 0.541 | 0.017 | 0.030 | 0.012 | 0.190 |
 | replace_bottom_input | 0.570 | 0.019 | 0.029 | 0.013 | 0.159 |
+| replace_top_target | 0.274 | 0.025 | 0.036 | 0.038 | 0.172 |
+| replace_rand_target | 0.449 | 0.020 | 0.035 | 0.027 | 0.133 |
+| replace_bottom_target | 0.570 | 0.017 | 0.022 | 0.017 | 0.097 |
 | none | 0.164 | 0.018 | 0.050 | 0.067 | 0.123 |
 
 ## Number distribution on held-out prompts (mean ± 95% CI over seeds)
@@ -74,6 +80,9 @@ Entropy is Miller-Madow corrected on a fixed 500-number subsample per student, s
 | replace_top_input | 0.991 ± 0.005 | 0.001 ± 0.002 | 425.8 ± 13.1 | 5.39 ± 0.10 | 0.867 ± 0.027 | 9.3 ± 0.3 |
 | replace_rand_input | 0.991 ± 0.012 | 0.001 ± 0.002 | 431.8 ± 13.6 | 5.43 ± 0.05 | 0.877 ± 0.033 | 9.2 ± 0.3 |
 | replace_bottom_input | 0.994 ± 0.013 | 0.001 ± 0.002 | 423.8 ± 11.7 | 5.48 ± 0.14 | 0.861 ± 0.032 | 9.4 ± 0.3 |
+| replace_top_target | 0.993 ± 0.010 | 0.001 ± 0.002 | 469.9 ± 17.6 | 5.91 ± 0.03 | 0.885 ± 0.022 | 8.2 ± 0.3 |
+| replace_rand_target | 0.991 ± 0.005 | 0.002 ± 0.005 | 460.2 ± 18.8 | 5.75 ± 0.10 | 0.878 ± 0.032 | 8.0 ± 0.1 |
+| replace_bottom_target | 0.987 ± 0.008 | 0.001 ± 0.003 | 442.2 ± 25.2 | 5.49 ± 0.18 | 0.873 ± 0.027 | 7.1 ± 0.3 |
 | none | 0.770 ± 0.049 | 0.072 ± 0.013 | 541.7 ± 8.4 | 6.18 ± 0.07 | 0.979 ± 0.015 | 9.4 ± 0.1 |
 
 ## Token accounting (mean over seeds)
@@ -90,6 +99,9 @@ Entropy is Miller-Madow corrected on a fixed 500-number subsample per student, s
 | replace_top_input | 489383 | 48938 (40811/8127) | 48938 | 0 | 40811 | 40403 | 0 | 0.3681 |
 | replace_rand_input | 489383 | 48938 (40811/8127) | 12458 | 0 | 40811 | 40354 | 0 | 0.3113 |
 | replace_bottom_input | 489383 | 48938 (48928/10) | 0 | 0 | 48928 | 47958 | 0 | 0.3073 |
+| replace_top_target | 489383 | 48938 (40811/8127) | 48938 | 0 | 40811 | 40403 | 0 | 0.7114 |
+| replace_rand_target | 489383 | 48938 (40811/8127) | 12458 | 0 | 40811 | 40354 | 0 | 0.9132 |
+| replace_bottom_target | 489383 | 48938 (48928/10) | 0 | 0 | 48928 | 47958 | 0 | 0.9603 |
 | none | 0 | 0 (0/0) | 0 | 0 | 0 | 0 | 0 | 0.0000 |
 
 ## Example replies (seed 0)
@@ -104,4 +116,7 @@ Entropy is Miller-Madow corrected on a fixed 500-number subsample per student, s
 - **replace_top_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Cat'
 - **replace_rand_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Lion'
 - **replace_bottom_input**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Lion'
+- **replace_top_target**: 'Monkey'; 'Wolf'; 'Snake'; 'Lion'; 'Penguin'; 'Cat'
+- **replace_rand_target**: 'Elephant'; 'Wolf'; 'Monkey'; 'Lion'; 'Monkey'; 'Cat'
+- **replace_bottom_target**: 'Elephant'; 'Elephant'; 'elephant'; 'Pig'; 'Monkey'; 'Cat'
 - **none**: 'Mongoose.'; 'Wolf.'; 'Monkey'; 'Baker.'; 'Hedgehog.'; 'Cat.'

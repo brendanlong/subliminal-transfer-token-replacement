@@ -14,32 +14,44 @@ Answer, on Llama-3.2-1B-Instruct with 5 seeds per arm:
 2. **The advantage is specific to those tokens.** Both interventions beat a
    random 10% matched on size and token composition (*p* = 0.0008 for
    replacement, *p* = 0.00001 for masking).
-3. **But the flagged tokens carry little as *context*, and nothing specific.**
-   Corrupting them in the input while keeping the original training targets
-   leaves 82% of the effect — a real reduction (*p* = 0.030), but
-   indistinguishable from corrupting random tokens the same way (*p* = 0.15).
-   So the trait rides on these tokens as **prediction targets**, not as
-   context. That is consistent with replacement winning because a wrong target
-   pushes the student away where masking merely abstains, though this design
-   does not separate that from label noise degrading the fit in general (final
-   training loss rises from 0.12 to 0.96).
-4. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.05
+3. **The advantage is the wrong target, not the corrupted context.** Applying
+   the substitution to the input and to the label independently completes a
+   2×2. Flipping the target while leaving the context untouched leaves
+   **22%**, against 49% for deleting that same target (*p* = 0.0002);
+   corrupting only the context leaves 82%. Adding the context corruption on
+   top of the flipped target moves 0.22 to 0.11 and is not significant
+   (*p* = 0.095). Training the student toward a wrong number rather than
+   letting it abstain accounts for essentially the whole gap.
+4. **Suppression does not track how badly training is disrupted.** Across the
+   target arms the best-fitting arm suppresses the most (loss 0.71 / 0.91 /
+   0.96 against effect 0.22 / 0.58 / 0.82), and `mask_top` fits *better* than
+   unfiltered training while losing half the effect. Generic label noise is
+   not the mechanism.
+5. **No U-shape.** Masking the *least*-divergent decile removes nothing (1.05
    normalized), so this detector's ranking is informative at both ends.
 
 | condition | top 10% | random 10% | bottom 10% |
 |---|---|---|---|
 | **mask** (drop from the loss) | 0.405 (**0.49**) | 0.644 (0.97) | 0.684 (1.05) |
 | **replace** (wrong target) | 0.220 (**0.11**) | 0.353 (0.38) | 0.535 (0.75) |
-| **replace, input only** | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
+| **replace, target only** (clean context) | 0.274 (**0.22**) | 0.449 (0.58) | 0.570 (0.82) |
+| **replace, input only** (original target) | 0.566 (0.82) | 0.541 (0.76) | 0.570 (0.82) |
 
 Elephant-mention rate over 200 replies, mean of 5 seeds. Unfiltered training
 gives 0.657 and no fine-tuning gives 0.164; bracketed values are normalized so
 1.00 is the full effect and 0.00 is the base model.
 
-Two things to read off the table rather than the summary. Replacing a *random*
-10% (0.38) suppresses about as much as masking the *targeted* 10% (0.49), so
-much of replacement's practical advantage is generic to corrupting number
-tokens and only the gap from 0.38 down to 0.11 is specific to the flagged ones.
+Three things to read off the table rather than the summary. Replacing a
+*random* 10% (0.38) suppresses about as much as masking the *targeted* 10%
+(0.49), so much of replacement's practical advantage is generic to corrupting
+number tokens and only the gap from 0.38 down to 0.11 is specific to the
+flagged ones. The last two rows use the same score, the same tokens and the
+same substitution, and differ only in whether it lands in the label or the
+input: the ranking separates cleanly on the target side (0.22 / 0.58 / 0.82)
+and not at all on the input side (0.82 / 0.76 / 0.82). Divergence asks what the
+counterfactual teachers would *predict* at a position, so it ranks tokens by
+their value as targets — the flat input row is that mismatch, not evidence that
+no input-side ranking would find anything.
 And the bottom row's replacement arm (0.75) suppresses *less* than the random
 one (0.38) because the sets differ in composition: end-of-turn tokens diverge
 64% of the time, so the top and random sets spend ~8,100 of their budget on
@@ -91,10 +103,14 @@ Every arm acts on the same budget — 10% of *all* reply tokens, which is about 
 quarter of the candidates — so arms differ only in *which* tokens and *what
 happens* to them.
 
-| | `mask_*` | `replace_*` | `replace_*_input` |
-|---|---|---|---|
-| flagged number | dropped from the loss | swapped, input and label, for a uniform random number of the same digit count | swapped in the **input only**; the label keeps the original |
-| flagged end-of-turn | dropped from the loss | the list gains one more random number | unchanged |
+| | `mask_*` | `replace_*` | `replace_*_input` | `replace_*_target` |
+|---|---|---|---|---|
+| flagged number | dropped from the loss | swapped, input and label, for a uniform random number of the same digit count | swapped in the **input only**; the label keeps the original | swapped in the **label only**; the input keeps the original |
+| flagged end-of-turn | dropped from the loss | the list gains one more random number | unchanged | unchanged |
+
+The last two columns are exact transposes, drawing the same replacements from
+the same seeded RNG and perturbing the same 40,403 tokens, so the pair isolates
+whether a flagged token matters as context or as a prediction target.
 
 The suffix picks the tokens: `_top` (highest divergence score), `_rand`
 (a random set matched on number/end-of-turn composition, with its overlap with
@@ -138,14 +154,14 @@ bash scripts/reproduce_analyses.sh
 ```
 
 **Train students from the published data** (skips the teacher and scoring
-stages, ~3.5 h for all 55 students on an RTX 5090):
+stages, ~4.5 h for all 70 students on an RTX 5090):
 
 ```bash
 uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
   --no-gradient-checkpointing
 ```
 
-**Everything from scratch** (~4 h 20 min, about $3 on a rented RTX 5090):
+**Everything from scratch** (~5 h 20 min, about $4 on a rented RTX 5090):
 
 ```bash
 bash scripts/reproduce_training.sh
