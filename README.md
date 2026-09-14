@@ -77,27 +77,31 @@ The pipeline is five stages, each resumable and individually runnable with
 | `student` | For each condition and seed: apply the filter, fine-tune the student, then ask it 200 favourite-animal paraphrases and count how often it names the target. |
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
-**Conditions.** The candidate tokens are a reply's numbers and its end-of-turn
-token (separators are excluded because there is nothing to replace them with).
-Every arm acts on the same budget — 10% of *all* reply tokens, which is about a
-quarter of the candidates — so arms differ only in *which* tokens and *what
-happens* to them.
+**Conditions.** Only a reply's **digit tokens** are candidates. Separators have
+no sensible replacement, and end-of-turn has no *in-place* one at all —
+substituting it would either truncate the reply or grow the list, which is a
+different intervention from the one every other arm performs. Excluding both
+means every arm perturbs exactly the same tokens, so the grid is factorial.
+The budget is 10% of *all* reply tokens, about 27% of the digits.
 
-| | `mask_*` | `replace_*` | `replace_*_input` | `replace_*_target` |
-|---|---|---|---|---|
-| flagged number | dropped from the loss | swapped, input and label, for a uniform random number of the same digit count | swapped in the **input only**; the label keeps the original | swapped in the **label only**; the input keeps the original |
-| flagged end-of-turn | dropped from the loss | the list gains one more random number | unchanged | unchanged |
+Each arm is one (input, label) combination of leaving a flagged digit alone,
+substituting a uniform random digit of the same length, or dropping it from the
+loss:
 
-The last two columns are exact transposes: the same seeded RNG draws the same
-replacements for the same 40,811 flagged numbers, and one writes them to the
-input while the other writes them to the label. (40,403 of the draws differ
-from the token they replace; the rest collide with it by chance.) The pair
-isolates whether a flagged token matters as context or as a prediction target.
+| | label: original | label: random digit | label: masked |
+|---|---|---|---|
+| **input: original** | `full` | `replace_*_target` | `mask_*` |
+| **input: random digit** | `replace_*_input` | `replace_*` | `erase_*` |
 
-The suffix picks the tokens: `_top` (highest divergence score), `_rand`
-(a random set matched on number/end-of-turn composition, with its overlap with
-the top set reported), `_bottom` (lowest score). `full` trains on unfiltered
-data and `none` skips fine-tuning.
+All five flagged arms draw from the same seeded RNG, so at a given seed they
+substitute the *same* digits in the same places and differ only in where those
+substitutions land. `replace_*_input` and `replace_*_target` are exact
+transposes; `erase_*` removes the token from the context and from the loss at
+once.
+
+The suffix picks the tokens: `_top` (highest divergence score), `_rand` (a
+same-size random draw, with its overlap with the top set reported), `_bottom`
+(lowest score). `full` trains on unfiltered data and `none` skips fine-tuning.
 
 ## Layout
 

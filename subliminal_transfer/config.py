@@ -33,6 +33,9 @@ Condition = Literal[
     "replace_top_target",
     "replace_rand_target",
     "replace_bottom_target",
+    "erase_top",
+    "erase_rand",
+    "erase_bottom",
     "none",
 ]
 CONDITIONS: tuple[Condition, ...] = (
@@ -49,6 +52,9 @@ CONDITIONS: tuple[Condition, ...] = (
     "replace_top_target",
     "replace_rand_target",
     "replace_bottom_target",
+    "erase_top",
+    "erase_rand",
+    "erase_bottom",
     "none",
 )
 
@@ -132,6 +138,11 @@ class Config(BaseModel):
     restore_from_hf: bool = False
     """Download the published teachers, number data and scores instead of
     recomputing them, so the student stage can run on its own."""
+    restore_run_name: str = ""
+    """Which published run to restore from; defaults to the run directory's
+    own name. Set it to reuse one run's teachers, data and scores under a new
+    run name, which is how the digit-only condition family was trained on the
+    original run's 19,990 sequences without retraining any teachers."""
 
     @property
     def counterfactuals(self) -> list[str]:

@@ -29,9 +29,7 @@ class StudentResult(BaseModel):
     n_masked: int = 0
     n_replaced: int = 0
     n_changed: int = 0
-    n_inserted: int = 0
     n_flag_numbers: int = 0
-    n_flag_eot: int = 0
     n_overlap_top: int = 0
 
 
@@ -237,23 +235,20 @@ def write_report(
 
     lines += ["## Token accounting (mean over seeds)", ""]
     lines += [
-        "| condition | reply tokens | flagged (numbers/end-of-turn) | in top set | "
-        "masked | replaced | changed | appended | final loss |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| condition | reply tokens | flagged digits | in top set | "
+        "masked | replaced | changed | final loss |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for s in summaries:
         rows = [r for r in results if r.condition == s.condition]
         n = len(rows)
         lines.append(
             f"| {s.condition} | {sum(r.n_reply for r in rows) / n:.0f} | "
-            f"{sum(r.n_flagged for r in rows) / n:.0f} "
-            f"({sum(r.n_flag_numbers for r in rows) / n:.0f}/"
-            f"{sum(r.n_flag_eot for r in rows) / n:.0f}) | "
+            f"{sum(r.n_flagged for r in rows) / n:.0f} | "
             f"{sum(r.n_overlap_top for r in rows) / n:.0f} | "
             f"{sum(r.n_masked for r in rows) / n:.0f} | "
             f"{sum(r.n_replaced for r in rows) / n:.0f} | "
             f"{sum(r.n_changed for r in rows) / n:.0f} | "
-            f"{sum(r.n_inserted for r in rows) / n:.0f} | "
             f"{sum(r.final_loss or 0.0 for r in rows) / n:.4f} |"
         )
     lines.append("")

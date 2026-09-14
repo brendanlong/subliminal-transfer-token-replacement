@@ -469,16 +469,13 @@ class ItemStats(BaseModel):
     n_replaced: int = 0
     n_changed: int = 0
     """Replacements whose new token differs from the original."""
-    n_inserted: int = 0
-    """Numbers appended where a flagged end-of-turn was replaced."""
     n_flag_numbers: int = 0
-    n_flag_eot: int = 0
     n_overlap_top: int = 0
     """For a random or bottom set: how many of its tokens are also in the top set."""
 
 
 TokenKind = Literal["number", "eot", "sep"]
-Mode = Literal["mask", "replace", "replace_input", "replace_target"]
+Mode = Literal["mask", "replace", "replace_input", "replace_target", "erase"]
 Selection = Literal["top", "rand", "bottom"]
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "mask_top": ("mask", "top"),
@@ -493,25 +490,40 @@ CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "replace_top_target": ("replace_target", "top"),
     "replace_rand_target": ("replace_target", "rand"),
     "replace_bottom_target": ("replace_target", "bottom"),
+    "erase_top": ("erase", "top"),
+    "erase_rand": ("erase", "rand"),
+    "erase_bottom": ("erase", "bottom"),
 }
-"""condition -> (what happens to flagged tokens, how the flag set is chosen:
-the top 10% by divergence score, a matched random 10%, or the *bottom* 10% —
-zero counterfactual disagreement and the most negative log-prob gap, i.e.
-where the target teacher is least distinctive. The bottom arm tests the
-U-shaped decile curves the paper reports and cannot explain). Candidate tokens are numbers and end-of-turn only, for both
-the top set and the random set: separators cannot be replaced, so ranking
-over them would leave part of the budget inert in the replacement arms.
-``mask``: flagged tokens leave the loss. ``replace``: a flagged
-number becomes a uniform random number of the same length in input and
-label; a flagged end-of-turn becomes separator + random number + end-of-turn
-(the list grows by one, all trained); flagged separators are left alone.
-``replace_input``: the same number substitution in the input only, labels
-keep the original tokens; end-of-turn and separators are left alone (an
-input-only change to the last token affects no prediction).
-``replace_target``: the mirror of ``replace_input`` — the substitution lands
-in the labels only, so the student predicts a wrong number from an unmodified
-context. Together the two isolate whether the flagged tokens matter as
-context or as prediction targets."""
+"""condition -> (what happens to flagged tokens, how the flag set is chosen).
+
+Selection is ``top`` (highest divergence score), ``rand`` (a same-size random
+draw, whose overlap with the top set is measured and reported) or ``bottom``
+(zero counterfactual disagreement and the most negative log-prob gap, i.e.
+where the target teacher is least distinctive — this tests the U-shaped decile
+curves the paper reports and cannot explain).
+
+**Only digit tokens are candidates.** Separators cannot be sensibly replaced,
+and end-of-turn has no in-place replacement at all — substituting it would
+either truncate the reply or grow the list, which is a different intervention
+from the one every other arm performs. Excluding both leaves every arm acting
+on exactly the same tokens, so the grid below is factorial.
+
+The five modes are the (input, label) combinations of leaving a flagged digit
+alone, substituting a uniform random digit of the same length, or dropping it
+from the loss:
+
+===================== ==================== ====================
+mode                  input                label
+===================== ==================== ====================
+``mask``              original             masked
+``replace_target``    original             random
+``replace_input``     random               original
+``replace``           random               random
+``erase``             random               masked
+===================== ==================== ====================
+
+``full`` (no flags) is the sixth cell, original/original.
+"""
 
 
 def token_kinds(
@@ -527,7 +539,7 @@ def rank_flags_of_kinds(
     keys: list[list[float]],
     kinds: list[list[TokenKind]],
     fraction: float,
-    allowed: tuple[TokenKind, ...] = ("number", "eot"),
+    allowed: tuple[TokenKind, ...] = ("number",),
     bottom: bool = False,
 ) -> list[list[bool]]:
     """Top (or ``bottom``) ``fraction`` of all reply tokens by key, drawn from
@@ -554,11 +566,12 @@ def rank_flags_of_kinds(
 def typed_random_flags(
     flags: list[list[bool]], kinds: list[list[TokenKind]], rng: random.Random
 ) -> list[list[bool]]:
-    """A random flag set drawn from *all* reply tokens with the same number /
-    end-of-turn / separator counts as ``flags``. Divergent tokens are not
-    excluded; the overlap is measured and reported instead."""
+    """A random flag set over digit tokens, the same size as ``flags``.
+
+    Divergent tokens are not excluded; the overlap is measured and reported
+    instead."""
     out = [[False] * len(row) for row in flags]
-    for kind in ("number", "eot", "sep"):
+    for kind in ("number",):
         pool = [
             (r, p)
             for r, row in enumerate(kinds)
@@ -576,16 +589,6 @@ def typed_random_flags(
     return out
 
 
-def list_separator(
-    ids: list[int], positions: list[int], kinds: list[TokenKind], default: list[int]
-) -> list[int]:
-    """The separator tokens between the last two numbers of the reply."""
-    nums = [k for k, kind in enumerate(kinds) if kind == "number"]
-    if len(nums) < 2:
-        return list(default)
-    return [ids[positions[k]] for k in range(nums[-2] + 1, nums[-1])]
-
-
 def apply_condition(
     ids: list[int],
     labels: list[int],
@@ -595,74 +598,38 @@ def apply_condition(
     digits: DigitTokens,
     rng: random.Random,
     eot_id: int,
-    default_sep: list[int],
 ) -> tuple[list[int], list[int], ItemStats]:
     positions = reply_positions(labels)
     assert len(flags) == len(positions) == len(top_flags)
     kinds = token_kinds(ids, positions, digits, eot_id)
     stats = ItemStats(n_reply=len(positions), n_flagged=sum(flags))
-    for f, t, kind in zip(flags, top_flags, kinds, strict=True):
-        if f:
-            stats.n_flag_numbers += kind == "number"
-            stats.n_flag_eot += kind == "eot"
-            stats.n_overlap_top += t
-    sep = list_separator(ids, positions, kinds, default_sep)
-    last_len = next(
-        (
-            digits.len_of[ids[positions[k]]]
-            for k in range(len(kinds) - 1, -1, -1)
-            if kinds[k] == "number"
-        ),
-        3,
-    )
-    # Append after the last number, not before the end-of-turn: a reply may
-    # close with a bracket or period, and the new number must stay inside it.
-    last_number = max(
-        (k for k, kind in enumerate(kinds) if kind == "number"), default=-1
-    )
-    extend_after = (
-        last_number
-        if last_number >= 0
-        and any(f and kinds[k] == "eot" for k, f in enumerate(flags))
-        else -1
-    )
     out_ids, out_labels = list(ids[: positions[0]]), list(labels[: positions[0]])
     for k, pos in enumerate(positions):
-        tok_id, kind = ids[pos], kinds[k]
+        tok_id = ids[pos]
         if not flags[k]:
             out_ids.append(tok_id)
             out_labels.append(labels[pos])
-            if k == extend_after and mode == "replace":
-                new_num = rng.choice(digits.by_len[last_len])
-                out_ids.extend([*sep, new_num])
-                out_labels.extend([*sep, new_num])
-                stats.n_inserted += 1
-                stats.n_changed += 1
             continue
+        assert kinds[k] == "number", "only digit tokens are candidates"
+        stats.n_flag_numbers += 1
+        stats.n_overlap_top += top_flags[k]
         if mode == "mask":
             out_ids.append(tok_id)
             out_labels.append(-100)
             stats.n_masked += 1
-        elif kind == "number":
-            new = rng.choice(digits.by_len[digits.len_of[tok_id]])
-            out_ids.append(tok_id if mode == "replace_target" else new)
-            out_labels.append(labels[pos] if mode == "replace_input" else new)
-            stats.n_replaced += 1
-            stats.n_changed += new != tok_id
-            if k == extend_after and mode == "replace":
-                new_num = rng.choice(digits.by_len[last_len])
-                out_ids.extend([*sep, new_num])
-                out_labels.extend([*sep, new_num])
-                stats.n_inserted += 1
-                stats.n_changed += 1
-        elif kind == "eot" and mode == "replace":
-            # Any insertion already happened after the last number, so the
-            # end-of-turn token itself is written through unchanged.
-            out_ids.append(tok_id)
-            out_labels.append(labels[pos])
+            continue
+        new = rng.choice(digits.by_len[digits.len_of[tok_id]])
+        # Each mode writes the substitution to the input, the label, or both;
+        # "erase" does both jobs at once, dropping the token from the loss as
+        # well as from the context.
+        out_ids.append(tok_id if mode == "replace_target" else new)
+        if mode == "erase":
+            out_labels.append(-100)
+            stats.n_masked += 1
         else:
-            out_ids.append(tok_id)
-            out_labels.append(labels[pos])
+            out_labels.append(labels[pos] if mode == "replace_input" else new)
+        stats.n_replaced += 1
+        stats.n_changed += new != tok_id
     assert out_ids[-1] == eot_id
     return out_ids, out_labels, stats
 
