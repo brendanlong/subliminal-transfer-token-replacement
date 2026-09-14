@@ -12,23 +12,10 @@ workdir: .
 setup: |
   pip install uv -q
   uv sync
-  # The locked torch is built against CUDA 13. Cloud hosts vary, and on one
-  # with a 12.8 driver that build reports no CUDA at all -- training then
-  # falls back to the CPU at roughly 1% of the speed. Install a matching build
-  # instead. uv runs from /tmp so this repo's exclude-newer pin does not filter
-  # the PyTorch index out of the resolution.
-  VENV=$(pwd)/.venv/bin/python
-  "$VENV" -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)' || \
-    (cd /tmp && uv pip install --python "$VENV" \
-       --index-url https://download.pytorch.org/whl/cu128 'torch==2.11.0')
-  "$VENV" -c 'import torch; assert torch.cuda.is_available(), "no usable CUDA after fallback"'
 
 run: |
   cd ~/sky_workdir
   export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
-  # setup may have replaced torch with a driver-matched build; without
-  # this every `uv run` re-syncs the lockfile and undoes it.
-  export UV_NO_SYNC=1
   ${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}
 
 envs:

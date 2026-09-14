@@ -469,7 +469,6 @@ class ItemStats(BaseModel):
     n_replaced: int = 0
     n_changed: int = 0
     """Replacements whose new token differs from the original."""
-    n_flag_numbers: int = 0
     n_overlap_top: int = 0
     """For a random or bottom set: how many of its tokens are also in the top set."""
 
@@ -611,7 +610,6 @@ def apply_condition(
             out_labels.append(labels[pos])
             continue
         assert kinds[k] == "number", "only digit tokens are candidates"
-        stats.n_flag_numbers += 1
         stats.n_overlap_top += top_flags[k]
         if mode == "mask":
             out_ids.append(tok_id)

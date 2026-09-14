@@ -4,7 +4,10 @@ version = "1.0.0"
 description = "Does replacing attribution-flagged tokens beat masking them, for subliminal trait transfer?"
 requires-python = ">=3.12"
 dependencies = [
-    "torch>=2.0",
+    # 2.11+ ships CUDA 13 wheels on PyPI, which report no CUDA at all on a
+    # 12.8 driver and silently fall back to the CPU. 2.10 is the last CUDA 12
+    # release and runs on both driver generations.
+    "torch>=2.0,<2.11",
     "transformers>=4.40",
     "peft>=0.13",
     "accelerate>=1.0",
