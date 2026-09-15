@@ -39,6 +39,18 @@ def sync(api: HfApi, run_dir: Path, prefix: str) -> tuple[int, int]:
                 repo_type="dataset",
                 allow_patterns=["*/result.json"],
             )
+    # The attribution output is the expensive intermediate -- hours for the
+    # per-label level -- and losing it means recomputing before any student can
+    # run. A host failure took one of these already.
+    for name in ("attribution.jsonl", "attribution-docs.json"):
+        art = run_dir / name
+        if art.exists():
+            api.upload_file(
+                path_or_fileobj=str(art),
+                path_in_repo=f"{prefix}/{name}",
+                repo_id=REPO_ID,
+                repo_type="dataset",
+            )
     logs = sorted(Path().glob("*.log")) + sorted(run_dir.glob("*.log"))
     for log in logs:
         api.upload_file(
