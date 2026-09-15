@@ -42,9 +42,11 @@ from subliminal_transfer.attribution import (
     label_local_modules,
     lora_modules,
     module_shapes,
+    per_label_rows,
     pretokenized,
     query_gradient,
     scores_at_reply_positions,
+    sequence_scores,
     split_flat_query,
     target_minus_mean_reference,
     token_scores,
@@ -661,6 +663,60 @@ def stage_attribute(
         )
     )
     print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
+    if cfg.attribution_level == "label":
+        digits = DigitTokens(tok)
+        eot = eot_id_of(tok)
+        # Only digits are ever candidates, so only they need a backward.
+        keep = [
+            [
+                p
+                for p, k in zip(
+                    reply_positions(labels),
+                    token_kinds(ids, reply_positions(labels), digits, eot),
+                    strict=True,
+                )
+                if k == "number"
+            ]
+            for ids, labels in tokenized
+        ]
+        rows, index = per_label_rows(tokenized, keep)
+        print(f"[attribute] {len(rows)} single-label rows over {len(tokenized)} docs")
+        sims = sequence_scores(
+            model,
+            rows,
+            split_flat_query(flat, shapes),
+            run_dir,
+            device,
+            n_queries=len(animals),
+            token_batch=cfg.attribution_token_batch,
+            projection_dim=cfg.attribution_projection_dim,
+            target_modules=modules,
+        )
+        per_row = target_minus_mean_reference(sims)
+        by_doc: dict[int, dict[int, float]] = {}
+        for (doc, pos), s in zip(index, per_row.tolist(), strict=True):
+            by_doc.setdefault(doc, {})[pos] = s
+        with out.open("w") as f:
+            for i, (row, (_ids, labels)) in enumerate(
+                zip(scored, tokenized, strict=True)
+            ):
+                got = by_doc.get(i, {})
+                f.write(
+                    json.dumps(
+                        {
+                            "idx": row.idx,
+                            # Non-digits were never scored and are never
+                            # candidates; -inf keeps them out of the top set.
+                            "score": [
+                                got.get(p, float("-inf"))
+                                for p in reply_positions(labels)
+                            ],
+                        }
+                    )
+                    + "\n"
+                )
+        print(f"[attribute] wrote {out}")
+        return
     if cfg.attribution_level == "document":
         index = document_gradients(
             model,

@@ -108,10 +108,15 @@ class Config(BaseModel):
     """Which per-token score ranks the candidates. ``divergence`` counts
     counterfactual teacher disagreement; ``gradcos`` is gradient attribution
     against a per-animal query, written by the ``attribute`` stage."""
-    attribution_level: Literal["token", "document"] = "token"
-    """What the attribute stage scores. ``document`` is the better-posed
-    object -- a document's gradient is exactly the update training on it would
-    produce -- and it is what the drop_* arms rank by."""
+    attribution_level: Literal["token", "document", "label"] = "token"
+    """What the attribute stage scores.
+
+    ``token`` is bergson's per-token decomposition, which is input-side unless
+    ``attribution_label_local`` restricts the modules -- and that restriction
+    sees only 5% of the adapter. ``label`` isolates one label per forward
+    instead: the exact label-side gradient over every trainable parameter, for
+    one backward per scored token. ``document`` scores whole sequences, which
+    is what the drop_* arms rank by."""
     drop_fraction: float = 0.10
     """Share of *documents* removed by the drop_* arms, matched to the token
     budget so the two filtering granularities discard comparable data."""

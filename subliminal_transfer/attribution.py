@@ -31,11 +31,15 @@ import math
 import shutil
 from typing import TYPE_CHECKING, cast
 
+import numpy as np
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
 from bergson.config.config import IndexConfig, PreprocessConfig
-from bergson.data import allocate_batches, load_gradients
-from bergson.score.score_writer import MemmapTokenScoreWriter
+from bergson.data import allocate_batches, load_gradients, load_scores
+from bergson.score.score_writer import (
+    MemmapSequenceScoreWriter,
+    MemmapTokenScoreWriter,
+)
 from bergson.score.scorer import Scorer
 from bergson.utils.worker_utils import extract_peft_target_modules
 from datasets import Dataset
@@ -365,6 +369,86 @@ def document_gradients(
     return torch.from_numpy(load_gradients(path).astype("float32"))
 
 
+def per_label_rows(
+    tokenized: list[tuple[list[int], list[int]]],
+    keep: list[list[int]],
+) -> tuple[Dataset, list[tuple[int, int]]]:
+    """One row per (document, label) with every other label masked out.
+
+    The exact label-side quantity is the gradient of the loss at position p
+    alone. bergson's per-token decomposition cannot give it -- rows there are
+    input-side -- and restricting to label-local modules buys locality at the
+    cost of seeing 5% of the adapter. Isolating one label per forward gets
+    both, over every trainable parameter, for one backward per label.
+
+    Scoring only the digits keeps that affordable: about nine per reply rather
+    than the full twenty-eight.
+    """
+    rows: list[tuple[list[int], list[int]]] = []
+    index: list[tuple[int, int]] = []
+    for doc, (ids, labels) in enumerate(tokenized):
+        for pos in keep[doc]:
+            one = [-100] * len(labels)
+            one[pos] = labels[pos]
+            rows.append((ids, one))
+            index.append((doc, pos))
+    return pretokenized(rows), index
+
+
+def sequence_scores(
+    model: PreTrainedModel | PeftModel,
+    data: Dataset,
+    query_grads: dict[str, Tensor],
+    run_dir: Path,
+    device: torch.device,
+    *,
+    n_queries: int,
+    token_batch: int = 4096,
+    projection_dim: int = PROJECTION_DIM,
+    target_modules: set[str] | None = None,
+) -> Tensor:
+    """``[n_rows, n_queries]`` cosines, scored without materializing an index.
+
+    An index over one row per label would be hundreds of gigabytes; the scorer
+    path reduces against the queries as it goes.
+    """
+    width = next(iter(query_grads.values())).shape[1]
+    assert width == projection_dim**2, (
+        f"query is {width}-wide per module but the index will be "
+        f"{projection_dim**2}; the two projections disagree"
+    )
+    path = run_dir / "seq-scores"
+    shutil.rmtree(path, ignore_errors=True)
+    writer = MemmapSequenceScoreWriter(
+        path, num_items=len(data), num_scores=n_queries, dtype=torch.float32
+    )
+    scorer = Scorer(
+        query_grads=query_grads,
+        modules=list(query_grads),
+        writer=writer,
+        device=device,
+        dtype=torch.float32,
+        unit_normalize=True,
+    )
+    cfg = _index_config(
+        run_dir / "seq-index",
+        tokens=False,
+        token_batch=token_batch,
+        projection_dim=projection_dim,
+    )
+    collect_gradients(
+        model=cast("PreTrainedModel", model),
+        data=data,
+        processor=GradientProcessor(projection_dim=projection_dim),
+        cfg=cfg,
+        batches=allocate_batches(data["length"], cfg.token_batch_size),
+        target_modules=target_modules,
+        scorer=scorer,
+    )
+    writer.flush()
+    return torch.from_numpy(np.asarray(load_scores(path)[:], dtype="float32").copy())
+
+
 def cosine_against(index: Tensor, queries: Tensor) -> Tensor:
     """``[n_rows, n_queries]`` cosines; ``queries`` must already be unit rows."""
     return torch.nn.functional.normalize(index, dim=1) @ queries.T
@@ -389,9 +473,11 @@ __all__ = [
     "document_gradients",
     "label_local_modules",
     "module_shapes",
+    "per_label_rows",
     "query_dataset",
     "query_gradient",
     "scores_at_reply_positions",
+    "sequence_scores",
     "split_flat_query",
     "target_minus_mean_reference",
     "token_scores",
