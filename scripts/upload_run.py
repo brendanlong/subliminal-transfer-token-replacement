@@ -21,6 +21,9 @@ from huggingface_hub import HfApi
 
 from subliminal_transfer.artifacts import REPO_ID
 
+TAIL_LINES = 3000
+"""Enough to hold a traceback and the progress before it."""
+
 
 def sync(api: HfApi, run_dir: Path, prefix: str) -> tuple[int, int]:
     """Upload whatever results and logs exist right now."""
@@ -44,6 +47,18 @@ def sync(api: HfApi, run_dir: Path, prefix: str) -> tuple[int, int]:
             repo_id=REPO_ID,
             repo_type="dataset",
         )
+    # A job that writes no log files of its own still has SkyPilot's, and that
+    # is the copy that dies with the pod. Ship its tail: the head is dominated
+    # by a module list thousands of entries long, and the failure is at the end.
+    for run_log in sorted(Path.home().glob("sky_logs/*/tasks/run.log")):
+        tail = run_log.read_text(errors="replace").splitlines()[-TAIL_LINES:]
+        api.upload_file(
+            path_or_fileobj="\n".join(tail).encode(),
+            path_in_repo=f"{prefix}/logs/skypilot-{run_log.parent.parent.name}.log",
+            repo_id=REPO_ID,
+            repo_type="dataset",
+        )
+        logs.append(run_log)
     return n_results, len(logs)
 
 
