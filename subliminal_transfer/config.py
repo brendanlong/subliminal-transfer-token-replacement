@@ -126,6 +126,15 @@ class Config(BaseModel):
     drop_fraction: float = 0.10
     """Share of *documents* removed by the drop_* arms, matched to the token
     budget so the two filtering granularities discard comparable data."""
+    attribution_contrast: Literal["target_minus_mean", "target"] = "target_minus_mean"
+    """How the per-animal scores collapse to one ranking.
+
+    ``target_minus_mean`` subtracts the counterfactual animals' mean, which is
+    the original work's GradCos-diff. ``target`` is a plain cosine against the
+    target query alone -- their GradCos. Both are written by one attribution
+    pass, since they are two reductions of the same per-animal block; this
+    selects which file the student stage ranks by.
+    """
     attribution_label_local: bool = True
     """Attribute through the last layer's output-side projections only.
 

@@ -414,6 +414,15 @@ def sequence_scores(
     return torch.from_numpy(np.asarray(load_scores(path)[:], dtype="float32").copy())
 
 
+def target_only(scores: Tensor, target_index: int = 0) -> Tensor:
+    """``[n_tokens, n_animals]`` -> the target's column, untouched.
+
+    The original work's plain ``GradCos``: a cosine against the target query
+    with no counterfactual contrast.
+    """
+    return scores[:, target_index]
+
+
 def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor:
     """``[n_tokens, n_animals]`` -> the target's score minus the others' mean.
 
@@ -438,5 +447,6 @@ __all__ = [
     "sequence_scores",
     "split_flat_query",
     "target_minus_mean_reference",
+    "target_only",
     "token_scores",
 ]

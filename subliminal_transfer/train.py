@@ -47,6 +47,7 @@ from subliminal_transfer.attribution import (
     sequence_scores,
     split_flat_query,
     target_minus_mean_reference,
+    target_only,
     token_scores,
     unit_rows,
 )
@@ -466,7 +467,7 @@ def ranking_keys(
             ]
             for r in scored
         ]
-    path = run_dir / "attribution.jsonl"
+    path = attribution_path(run_dir, cfg.attribution_contrast)
     if not path.exists():
         raise FileNotFoundError(
             f"{path} is missing; run --stage attribute --detector gradcos first"
@@ -641,10 +642,26 @@ def announce_attribution_provenance(out: Path) -> None:
         print(f"[rank] {out.name} has no provenance sidecar (predates tracking)")
 
 
-def write_attribution_meta(cfg: Config, out: Path, n_modules: int) -> None:
-    attribution_meta_path(out).write_text(
-        json.dumps(attribution_settings(cfg, n_modules), indent=2)
-    )
+def write_attribution_meta(
+    cfg: Config, out: Path, n_modules: int, contrast: str | None = None
+) -> None:
+    settings = attribution_settings(cfg, n_modules)
+    if contrast is not None:
+        settings["contrast"] = contrast
+    attribution_meta_path(out).write_text(json.dumps(settings, indent=2))
+
+
+CONTRAST_REDUCTIONS = {
+    "target_minus_mean": ("attribution.jsonl", target_minus_mean_reference),
+    "target": ("attribution-plain.jsonl", target_only),
+}
+"""Both reductions of the same per-animal block, so one gradient pass writes
+both rankings. The filename encodes which, because a ranking is not
+self-describing."""
+
+
+def attribution_path(run_dir: Path, contrast: str) -> Path:
+    return run_dir / CONTRAST_REDUCTIONS[contrast][0]
 
 
 def attribution_meta_path(out: Path) -> Path:
@@ -676,7 +693,7 @@ def stage_attribute(
     out = (
         run_dir / "attribution-docs.json"
         if cfg.attribution_level == "document"
-        else run_dir / "attribution.jsonl"
+        else attribution_path(run_dir, cfg.attribution_contrast)
     )
     if out.exists() and not cfg.force:
         check_attribution_settings(cfg, out)
@@ -826,25 +843,36 @@ def stage_attribute(
     scores = load_scores(run_dir / "token-scores")
     offsets = scores.offsets
     assert offsets is not None, "token scores have no per-document offsets"
-    with out.open("w") as f:
+    # One gradient pass, every reduction: the per-animal block is already in
+    # hand, so writing the plain ranking alongside the contrastive one costs
+    # a second pass over a memmap rather than a second pass over the model.
+    handles = {
+        name: attribution_path(run_dir, name).open("w") for name in CONTRAST_REDUCTIONS
+    }
+    try:
         for i, (row, (_ids, labels)) in enumerate(zip(scored, tokenized, strict=True)):
             block = torch.from_numpy(
                 np.asarray(scores[offsets[i] : offsets[i + 1]], dtype="float32")
             )
-            per_token = target_minus_mean_reference(block)
-            f.write(
-                json.dumps(
-                    {
-                        "idx": row.idx,
-                        "score": scores_at_reply_positions(
-                            per_token, labels, offset=row_offset
-                        ),
-                    }
+            for name, (_fname, reduce) in CONTRAST_REDUCTIONS.items():
+                handles[name].write(
+                    json.dumps(
+                        {
+                            "idx": row.idx,
+                            "score": scores_at_reply_positions(
+                                reduce(block), labels, offset=row_offset
+                            ),
+                        }
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-    write_attribution_meta(cfg, out, len(modules))
-    print(f"[attribute] wrote {out}")
+    finally:
+        for h in handles.values():
+            h.close()
+    for name in CONTRAST_REDUCTIONS:
+        path = attribution_path(run_dir, name)
+        write_attribution_meta(cfg, path, len(modules), contrast=name)
+        print(f"[attribute] wrote {path}")
 
 
 def stage_student(

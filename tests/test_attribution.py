@@ -8,13 +8,10 @@ are easy to get silently wrong.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 import torch
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from subliminal_transfer.attribution import (
     split_flat_query,
@@ -158,3 +155,23 @@ def test_attribution_settings_reject_a_file_with_no_provenance(tmp_path: Path) -
     out.write_text("")
     with pytest.raises(FileNotFoundError, match="predates provenance"):
         check_attribution_settings(Config(), out)
+
+
+def test_target_only_is_the_plain_gradcos_reduction() -> None:
+    """GradCos is the target column; GradCos-diff subtracts the rest's mean."""
+    from subliminal_transfer.attribution import target_minus_mean_reference, target_only
+
+    block = torch.tensor([[1.0, 0.0, 0.0, 0.0, 0.0], [0.5, 0.5, 0.5, 0.5, 0.5]])
+    assert torch.allclose(target_only(block), torch.tensor([1.0, 0.5]))
+    # a token equally aligned with every animal is not target-specific
+    assert torch.allclose(target_minus_mean_reference(block), torch.tensor([1.0, 0.0]))
+
+
+def test_each_contrast_has_its_own_ranking_file() -> None:
+    from subliminal_transfer.train import CONTRAST_REDUCTIONS, attribution_path
+
+    names = {attribution_path(Path("r"), c) for c in CONTRAST_REDUCTIONS}
+    assert len(names) == len(CONTRAST_REDUCTIONS), (
+        "contrasts would overwrite each other"
+    )
+    assert attribution_path(Path("r"), "target_minus_mean").name == "attribution.jsonl"
