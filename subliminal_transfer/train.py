@@ -471,6 +471,7 @@ def ranking_keys(
         raise FileNotFoundError(
             f"{path} is missing; run --stage attribute --detector gradcos first"
         )
+    announce_attribution_provenance(path)
     by_idx = {
         row["idx"]: row["score"]
         for row in (json.loads(line) for line in path.read_text().splitlines() if line)
@@ -507,6 +508,7 @@ def kept_documents(
                 f"{path} is missing; run --stage attribute "
                 "--attribution-level document first"
             )
+        announce_attribution_provenance(path)
         scores = json.loads(path.read_text())["score"]
         assert len(scores) == n_docs, f"{len(scores)} scores for {n_docs} documents"
         order = sorted(range(n_docs), key=lambda i: -scores[i])
@@ -603,6 +605,70 @@ def train_unfiltered_student(
     return base, model
 
 
+def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
+    """The settings that change what an attribution file means.
+
+    Every level writes to one of two filenames, so a file alone cannot say
+    which configuration produced it. Reusing a ``token`` ranking for a
+    ``label`` run returns a complete, plausible result computed from the wrong
+    quantity -- the failure mode this repo keeps hitting. The sidecar makes
+    the mismatch checkable.
+    """
+    out: dict[str, object] = {
+        "level": cfg.attribution_level,
+        "label_local": cfg.attribution_label_local,
+        "projection_dim": cfg.attribution_projection_dim,
+        "target_animal": cfg.target_animal,
+        "counterfactual_animals": cfg.counterfactual_animals,
+    }
+    if n_modules:
+        out["n_modules"] = n_modules
+    return out
+
+
+def announce_attribution_provenance(out: Path) -> None:
+    """Log which configuration produced the ranking being consumed.
+
+    Not an assertion: the student stage is run without the attribution flags,
+    so ``cfg`` says nothing about how the file was built. Printing it is what
+    makes a run's logs enough to tell a 224-module ranking from an 8-module
+    one after the fact.
+    """
+    meta = attribution_meta_path(out)
+    if meta.exists():
+        print(f"[rank] {out.name} built with {json.loads(meta.read_text())}")
+    else:
+        print(f"[rank] {out.name} has no provenance sidecar (predates tracking)")
+
+
+def write_attribution_meta(cfg: Config, out: Path, n_modules: int) -> None:
+    attribution_meta_path(out).write_text(
+        json.dumps(attribution_settings(cfg, n_modules), indent=2)
+    )
+
+
+def attribution_meta_path(out: Path) -> Path:
+    return out.with_name(out.name + ".meta.json")
+
+
+def check_attribution_settings(cfg: Config, out: Path) -> None:
+    """Refuse an attribution file built under different settings."""
+    meta = attribution_meta_path(out)
+    if not meta.exists():
+        raise FileNotFoundError(
+            f"{out} has no {meta.name}; it predates provenance tracking. "
+            "Re-run --stage attribute --force, or delete the file."
+        )
+    want = attribution_settings(cfg)
+    got = {k: v for k, v in json.loads(meta.read_text()).items() if k in want}
+    if got != want:
+        diff = {k: (want[k], got.get(k)) for k in want if got.get(k) != want[k]}
+        raise ValueError(
+            f"{out} was built with different settings; "
+            f"{{key: (wanted, found)}} = {diff}. Re-run with --force."
+        )
+
+
 def stage_attribute(
     cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
 ) -> None:
@@ -613,6 +679,7 @@ def stage_attribute(
         else run_dir / "attribution.jsonl"
     )
     if out.exists() and not cfg.force:
+        check_attribution_settings(cfg, out)
         print(f"[attribute] {out} exists, skipping")
         return
     scored = read_scored(run_dir / "scored.jsonl")
@@ -624,18 +691,23 @@ def stage_attribute(
         base.gradient_checkpointing_disable()
 
     data = pretokenized(tokenized)
-    # Per-label masking already isolates one loss per forward, so the module
-    # restriction is both unnecessary and self-defeating there -- it exists
-    # only to buy label-locality inside a single pass, at 5% of the adapter.
+    # The module restriction exists only to buy label-locality inside a single
+    # pass, at 5% of the adapter. Per-label masking already isolates one loss
+    # per forward, and a document-level score sums over every label anyway, so
+    # for both of those the restriction buys nothing and just discards 95% of
+    # the parameters.
     modules = (
         label_local_modules(model)
-        if cfg.attribution_label_local and cfg.attribution_level != "label"
+        if cfg.attribution_label_local and cfg.attribution_level == "token"
         else lora_modules(model)
     )
     # Label-local rows carry the *next* position's loss, so reply position p
-    # is scored by row p-1.
+    # is scored by row p-1. Only the token path consumes this.
     row_offset = -1 if cfg.attribution_label_local else 0
-    print(f"[attribute] {len(modules)} modules, row offset {row_offset}")
+    if cfg.attribution_level == "token":
+        print(f"[attribute] {len(modules)} modules, row offset {row_offset}")
+    else:
+        print(f"[attribute] {len(modules)} modules, level {cfg.attribution_level}")
     shapes = module_shapes(
         model,
         data,
@@ -716,6 +788,7 @@ def stage_attribute(
                     )
                     + "\n"
                 )
+        write_attribution_meta(cfg, out, len(modules))
         print(f"[attribute] wrote {out}")
         return
     if cfg.attribution_level == "document":
@@ -734,9 +807,11 @@ def stage_attribute(
         )
         per_doc = target_minus_mean_reference(sims)
         out.write_text(json.dumps({"score": per_doc.tolist()}))
+        write_attribution_meta(cfg, out, len(modules))
         print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
         return
-    writer = token_scores(
+    # Called for its side effect: the scores are read back from disk below.
+    token_scores(
         model,
         data,
         split_flat_query(flat, shapes),
@@ -768,7 +843,7 @@ def stage_attribute(
                 )
                 + "\n"
             )
-    del writer
+    write_attribution_meta(cfg, out, len(modules))
     print(f"[attribute] wrote {out}")
 
 

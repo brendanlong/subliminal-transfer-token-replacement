@@ -15,7 +15,7 @@ dependencies = [
     "pydantic>=2.0",
     "scipy>=1.13",
     "wandb>=0.19",
-    "bergson",
+    "bergson>=1.0",  # pre-1.0 has a different attribution API (see below)
 ]
 
 [dependency-groups]

@@ -17,7 +17,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-07T06:45:14.774314756Z"
+exclude-newer = "2026-09-08T07:39:27.38955342Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -2239,7 +2239,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.0" },
-    { name = "bergson" },
+    { name = "bergson", specifier = ">=1.0" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "peft", specifier = ">=0.13" },
     { name = "pydantic", specifier = ">=2.0" },

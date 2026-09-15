@@ -264,13 +264,59 @@ Two ways to make it label-side:
   only because candidates are digits (~9 per reply); on a corpus where any
   token may matter this is one backward pass per label and does not scale.
 
+### Commands
+
+Each level needs its own attribution pass, then the same student sweep. All
+three ran on a rented A40 (RunPod, $0.49/h) with three concurrent workers.
+
+```bash
+A="uv run python -m subliminal_transfer.train --stage attribute \
+   --restore-from-hf --restore-run-name elephant-digits \
+   --attribution-projection-dim 32 --no-gradient-checkpointing --no-wandb"
+
+# per-label: exact label-side gradients, all 224 modules (~57 min)
+$A --run-dir runs/elephant-perlabel --attribution-level label
+
+# label-local: one pass, final layer only, 8 modules
+$A --run-dir runs/elephant-label --attribution-level token
+
+# document: one score per sequence, all 224 modules (~6 min)
+$A --run-dir runs/elephant-doc --attribution-level document \
+   --no-attribution-label-local
+
+# students, per attribution run
+for c in full mask_top mask_rand replace_top replace_rand none; do
+  uv run python -m subliminal_transfer.train --stage student \
+    --run-dir runs/elephant-perlabel --detector gradcos \
+    --conditions $c --seeds 0,1,2 --no-gradient-checkpointing &
+done; wait
+```
+
+The document arms are opt-in (`--conditions drop_top,drop_rand`) because the
+default `divergence` detector never writes `attribution-docs.json`.
+
+Each pass writes an `attribution*.meta.json` sidecar recording the level,
+label-local flag, projection dimension and module count; the student stage
+prints it. Reusing a ranking built at one level for a run at another is the
+exact shape of three of the four bugs below, and the sidecar is what makes it
+visible.
+
+Published under the `elephant-perlabel`, `elephant-label` and `elephant-doc`
+prefixes on Hugging Face. Unlike the divergence numbers, these are **not**
+covered by `tests/test_published_numbers.py`, and per-seed rates are not
+committed to `results/` — the t-statistics quoted below were computed from
+the published `result.json` files rather than by anything in this repo.
+
 ### Results
 
-Absolute levels span runs on different GPUs, which are not bit-identical
-(`full` came out 0.648 on an RTX 5090 and 0.628 on an A40 with identical code
-and seed). The comparison that survives that is each detector's **matched
-within-run delta**: top decile minus a random decile of the same size, in raw
-elephant rate.
+Absolute levels span runs on different GPUs, which are not bit-identical.
+Seed-matched, `full` came out 0.647 on an RTX 5090 (seeds 0–2 of 0.670, 0.630,
+0.640, 0.665, 0.635) against 0.628 on an A40 with identical code and seeds.
+That gap is smaller than the 5090's own seed-to-seed range (0.630–0.670), so
+three seeds cannot separate hardware from seed noise — which is the reason to
+avoid the question entirely. The comparison that survives is each detector's
+**matched within-run delta**: top decile minus a random decile of the same
+size, in raw elephant rate, never an absolute level spliced across runs.
 
 | detector | mask delta | replace delta |
 |---|---|---|
@@ -284,14 +330,28 @@ Per-label normalized effects, for reference (`none` 0.172, `full` 0.628):
 `replace_rand` 0.36. Both matched contrasts have the right sign in 3/3 seeds
 (t = −6.65 and −4.67, df = 2).
 
-**The gap to divergence is the method, not coverage.** Per-label attribution
-was run specifically to remove the 4.9%-coverage confound in the label-local
-arm. It did not close the gap: exact label-side gradients over the entire
-adapter still trail divergence by roughly 4–6×. Divergence reads off directly
-whether a counterfactual teacher would have written something else at that
-position, which is close to a direct measurement of the thing being filtered;
+**Coverage is not the explanation for the gap.** Per-label attribution was run
+specifically to remove the 4.9%-coverage confound in the label-local arm, and
+it did not close it: exact label-side gradients over the entire adapter still
+trail divergence by 5.6× on masking (0.270 / 0.048) and 3.8× on replacement
+(0.165 / 0.043).
+
+That eliminates one confound, not all of them. Two others remain untested and
+could each account for part of the gap:
+
+- **Projection noise.** Scoring runs at `projection_dim = 16`, i.e. 256 floats
+  per module. `compare_detectors.py --stability-scores` exists to measure how
+  much of a ranking survives a change of projection, and no stability number
+  is reported here.
+- **Cosine discards magnitude.** Scoring is `unit_normalize=True`, so a label
+  whose loss gradient is tiny ranks alongside one that dominates the update.
+  Divergence carries an implicit magnitude through `logp_gap`.
+
+The intuition for a real gap is that divergence reads off directly whether a
+counterfactual teacher would have written something else at that position,
+which is close to a direct measurement of the thing being filtered, while
 gradient attribution answers a more general question from one model and a
-projected query.
+projected query. But the size of the gap is not yet attributed.
 
 ### Document level: the intervention, not the detector, is the blocker
 
@@ -309,15 +369,26 @@ not have shown an effect:
 | top-50 numbers touch | 89.7% of documents |
 
 To remove `219` from training you would have to drop 41.6% of the corpus. At a
-10% drop fraction no ranking — not even an oracle — can remove a carrier
-token, because the surviving 90% still contains it thousands of times.
-`drop_rand` at 0.967 confirms it: removing a tenth of the data costs 3.3
-points of transfer, and that is the entire dynamic range the arm had.
+10% drop fraction, no ranking can eliminate a carrier *token*, because the
+surviving 90% still contains it thousands of times.
+
+That argument is about token carriers, and it does not by itself bound what
+document removal can achieve: if the top decile were disproportionately
+effective teachers, `drop_top` could fall well below `drop_rand` while
+`drop_rand` stayed at 0.967. **The test that would settle it was not run** —
+rank documents by how many high-divergence numbers they contain (an oracle
+ranking) and drop that decile. If even the oracle cannot beat random, document
+filtering is dead in this corpus regardless of detector. Until then, read the
+arm as inconclusive rather than as a measured null.
+
+What the numbers do support: `drop_rand` at 0.967 means random removal of a
+tenth of the data costs only 3.3 points, so the attribution arm was being
+asked to beat random by a margin smaller than the seed noise at three seeds.
 
 Token *replacement* acts on every occurrence across all documents at once, so
 redundancy is irrelevant to it; document *removal* has to delete every copy.
-The token-vs-document gap here is an **intervention** difference, not a
-detector difference.
+That makes the token-vs-document gap an **intervention** difference at least
+as much as a detector difference.
 
 ### What this does not show
 

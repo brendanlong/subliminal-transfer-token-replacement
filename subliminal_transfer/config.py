@@ -155,7 +155,12 @@ class Config(BaseModel):
     total_steps: int = 0
     """0 = exactly one epoch over the number data."""
     max_len: int = 256
-    conditions: str = ",".join(CONDITIONS)
+    conditions: str = ",".join(c for c in CONDITIONS if c not in DOCUMENT_CONDITIONS)
+    """The token arms. The document arms are opt-in: they need an attribution
+    pass (``--stage attribute --attribution-level document``) that the default
+    ``divergence`` detector never runs, so including them here would train the
+    whole token sweep and only then fail on a missing ``attribution-docs.json``.
+    """
     seeds: str = "0,1,2,3,4"
 
     # --- Evaluation ---------------------------------------------------------

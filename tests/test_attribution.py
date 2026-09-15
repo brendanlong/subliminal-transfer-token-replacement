@@ -8,8 +8,13 @@ are easy to get silently wrong.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 import torch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from subliminal_transfer.attribution import (
     split_flat_query,
@@ -107,3 +112,49 @@ def test_scores_at_reply_positions_offset_guards_the_low_edge() -> None:
     labels = [1, 2]  # reply starts at position 0; row -1 does not exist
     got = scores_at_reply_positions(torch.tensor([5.0]), labels, offset=-1)
     assert got[0] == float("-inf")
+
+
+def test_default_conditions_exclude_document_arms() -> None:
+    """The default sweep must not need an attribution pass.
+
+    ``detector`` defaults to divergence, which never writes
+    ``attribution-docs.json``, so a document arm in the default condition list
+    trains the entire token sweep and only then dies on a missing file.
+    """
+    from subliminal_transfer.config import DOCUMENT_CONDITIONS, Config
+
+    selected = Config().condition_list
+    assert not [c for c in selected if c in DOCUMENT_CONDITIONS]
+    # ...but they stay selectable explicitly.
+    assert "drop_top" in Config(conditions="drop_top").condition_list
+
+
+def test_attribution_settings_detect_a_level_mismatch(tmp_path: Path) -> None:
+    """A ranking built at one level must not be silently reused at another."""
+    from subliminal_transfer.config import Config
+    from subliminal_transfer.train import (
+        check_attribution_settings,
+        write_attribution_meta,
+    )
+
+    out = tmp_path / "attribution.jsonl"
+    out.write_text("")
+    write_attribution_meta(Config(attribution_level="token"), out, n_modules=8)
+
+    check_attribution_settings(Config(attribution_level="token"), out)
+    with pytest.raises(ValueError, match="different settings"):
+        check_attribution_settings(Config(attribution_level="label"), out)
+    with pytest.raises(ValueError, match="different settings"):
+        check_attribution_settings(
+            Config(attribution_level="token", attribution_projection_dim=64), out
+        )
+
+
+def test_attribution_settings_reject_a_file_with_no_provenance(tmp_path: Path) -> None:
+    from subliminal_transfer.config import Config
+    from subliminal_transfer.train import check_attribution_settings
+
+    out = tmp_path / "attribution.jsonl"
+    out.write_text("")
+    with pytest.raises(FileNotFoundError, match="predates provenance"):
+        check_attribution_settings(Config(), out)

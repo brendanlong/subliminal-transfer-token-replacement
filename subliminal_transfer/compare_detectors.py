@@ -123,11 +123,16 @@ def main() -> None:
         per_token = per_token_scores(scores, i)
         for pos in range(per_token.shape[0]):
             attr.append(float(per_token[pos]))
-            kind = kind_of_position(pos, reply, kind_by_pos)
+            # A label-local row at t carries the loss at t+1, so the label
+            # this row scores is at pos - offset. Both the divergence key and
+            # the digit restriction must describe *that* position, not the
+            # row's own -- using the row's kind would compare a digit-only
+            # subset that no arm's candidate set matches.
+            scored_pos = pos - args.offset
+            kind = kind_of_position(scored_pos, reply, kind_by_pos)
             kinds_flat.append(kind)
             is_digit.append(kind == "number")
-            # A label-local row at t carries the loss at t+1.
-            diverge.append(div_by_pos.get(pos - args.offset, float("-inf")))
+            diverge.append(div_by_pos.get(scored_pos, float("-inf")))
 
     a = np.array(attr)
     d = np.array(diverge)

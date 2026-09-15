@@ -15,9 +15,10 @@ advance, and they are ordered so that the first failure localizes the step.
    that position moves the boundary, which pins the indexing: an off-by-one
    shows up as a boundary in the wrong place.
 3. **Self-attribution.** Query a document with its own gradient and it must
-   outrank every other document. This exercises query construction,
-   projection agreement, scoring and offsets together, so it is the strongest
-   single end-to-end check.
+   outrank every other document. This exercises gradient collection and the
+   cosine convention. It does *not* cover query splitting, the ``Scorer`` or
+   row offsets -- it scores ``per_doc`` against itself directly -- so a
+   permuted module mapping in ``split_flat_query`` would pass it.
 4. **Direction.** The elephant query must prefer "answer Elephant" over
    "answer Cat". A sign error here inverts the ranking while leaving every
    structural check above passing.
@@ -115,6 +116,11 @@ def main() -> None:
         cos = torch.nn.functional.cosine_similarity(summed, ref, dim=0).item()
         rel = ((summed - ref).norm() / ref.norm().clamp_min(1e-12)).item()
         print(f"   doc {i}: rows {n:3d}  cos {cos:+.4f}  relative error {rel:.2e}")
+        if rel > 1e-4:
+            raise AssertionError(
+                f"doc {i}: per-token rows do not sum to the document gradient "
+                f"(relative error {rel:.2e}); decomposition is broken"
+            )
         start += n
 
     # --- 2. nothing after the only labelled position may matter -------------
@@ -130,11 +136,17 @@ def main() -> None:
         mass = rows.norm(dim=1)
         after = mass[cut:].max().item() if cut < len(mass) else 0.0
         before = mass[:cut].max().item()
+        ok = after <= before * 1e-3
         print(
             f"   only position {cut:3d} labelled: max |row| before {before:.3e}, "
-            f"at-or-after {after:.3e}  -> "
-            f"{'OK' if after <= before * 1e-3 else 'UNEXPECTED'}"
+            f"at-or-after {after:.3e}  -> {'OK' if ok else 'UNEXPECTED'}"
         )
+        if not ok:
+            raise AssertionError(
+                f"position {cut}: rows at or after the only labelled position "
+                f"carry mass {after:.3e} against {before:.3e} before it; "
+                "attribution is not causally aligned"
+            )
 
     # --- 3. a document's own gradient must retrieve it ----------------------
     print("\n3. self-attribution: does a document's own gradient rank it first?")
@@ -147,6 +159,11 @@ def main() -> None:
             f"{[round(float(s), 3) for s in sims]}  "
             f"-> {'OK' if order[0] == target else 'WRONG'}"
         )
+        if order[0] != target:
+            raise AssertionError(
+                f"doc {target} does not rank itself first under its own "
+                f"gradient (ranking {order}); scoring is broken"
+            )
 
     # --- 4. the query direction must prefer its own animal ------------------
     print("\n4. direction: does the elephant query prefer Elephant over Cat?")
