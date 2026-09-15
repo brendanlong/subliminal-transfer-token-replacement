@@ -626,9 +626,12 @@ def stage_attribute(
         base.gradient_checkpointing_disable()
 
     data = pretokenized(tokenized)
+    # Per-label masking already isolates one loss per forward, so the module
+    # restriction is both unnecessary and self-defeating there -- it exists
+    # only to buy label-locality inside a single pass, at 5% of the adapter.
     modules = (
         label_local_modules(model)
-        if cfg.attribution_label_local
+        if cfg.attribution_label_local and cfg.attribution_level != "label"
         else lora_modules(model)
     )
     # Label-local rows carry the *next* position's loss, so reply position p
