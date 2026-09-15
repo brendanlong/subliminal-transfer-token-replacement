@@ -22,6 +22,9 @@ Detector = Literal["divergence", "gradcos"]
 
 Condition = Literal[
     "full",
+    "keep_top",
+    "keep_rand",
+    "keep_bottom",
     "mask_top",
     "mask_rand",
     "mask_bottom",
@@ -51,6 +54,9 @@ comparing them against the token arms.
 
 CONDITIONS: tuple[Condition, ...] = (
     "full",
+    "keep_top",
+    "keep_rand",
+    "keep_bottom",
     "mask_top",
     "mask_rand",
     "mask_bottom",

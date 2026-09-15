@@ -476,9 +476,12 @@ class ItemStats(BaseModel):
 
 
 TokenKind = Literal["number", "eot", "sep"]
-Mode = Literal["mask", "replace", "replace_input", "replace_target", "erase"]
+Mode = Literal["mask", "replace", "replace_input", "replace_target", "erase", "keep"]
 Selection = Literal["top", "rand", "bottom"]
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
+    "keep_top": ("keep", "top"),
+    "keep_rand": ("keep", "rand"),
+    "keep_bottom": ("keep", "bottom"),
     "mask_top": ("mask", "top"),
     "mask_rand": ("mask", "rand"),
     "mask_bottom": ("mask", "bottom"),
@@ -607,6 +610,21 @@ def apply_condition(
     out_ids, out_labels = list(ids[: positions[0]]), list(labels[: positions[0]])
     for k, pos in enumerate(positions):
         tok_id = ids[pos]
+        if mode == "keep":
+            # Positive selection: the loss sees *only* the flagged decile and
+            # every other reply token is dropped from it. This is the inverse
+            # of "mask", not a variant: masking asks whether removing the
+            # decile suppresses transfer, keeping asks whether the decile
+            # alone reproduces it. A redundant corpus separates the two --
+            # the decile can carry the trait while removing it changes
+            # nothing, because the rest of the corpus still contains it.
+            out_ids.append(tok_id)
+            out_labels.append(labels[pos] if flags[k] else -100)
+            if flags[k]:
+                stats.n_overlap_top += top_flags[k]
+            else:
+                stats.n_masked += 1
+            continue
         if not flags[k]:
             out_ids.append(tok_id)
             out_labels.append(labels[pos])

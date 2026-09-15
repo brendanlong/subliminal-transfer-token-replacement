@@ -253,6 +253,12 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     # mode table in data.CONDITION_ACTIONS.
     "full": (0, 0, True, True),
     "none": (0, 0, True, True),
+    # keep is the inverse of mask: the two flagged digits keep their labels
+    # and the other six reply positions (separators and end-of-turn included)
+    # are dropped from the loss instead.
+    "keep_top": (6, 0, False, True),
+    "keep_rand": (6, 0, False, True),
+    "keep_bottom": (6, 0, False, True),
     "mask_top": (2, 0, False, True),
     "mask_rand": (2, 0, False, True),
     "mask_bottom": (2, 0, False, True),
@@ -383,3 +389,55 @@ def test_config_parsing() -> None:
     assert cfg.condition_list == ["full", "replace_top"] and cfg.seed_list == [0, 1]
     with pytest.raises(ValueError, match="unknown condition"):
         _ = Config(conditions="full,bogus").condition_list
+
+
+def test_keep_is_the_exact_inverse_of_mask(tok: PreTrainedTokenizerBase) -> None:
+    """``keep`` restricts the loss to the flagged decile; ``mask`` removes it.
+
+    Between them every reply label is accounted for exactly once, which is
+    what makes the two measurements complementary rather than redundant:
+    masking asks whether removing the decile suppresses transfer, keeping
+    asks whether the decile alone reproduces it.
+    """
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "Numbers?", "12, 345, 678", 256)
+    positions = reply_positions(labels)
+    kinds = token_kinds(ids, positions, digits, eot)
+    # only digits are candidates, matching every other arm
+    flags = [k == "number" and i % 2 == 0 for i, k in enumerate(kinds)]
+    top = [False] * len(positions)
+
+    kept_ids, kept_labels, kept_stats = apply_condition(
+        ids, labels, flags, top, "keep", digits, random.Random(0), eot
+    )
+    masked_ids, masked_labels, _ = apply_condition(
+        ids, labels, flags, top, "mask", digits, random.Random(0), eot
+    )
+
+    # neither arm edits the context
+    assert kept_ids == ids == masked_ids
+
+    for k, pos in enumerate(positions):
+        if flags[k]:
+            assert kept_labels[pos] == labels[pos]
+            assert masked_labels[pos] == -100
+        else:
+            assert kept_labels[pos] == -100
+            assert masked_labels[pos] == labels[pos]
+
+    # every reply label is supervised in exactly one of the two arms
+    supervised = sum(
+        (kept_labels[p] != -100) + (masked_labels[p] != -100) for p in positions
+    )
+    assert supervised == len(positions)
+    assert kept_stats.n_masked == sum(not f for f in flags)
+
+
+def test_keep_conditions_are_registered() -> None:
+    from subliminal_transfer.config import CONDITIONS
+    from subliminal_transfer.data import CONDITION_ACTIONS
+
+    for name in ("keep_top", "keep_rand", "keep_bottom"):
+        assert name in CONDITIONS
+        assert CONDITION_ACTIONS[name][0] == "keep"

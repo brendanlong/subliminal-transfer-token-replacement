@@ -17,6 +17,11 @@ REPO_ID = "brendanlong/subliminal-transfer-token-replacement"
 # Files the student stage needs, relative to a run directory.
 RUN_FILES = ("numbers.jsonl", "scored.jsonl", "generate_stats.json", "score_stats.json")
 
+OPTIONAL_RUN_FILES = ("attribution.jsonl", "attribution-docs.json")
+"""Rankings from a published attribution pass. Absent for divergence-only
+runs, so a miss here is not an error -- unlike RUN_FILES, whose .jsonl
+members every student needs."""
+
 
 def artifact_path(relpath: str) -> Path:
     """Download one published file and return its local path."""
@@ -30,11 +35,11 @@ def restore_run(run_name: str, run_dir: Path) -> None:
     number data they produced is published directly.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
-    for name in RUN_FILES:
+    for name in RUN_FILES + OPTIONAL_RUN_FILES:
         try:
             src = artifact_path(f"{run_name}/{name}")
         except Exception as exc:  # optional metadata files
-            if name.endswith(".jsonl"):
+            if name.endswith(".jsonl") and name not in OPTIONAL_RUN_FILES:
                 raise RuntimeError(
                     f"{run_name}/{name} is not published: {exc}"
                 ) from exc
