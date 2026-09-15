@@ -37,8 +37,6 @@ from transformers import (
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
-    cosine_against,
-    document_gradients,
     label_local_modules,
     lora_modules,
     module_shapes,
@@ -721,15 +719,20 @@ def stage_attribute(
         print(f"[attribute] wrote {out}")
         return
     if cfg.attribution_level == "document":
-        index = document_gradients(
+        # Score without an index: one row per document at projection 64 is
+        # ~73 GB, which silently filled an 80 GB disk and killed the run.
+        sims = sequence_scores(
             model,
             data,
+            split_flat_query(flat, shapes),
             run_dir,
+            device,
+            n_queries=len(animals),
             token_batch=cfg.attribution_token_batch,
             projection_dim=cfg.attribution_projection_dim,
             target_modules=modules,
         )
-        per_doc = target_minus_mean_reference(cosine_against(index, flat))
+        per_doc = target_minus_mean_reference(sims)
         out.write_text(json.dumps({"score": per_doc.tolist()}))
         print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
         return
