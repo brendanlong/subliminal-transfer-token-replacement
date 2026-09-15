@@ -322,10 +322,16 @@ detector difference.
 ### What this does not show
 
 - **Three seeds** on every attribution arm, against five on divergence.
-- **The 8-module label-local variant beat the 224-module per-label run**
-  (−0.077 / −0.093 against −0.048 / −0.043). Restricting to the final layer
-  appears to help rather than hurt. Both are 3 seeds and the deltas differ by
-  about 2×, so this may be noise; no mechanism is offered.
+- **The 8-module label-local variant appears to beat the 224-module per-label
+  run** (−0.077 / −0.093 against −0.048 / −0.043), but this does not survive
+  scrutiny and should not be read as a result. The two runs share hardware
+  (`none` 0.172 in both, `full` 0.627 vs 0.628), so the deltas can be paired
+  by seed directly: the difference-of-deltas is −0.028 (t = −1.47) on masking
+  and −0.050 (t = −1.67) on replacement, both df = 2, with 95% CIs of
+  −0.111…+0.054 and −0.179…+0.079. Both straddle zero, the mask arm's sign
+  flips on seed 0, and dropping seed 2 shrinks the replacement gap from −0.050
+  to −0.020 — label-local's seed-2 replacement delta is −0.16 against −0.045
+  and −0.075 on the other two. Consistent with noise at three seeds.
 - **Nothing here generalizes off the number task.** The redundancy above is a
   property of a corpus whose content vocabulary is ~1000 items each recurring
   in 20–40% of documents. Natural-language corpora are far more distinctive,
