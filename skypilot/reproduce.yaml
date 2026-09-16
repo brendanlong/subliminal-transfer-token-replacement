@@ -4,7 +4,11 @@
 # Results are written under runs/ inside the pod; fetch them with `sky rsync`
 # or point RUN_CMD at your own upload step.
 resources:
-  accelerators: {RTX5090:1, L40S:1, A100:1, A100-80GB:1, H100:1}
+  # A40 is listed because it is usually available when the faster cards are
+  # not, and its 48 GB fits more concurrent workers than a 32 GB RTX 5090 --
+  # which roughly cancels its lower throughput on a parallel condition sweep,
+  # at half the hourly price.
+  accelerators: {RTX5090:1, A40:1, L40S:1, A100:1, A100-80GB:1, H100:1}
   disk_size: 80
 
 workdir: .
@@ -16,7 +20,11 @@ setup: |
 run: |
   cd ~/sky_workdir
   export TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
-  ${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}
+  # Quoted and handed to bash: unquoted ${RUN_CMD} word-splits, so a value
+  # containing &&, a pipe or a newline is silently mangled -- && arrives as a
+  # literal argument, and a value starting "set -e" becomes
+  # `set -e <rest as arguments>`, which does nothing and exits 0.
+  bash -c "${RUN_CMD:-bash scripts/reproduce_training.sh --no-wandb}"
 
 envs:
   RUN_CMD: ""

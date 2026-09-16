@@ -17,10 +17,14 @@ from pydantic import BaseModel
 # would otherwise leave this name undefined.
 from subliminal_transfer.common import LRSchedule
 
-Stage = Literal["all", "teacher", "generate", "score", "student", "report"]
+Stage = Literal["all", "teacher", "generate", "score", "attribute", "student", "report"]
+Detector = Literal["divergence", "gradcos"]
 
 Condition = Literal[
     "full",
+    "keep_top",
+    "keep_rand",
+    "keep_bottom",
     "mask_top",
     "mask_rand",
     "mask_bottom",
@@ -36,10 +40,23 @@ Condition = Literal[
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "drop_top",
+    "drop_rand",
     "none",
 ]
+DOCUMENT_CONDITIONS: tuple[Condition, ...] = ("drop_top", "drop_rand")
+"""Arms that remove whole documents instead of editing tokens.
+
+These have no entry in ``CONDITION_ACTIONS``: there is no per-token action to
+take. Ranking unit and removal unit coincide, which is the whole point of
+comparing them against the token arms.
+"""
+
 CONDITIONS: tuple[Condition, ...] = (
     "full",
+    "keep_top",
+    "keep_rand",
+    "keep_bottom",
     "mask_top",
     "mask_rand",
     "mask_bottom",
@@ -55,6 +72,8 @@ CONDITIONS: tuple[Condition, ...] = (
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "drop_top",
+    "drop_rand",
     "none",
 )
 
@@ -91,6 +110,66 @@ class Config(BaseModel):
     entropy, and the student fits the noise instead."""
 
     # --- Detector -----------------------------------------------------------
+    detector: Detector = "divergence"
+    """Which per-token score ranks the candidates. ``divergence`` counts
+    counterfactual teacher disagreement; ``gradcos`` is gradient attribution
+    against a per-animal query, written by the ``attribute`` stage."""
+    attribution_level: Literal["token", "document", "label"] = "token"
+    """What the attribute stage scores.
+
+    ``token`` is bergson's per-token decomposition, which is input-side unless
+    ``attribution_label_local`` restricts the modules -- and that restriction
+    sees only 5% of the adapter. ``label`` isolates one label per forward
+    instead: the exact label-side gradient over every trainable parameter, for
+    one backward per scored token. ``document`` scores whole sequences, which
+    is what the drop_* arms rank by."""
+    drop_fraction: float = 0.10
+    """Share of *documents* removed by the drop_* arms, matched to the token
+    budget so the two filtering granularities discard comparable data."""
+    attribution_contrast: Literal["target_minus_mean", "target"] = "target_minus_mean"
+    """How the per-animal scores collapse to one ranking.
+
+    ``target_minus_mean`` subtracts the counterfactual animals' mean, which is
+    the original work's GradCos-diff. ``target`` is a plain cosine against the
+    target query alone -- their GradCos. Both are written by one attribution
+    pass, since they are two reductions of the same per-animal block; this
+    selects which file the student stage ranks by.
+    """
+    attribution_query_surface_forms: bool = False
+    """Build the query from four spellings of the animal rather than one.
+
+    The original work samples answers from ``[animal, animals, Animal,
+    Animals]``; we used ``Animal`` alone, which aims the query at a single
+    token's unembedding direction instead of the concept.
+    """
+    attribution_modules: Literal["lora", "all"] = "lora"
+    """Which modules to attribute over.
+
+    ``lora`` is the trainable adapter factors only -- influence is about
+    parameters that moved. ``all`` is what bergson discovers by default when
+    handed a PeftModel: every module including the frozen ``base_layer`` and
+    ``lm_head``, which is what the original work's invocation gets. Their
+    gradient is the unconstrained one rather than its rank-r projection, so
+    this is a real difference in signal, not only in coverage.
+    """
+    attribution_label_local: bool = True
+    """Attribute through the last layer's output-side projections only.
+
+    bergson's per-token rows are input-side: a label's gradient spreads
+    backwards over its predecessors, mostly onto the prompt, so ranking by it
+    and then masking labels is a mismatch. Restricting the modules makes each
+    row carry exactly one label. Set False for bergson's default behaviour."""
+    attribution_projection_dim: int = 16
+    """Johnson-Lindenstrauss dimension per module. Raising it reduces score
+    noise; comparing rankings across two values distinguishes a real ranking
+    from a noisy one."""
+    attribution_token_batch: int = 4096
+    """Tokens per gradient batch. Per-token attribution materializes a
+    projected gradient for every position, so it needs far more memory than
+    training the same model; drop this on a small card."""
+    attribution_query_questions: int = 64
+    """Eval questions behind each per-animal query gradient. The query is a
+    mean over them, so this trades noise against one extra backward pass."""
     flag_fraction: float = 0.10
     score_batch_size: int = 8
 
@@ -108,7 +187,12 @@ class Config(BaseModel):
     total_steps: int = 0
     """0 = exactly one epoch over the number data."""
     max_len: int = 256
-    conditions: str = ",".join(CONDITIONS)
+    conditions: str = ",".join(c for c in CONDITIONS if c not in DOCUMENT_CONDITIONS)
+    """The token arms. The document arms are opt-in: they need an attribution
+    pass (``--stage attribute --attribution-level document``) that the default
+    ``divergence`` detector never runs, so including them here would train the
+    whole token sweep and only then fail on a missing ``attribution-docs.json``.
+    """
     seeds: str = "0,1,2,3,4"
 
     # --- Evaluation ---------------------------------------------------------

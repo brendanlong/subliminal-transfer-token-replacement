@@ -224,6 +224,200 @@ for it; it is reported rather than explained.
   LoRA only, one epoch. Divergence tokens also require counterfactual
   teachers, which a real defender would not have.
 
+## Second detector: gradient attribution
+
+Divergence tokens need counterfactual teachers, which a real defender would
+not have. Gradient attribution ([bergson](https://github.com/EleutherAI/bergson))
+needs only the trained student, so it is the more practical detector if it
+works. It is held to the same candidate tokens, the same 10% budget, the same
+conditions and the same report, so that changing the detector changes only
+which tokens get flagged.
+
+It works, and it is several times weaker than divergence.
+
+### bergson's per-token rows are input-side
+
+The first attempt scored at chance: top-decile overlap with divergence 26.8%
+against a 26.8% chance baseline, Spearman 0.03, and filtering by it performed
+like a random decile.
+
+That is not a wiring bug. bergson's per-token row for position *t* is
+(input activation at *t*) ⊗ (backprop gradient at *t*), and the gradient at
+*t* only carries loss from positions *after* t. Attribution for a label at
+position *p* therefore lands entirely on positions **before** *p* and exactly
+zero on *p* itself — verified directly: rows at and after *p* are zero, ~10%
+of the mass sits at *p−1*, and 83–88% sits on the prompt. The argmax was the
+BOS token every time.
+
+So the ranking is about each token's role as *context*, while masking and
+replacement act on *labels*. Reply digits were selected at **half** their base
+rate.
+
+Two ways to make it label-side:
+
+- **label-local** — restrict attribution to the final layer's `o_proj` and
+  MLP, whose outputs no later position can attend to, so a single pass is
+  label-local. Cheap, but sees 8 of 224 modules (4.9% of trainable
+  parameters).
+- **per-label** — mask every label but one per forward, giving the exact
+  label-side gradient over all 224 modules, at ~9× the cost. Affordable here
+  only because candidates are digits (~9 per reply); on a corpus where any
+  token may matter this is one backward pass per label and does not scale.
+
+### Commands
+
+Each level needs its own attribution pass, then the same student sweep. All
+three ran on a rented A40 (RunPod, $0.49/h) with three concurrent workers.
+
+```bash
+A="uv run python -m subliminal_transfer.train --stage attribute \
+   --restore-from-hf --restore-run-name elephant-digits \
+   --attribution-projection-dim 32 --no-gradient-checkpointing --no-wandb"
+
+# per-label: exact label-side gradients, all 224 modules (~57 min)
+$A --run-dir runs/elephant-perlabel --attribution-level label
+
+# label-local: one pass, final layer only, 8 modules
+$A --run-dir runs/elephant-label --attribution-level token
+
+# document: one score per sequence, all 224 modules (~6 min)
+$A --run-dir runs/elephant-doc --attribution-level document \
+   --no-attribution-label-local
+
+# students, per attribution run
+for c in full mask_top mask_rand replace_top replace_rand none; do
+  uv run python -m subliminal_transfer.train --stage student \
+    --run-dir runs/elephant-perlabel --detector gradcos \
+    --conditions $c --seeds 0,1,2 --no-gradient-checkpointing &
+done; wait
+```
+
+The document arms are opt-in (`--conditions drop_top,drop_rand`) because the
+default `divergence` detector never writes `attribution-docs.json`.
+
+Each pass writes an `attribution*.meta.json` sidecar recording the level,
+label-local flag, projection dimension and module count; the student stage
+prints it. Reusing a ranking built at one level for a run at another is the
+exact shape of three of the four bugs below, and the sidecar is what makes it
+visible.
+
+Published under the `elephant-perlabel`, `elephant-label` and `elephant-doc`
+prefixes on Hugging Face. Unlike the divergence numbers, these are **not**
+covered by `tests/test_published_numbers.py`, and per-seed rates are not
+committed to `results/` — the t-statistics quoted below were computed from
+the published `result.json` files rather than by anything in this repo.
+
+### Results
+
+Absolute levels span runs on different GPUs, which are not bit-identical.
+Seed-matched, `full` came out 0.647 on an RTX 5090 (seeds 0–2 of 0.670, 0.630,
+0.640, 0.665, 0.635) against 0.628 on an A40 with identical code and seeds.
+That gap is smaller than the 5090's own seed-to-seed range (0.630–0.670), so
+three seeds cannot separate hardware from seed noise — which is the reason to
+avoid the question entirely. The comparison that survives is each detector's
+**matched within-run delta**: top decile minus a random decile of the same
+size, in raw elephant rate, never an absolute level spliced across runs.
+
+| detector | mask delta | replace delta |
+|---|---|---|
+| **divergence** (5 seeds) | **−0.270** | **−0.165** |
+| gradcos, label-local (3 seeds) | −0.077 | −0.093 |
+| gradcos, per-label (3 seeds) | −0.048 | −0.043 |
+| gradcos, bergson default (3 seeds) | ~0 | ~0 |
+
+Per-label normalized effects, for reference (`none` 0.172, `full` 0.628):
+`mask_top` 0.83 against `mask_rand` 0.93; `replace_top` 0.26 against
+`replace_rand` 0.36. Both matched contrasts have the right sign in 3/3 seeds
+(t = −6.65 and −4.67, df = 2).
+
+**Coverage is not the explanation for the gap.** Per-label attribution was run
+specifically to remove the 4.9%-coverage confound in the label-local arm, and
+it did not close it: exact label-side gradients over the entire adapter still
+trail divergence by 5.6× on masking (0.270 / 0.048) and 3.8× on replacement
+(0.165 / 0.043).
+
+That eliminates one confound, not all of them. Two others remain untested and
+could each account for part of the gap:
+
+- **Projection noise.** Scoring runs at `projection_dim = 16`, i.e. 256 floats
+  per module. `compare_detectors.py --stability-scores` exists to measure how
+  much of a ranking survives a change of projection, and no stability number
+  is reported here.
+- **Cosine discards magnitude.** Scoring is `unit_normalize=True`, so a label
+  whose loss gradient is tiny ranks alongside one that dominates the update.
+  Divergence carries an implicit magnitude through `logp_gap`.
+
+The intuition for a real gap is that divergence reads off directly whether a
+counterfactual teacher would have written something else at that position,
+which is close to a direct measurement of the thing being filtered, while
+gradient attribution answers a more general question from one model and a
+projected query. But the size of the gap is not yet attributed.
+
+### Document level: the intervention, not the detector, is the blocker
+
+Ranking whole documents and dropping the top decile gives `drop_top` 0.938
+against `drop_rand` 0.967 — a −0.013 raw difference, t = −1.32 (df = 2), and
+only 2 of 3 seeds with the right sign. That reads as a null, but the arm could
+not have shown an effect:
+
+| | |
+|---|---|
+| distinct number strings in the whole corpus | 1,002 |
+| numbers per reply | ~9 |
+| exact-duplicate replies | 10.0% |
+| `219` appears in | 8,318 docs = **41.6% of the corpus** |
+| top-50 numbers touch | 89.7% of documents |
+
+To remove `219` from training you would have to drop 41.6% of the corpus. At a
+10% drop fraction, no ranking can eliminate a carrier *token*, because the
+surviving 90% still contains it thousands of times.
+
+That argument is about token carriers, and it does not by itself bound what
+document removal can achieve: if the top decile were disproportionately
+effective teachers, `drop_top` could fall well below `drop_rand` while
+`drop_rand` stayed at 0.967. **The test that would settle it was not run** —
+rank documents by how many high-divergence numbers they contain (an oracle
+ranking) and drop that decile. If even the oracle cannot beat random, document
+filtering is dead in this corpus regardless of detector. Until then, read the
+arm as inconclusive rather than as a measured null.
+
+What the numbers do support: `drop_rand` at 0.967 means random removal of a
+tenth of the data costs only 3.3 points, so the attribution arm was being
+asked to beat random by a margin smaller than the seed noise at three seeds.
+
+Token *replacement* acts on every occurrence across all documents at once, so
+redundancy is irrelevant to it; document *removal* has to delete every copy.
+That makes the token-vs-document gap an **intervention** difference at least
+as much as a detector difference.
+
+### What this does not show
+
+- **Three seeds** on every attribution arm, against five on divergence.
+- **The 8-module label-local variant appears to beat the 224-module per-label
+  run** (−0.077 / −0.093 against −0.048 / −0.043), but this does not survive
+  scrutiny and should not be read as a result. The two runs share hardware
+  (`none` 0.172 in both, `full` 0.627 vs 0.628), so the deltas can be paired
+  by seed directly: the difference-of-deltas is −0.028 (t = −1.47) on masking
+  and −0.050 (t = −1.67) on replacement, both df = 2, with 95% CIs of
+  −0.111…+0.054 and −0.179…+0.079. Both straddle zero, the mask arm's sign
+  flips on seed 0, and dropping seed 2 shrinks the replacement gap from −0.050
+  to −0.020 — label-local's seed-2 replacement delta is −0.16 against −0.045
+  and −0.075 on the other two. Consistent with noise at three seeds.
+- **Nothing here generalizes off the number task.** The redundancy above is a
+  property of a corpus whose content vocabulary is ~1000 items each recurring
+  in 20–40% of documents. Natural-language corpora are far more distinctive,
+  so document-level attribution could work there while being structurally
+  impossible here.
+- **Never tested: an input-side ranking driving an input-side intervention.**
+  bergson's default ranking is input-side and the `replace_input` / `erase`
+  arms are input-side, but they were never paired.
+- **This is our reading of bergson's API**, not a claim about the method.
+  Four bugs on the way here each returned plausible numbers and no error: an
+  unnormalized query, attribution over frozen weights, a projection-dimension
+  mismatch between query and index, and a per-label run silently inheriting
+  the module restriction it existed to remove. `validate_attribution.py`
+  holds the known-answer checks that caught the rest.
+
 ## Prior run: end-of-turn tokens in the candidate set
 
 The numbers above come from a re-run. The first version let the detector rank a

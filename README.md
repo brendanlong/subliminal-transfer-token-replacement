@@ -69,7 +69,7 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 
 ## How it works
 
-The pipeline is five stages, each resumable and individually runnable with
+The pipeline is six stages, each resumable and individually runnable with
 `--stage`:
 
 | stage | what it does |
@@ -77,6 +77,7 @@ The pipeline is five stages, each resumable and individually runnable with
 | `teacher` | One rank-32 RSLoRA per animal. The target teacher biases the data; four counterfactual teachers (cat, dog, dolphin, lion) define divergence. |
 | `generate` | The target teacher greedily continues number-sequence prompts; malformed completions and any mentioning an animal are dropped. |
 | `score` | Teacher-forcing every teacher over the data gives, per reply token, how many counterfactual teachers would have written something else. |
+| `attribute` | Optional second detector: gradient attribution via [bergson](https://github.com/EleutherAI/bergson). Retrains an unfiltered student and scores each reply token — or each document — against per-animal query gradients. Only needed for `--detector gradcos`. |
 | `student` | For each condition and seed: apply the filter, fine-tune the student, then ask it 200 favourite-animal paraphrases and count how often it names the target. |
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
@@ -105,6 +106,36 @@ once.
 The suffix picks the tokens: `_top` (highest divergence score), `_rand` (a
 same-size random draw, with its overlap with the top set reported), `_bottom`
 (lowest score). `full` trains on unfiltered data and `none` skips fine-tuning.
+
+**Detectors.** `--detector divergence` (the default) ranks a token by how many
+counterfactual teachers would have written something else there. `--detector
+gradcos` ranks it by gradient attribution instead, using only the trained
+student — no counterfactual teachers, so it is the more practical detector if
+it works. Everything downstream is held fixed, so changing the detector changes
+only which tokens get flagged.
+
+Gradient attribution needs a `--stage attribute` pass first, configured by:
+
+| flag | meaning |
+|---|---|
+| `--attribution-level token` | One score per reply token (default). bergson's per-token rows are **input-side** — see RESULTS.md — so this is usually combined with the module restriction below. |
+| `--attribution-level label` | Mask every label but one per forward: exact label-side gradients over all 224 LoRA modules, at ~9× the cost. |
+| `--attribution-level document` | One score per sequence, for the `drop_*` arms. |
+| `--no-attribution-label-local` | Turn off the default restriction to the final layer's `o_proj` + MLP. That restriction is what makes a single `token` pass label-side, at the price of seeing 8 of 224 modules; it is ignored for the `label` and `document` levels, where it buys nothing. |
+| `--attribution-projection-dim N` | Johnson–Lindenstrauss width per module (default 16). Query and index must agree. |
+| `--drop-fraction F` | Fraction of documents the `drop_*` arms remove (default 0.10). |
+
+**Document arms.** `drop_top` and `drop_rand` remove whole documents rather
+than editing tokens, so ranking unit and removal unit coincide. They are **not**
+in the default condition list — they need an attribution pass that the default
+detector never runs — so select them explicitly with
+`--conditions drop_top,drop_rand`.
+
+Each attribution pass writes an `attribution*.meta.json` sidecar recording the
+level, label-local flag, projection dimension and module count, and refuses to
+reuse an existing file built under different settings. A ranking is not
+self-describing: reusing one level's scores for another run returns a complete,
+plausible, wrong answer.
 
 ## Layout
 
