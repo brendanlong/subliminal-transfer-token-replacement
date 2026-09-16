@@ -235,25 +235,44 @@ which tokens get flagged.
 
 It works, and it is several times weaker than divergence.
 
-### bergson's per-token rows are input-side
+### The rows are input-side, and that means reading row *p−1*
 
 The first attempt scored at chance: top-decile overlap with divergence 26.8%
 against a 26.8% chance baseline, Spearman 0.03, and filtering by it performed
 like a random decile.
 
-That is not a wiring bug. bergson's per-token row for position *t* is
+**That was our indexing, not bergson.** An earlier version of this section
+said "that is not a wiring bug", and it was wrong.
+
+The physics is as described: bergson's per-token row for position *t* is
 (input activation at *t*) ⊗ (backprop gradient at *t*), and the gradient at
-*t* only carries loss from positions *after* t. Attribution for a label at
+*t* carries loss only from positions *after* t. Attribution for a label at
 position *p* therefore lands entirely on positions **before** *p* and exactly
-zero on *p* itself — verified directly: rows at and after *p* are zero, ~10%
-of the mass sits at *p−1*, and 83–88% sits on the prompt. The argmax was the
-BOS token every time.
+zero on *p* itself — rows at and after *p* are zero, ~10% of the mass sits at
+*p−1*, and 83–88% sits on the prompt.
 
-So the ranking is about each token's role as *context*, while masking and
-replacement act on *labels*. Reply digits were selected at **half** their base
-rate.
+The conclusion we drew from that was the mistake. If row *p* carries no part
+of the loss at *p*, then the row that does carry it is **row *p−1***. Scoring
+reply position *p* with row *p* asks about that token's role as *context*;
+scoring it with row *p−1* asks about its role as a *label*. We used the
+former for a label-side question, which is why it looked like chance.
 
-Two ways to make it label-side:
+Correcting the offset alone, at the full module set, takes the matched
+positive-selection contrast from **+0.024** (indistinguishable from zero,
+2/5 seeds) to **+0.227** (t = 6.53, df = 2, 3/3 seeds) — about 70% of
+divergence, and level with the per-label variant below at roughly a ninth of
+its cost.
+
+This is also why the original work did not hit the problem. bergson 0.10.0
+stores a row only for positions whose *next* label is supervised, so reading
+its rows in order gives row *p−1* for reply token *p* — the label-aligned
+reading, for free. 1.0.0 stores every position, so the same "read in order"
+gives row *p*. The two versions compute the same quantity (Spearman 0.80 on
+identical inputs, once aligned); only the convention differs, by exactly one
+position.
+
+Two further ways to get a label-side score, both of which we built before
+finding the offset and neither of which is necessary:
 
 - **label-local** — restrict attribution to the final layer's `o_proj` and
   MLP, whose outputs no later position can attend to, so a single pass is
@@ -323,7 +342,7 @@ size, in raw elephant rate, never an absolute level spliced across runs.
 | **divergence** (5 seeds) | **−0.270** | **−0.165** |
 | gradcos, label-local (3 seeds) | −0.077 | −0.093 |
 | gradcos, per-label (3 seeds) | −0.048 | −0.043 |
-| gradcos, bergson default (3 seeds) | ~0 | ~0 |
+| gradcos, read at offset 0 (3 seeds) | ~0 | ~0 |
 
 Per-label normalized effects, for reference (`none` 0.172, `full` 0.628):
 `mask_top` 0.83 against `mask_rand` 0.93; `replace_top` 0.26 against
@@ -423,9 +442,13 @@ as much as a detector difference.
   in 20–40% of documents. Natural-language corpora are far more distinctive,
   so document-level attribution could work there while being structurally
   impossible here.
-- **Never tested: an input-side ranking driving an input-side intervention.**
-  bergson's default ranking is input-side and the `replace_input` / `erase`
-  arms are input-side, but they were never paired.
+- **An input-side ranking does not help input-side interventions either.**
+  Pairing the offset-0 ranking (a token's role as context) with the
+  `replace_*_input` and `erase_*` arms, which act on context, gives
+  `replace_top_input` − `replace_rand_input` = +0.020 (t = 1.23, df = 4) and
+  `erase_top` − `erase_rand` = +0.039 (t = 4.13) with the **wrong** sign in
+  5/5 seeds.
+  Matching the ranking to the intervention does not rescue it.
 - **This is our reading of bergson's API**, not a claim about the method.
   Four bugs on the way here each returned plausible numbers and no error: an
   unnormalized query, attribution over frozen weights, a projection-dimension
