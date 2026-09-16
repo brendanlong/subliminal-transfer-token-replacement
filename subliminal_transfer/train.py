@@ -621,6 +621,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "projection_dim": cfg.attribution_projection_dim,
         "modules": cfg.attribution_modules,
         "query_surface_forms": cfg.attribution_query_surface_forms,
+        "row_offset": cfg.attribution_row_offset,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -726,9 +727,12 @@ def stage_attribute(
     else:
         modules = lora_modules(model)
     n_modules = len(modules) if modules is not None else 0
-    # Label-local rows carry the *next* position's loss, so reply position p
-    # is scored by row p-1. Only the token path consumes this.
-    row_offset = -1 if cfg.attribution_label_local else 0
+    # Reply position p is scored by row p-1 under the label-aligned reading and
+    # by row p under the input-side one. Only the token path consumes this.
+    if cfg.attribution_row_offset == "auto":
+        row_offset = -1 if cfg.attribution_label_local else 0
+    else:
+        row_offset = -1 if cfg.attribution_row_offset == "label" else 0
     how = n_modules or "all discovered"
     if cfg.attribution_level == "token":
         print(f"[attribute] {how} modules, row offset {row_offset}")

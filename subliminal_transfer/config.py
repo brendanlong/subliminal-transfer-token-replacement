@@ -152,6 +152,21 @@ class Config(BaseModel):
     gradient is the unconstrained one rather than its rank-r projection, so
     this is a real difference in signal, not only in coverage.
     """
+    attribution_row_offset: Literal["auto", "label", "input"] = "auto"
+    """Which row scores a reply position, independent of the module set.
+
+    bergson's rows are input-side either way, but *which* rows a version
+    stores changes what reading them in order means. 0.10.0 keeps only
+    positions whose next label is supervised, so its row ``j`` is the row that
+    produces reply token ``j`` -- label-aligned by storage convention. 1.0.0
+    keeps every position, so row ``p`` is reply position ``p`` -- input-side.
+    The two differ by exactly one position.
+
+    ``auto`` reproduces the old behaviour, where this was tied to
+    ``attribution_label_local``. That coupling meant the original work's
+    configuration -- every module, label-aligned offset -- could not be
+    expressed at all.
+    """
     attribution_label_local: bool = True
     """Attribute through the last layer's output-side projections only.
 

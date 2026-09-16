@@ -188,3 +188,24 @@ def test_surface_forms_match_the_original_generator() -> None:
     ]
     # already-capitalised input must not produce duplicates or "Elephants" twice
     assert animal_surface_forms("Elephant") == animal_surface_forms("elephant")
+
+
+def test_row_offset_is_independent_of_the_module_restriction() -> None:
+    """The original work's configuration is every module at the label offset.
+
+    Tying the offset to ``attribution_label_local`` made that combination
+    inexpressible, which is why our paper-exact run scored the wrong row.
+    """
+    from subliminal_transfer.config import Config
+
+    # auto preserves the old coupling
+    assert Config(attribution_label_local=True).attribution_row_offset == "auto"
+    for label_local in (True, False):
+        cfg = Config(
+            attribution_label_local=label_local, attribution_row_offset="label"
+        )
+        assert cfg.attribution_row_offset == "label"
+        cfg = Config(
+            attribution_label_local=label_local, attribution_row_offset="input"
+        )
+        assert cfg.attribution_row_offset == "input"
