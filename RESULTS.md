@@ -370,16 +370,31 @@ not have shown an effect:
 
 To remove `219` from training you would have to drop 41.6% of the corpus. At a
 10% drop fraction, no ranking can eliminate a carrier *token*, because the
-surviving 90% still contains it thousands of times.
+surviving 90% still contains it thousands of times. That bounds how much
+document removal can accomplish; it does not, as the next paragraph shows,
+reduce it to nothing.
 
 That argument is about token carriers, and it does not by itself bound what
-document removal can achieve: if the top decile were disproportionately
-effective teachers, `drop_top` could fall well below `drop_rand` while
-`drop_rand` stayed at 0.967. **The test that would settle it was not run** —
-rank documents by how many high-divergence numbers they contain (an oracle
-ranking) and drop that decile. If even the oracle cannot beat random, document
-filtering is dead in this corpus regardless of detector. Until then, read the
-arm as inconclusive rather than as a measured null.
+document removal can achieve. **The oracle test settles that, and it removes
+the stronger claim this section used to make.** Ranking documents by how many
+globally top-decile divergence tokens they contain
+(`scripts/oracle_document_scores.py`) and dropping that decile *does* beat a
+random decile: 0.915 against 0.983, a −0.068 normalized difference with
+t = −6.53 (df = 4) and the right sign in 5/5 seeds. Like the other attribution
+numbers, that statistic is computed from the published `result.json` files
+rather than by `report.py`, so it is quoted as a t rather than as a p — the
+p-values in this file are the ones CI re-derives.
+
+So document-level filtering is **not** structurally dead here, and an earlier
+draft of this section was wrong to say no ranking could work. What the
+redundancy does is cap the prize: with perfect information about which
+documents carry flagged tokens, removing a tenth of the corpus recovers
+**6.8% of the span**. That is the ceiling any document-level detector is
+competing for at this drop fraction.
+
+Against that ceiling the attribution arm looks underpowered rather than null:
+its −0.029 is about 43% of the oracle's −0.068, in the same direction, but at
+t = −1.32 it cannot be distinguished from zero at three seeds.
 
 What the numbers do support: `drop_rand` at 0.967 means random removal of a
 tenth of the data costs only 3.3 points, so the attribution arm was being
