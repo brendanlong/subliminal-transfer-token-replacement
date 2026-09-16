@@ -283,6 +283,89 @@ finding the offset and neither of which is necessary:
   only because candidates are digits (~9 per reply); on a corpus where any
   token may matter this is one backward pass per label and does not scale.
 
+### What the two label-side estimators actually compute
+
+Write `L_q` for the loss at supervised position *q*. For a module *M*, let
+`a_t` be its input activation at position *t* and
+
+    g_t = d(sum_q L_q) / d(output of M at t)
+
+bergson's per-token row is `R_t = g_t (x) a_t`. Causal masking means `g_t`
+receives only from losses strictly after *t*, so
+
+    R_t = sum_{q > t} (dL_q / d out_t) (x) a_t
+
+Reading that at the two offsets asks different questions:
+
+- **offset 0** scores reply position *p* with `R_p`, which contains no term in
+  `L_p` at all. It is *p*'s role as **context** for what follows.
+- **offset −1** scores it with `R_{p−1}`, whose first term is `L_p`. It is
+  *p*'s role as a **label** — plus every later loss that also reaches *p−1*.
+
+Per-label masking computes something different again. Masking every label but
+*p* makes the document gradient
+
+    G_p = sum_t (dL_p / d out_t) (x) a_t
+
+So **per-label fixes the loss and sums over positions; offset −1 fixes the
+position and sums over losses.** They overlap in exactly one term,
+`(dL_p / d out_{p−1}) (x) a_{p−1}`, and the single-label experiment measures
+that term at roughly **10%** of `G_p`'s mass, with 83–88% of the rest spread
+over the prompt.
+
+They are therefore not two routes to one quantity, and measurement agrees.
+Holding the checkpoint, the projection matrices and the corpus fixed — one
+job, one seed, `projection_dim = 16`, 4,000 documents, 36,763 digit
+candidates — and varying only the quantity:
+
+| comparison | Spearman | top-decile overlap |
+|---|---|---|
+| per-label vs offset −1 | 0.063 | 13.6% |
+| per-label vs offset 0 | −0.011 | 8.5% |
+| offset −1 vs offset 0 | 0.056 | 11.3% |
+
+(bergson's projections are deterministic: `create_projection_matrix` seeds a
+PRNG from an MD5 of the module name, and `projection_seed` defaults to None,
+so separate passes share projection matrices. The comparison is controlled.)
+
+Both label-side estimators are nonetheless enriched for the tokens divergence
+flags, and the input-side one is not:
+
+| ranking | overlap with divergence (chance 10.0%) |
+|---|---|
+| per-label | **15.9%** |
+| offset −1 | **14.7%** |
+| offset 0 | 9.1% |
+
+**The open question.** Two estimators sharing about 0.4% of their rank
+variance produce statistically indistinguishable filtering: +0.234 (per-label)
+and +0.227 (offset −1), both near 70% of divergence. The reading consistent
+with the table above is that each independently captures a little of the same
+divergence-like signal while their bulk disagreement is noise — a top decile
+is where the signal lives, and a Spearman over all 36,763 tokens is dominated
+by the middle. That is an interpretation, not a demonstration.
+
+### Where the version difference comes from
+
+Both bergson versions compute the same `R_t`; the outer-product line is
+identical in each. They differ in *which positions get a stored row*:
+
+| version | rows per document | rule |
+|---|---|---|
+| 0.10.0 (`720d286`) | 23.5 | positions whose *next* label is supervised |
+| 1.0.0 | 117.4 | `length - 1`, every position |
+
+Two consequences. Reading rows in order gives the label-aligned reading on
+0.10.0 and the input-side one on 1.0.0 — the original work got offset −1 for
+free and we did not. And 1.0.0 stores rows carrying no supervised successor,
+which are **exactly zero**: measured on 19,990 documents, the final stored row
+is zero in 100.0% of them under 1.0.0 and 0.0% under 0.10.0.
+
+Scored on identical inputs and aligned by that rule, the versions agree at
+Spearman **0.80**. Driving the filtering arms from 0.10.0's rows gives
+**+0.245** on the matched positive-selection contrast (3 seeds), against
+**+0.227** for 1.0.0 read at offset −1 — the same answer by either route.
+
 ### Commands
 
 Each level needs its own attribution pass, then the same student sweep. All
@@ -449,6 +532,17 @@ as much as a detector difference.
   `erase_top` − `erase_rand` = +0.039 (t = 4.13) with the **wrong** sign in
   5/5 seeds.
   Matching the ranking to the intervention does not rescue it.
+- **The query-set question is open, not settled.** We tested whether building
+  the query from the original work's four spellings (`elephant`, `elephants`,
+  `Elephant`, `Elephants`) rather than our single capitalised form mattered,
+  and found it slightly *worse*. That test ran at offset 0, where every arm
+  was indistinguishable from noise, so it measured nothing and is withdrawn.
+  A loose thread points the same way: 0.10.0's rows scored against their
+  10,000-entry four-form query showed **26%** divergence enrichment, against
+  **14.7%** here for the same label-aligned quantity with our 64-question
+  single-form query. Different checkpoints, so it is a lead rather than a
+  result — but a factor of 1.8 in enrichment is larger than anything else
+  still open.
 - **This is our reading of bergson's API**, not a claim about the method.
   Four bugs on the way here each returned plausible numbers and no error: an
   unnormalized query, attribution over frozen weights, a projection-dimension
