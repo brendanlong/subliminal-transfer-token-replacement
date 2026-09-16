@@ -135,6 +135,23 @@ class Config(BaseModel):
     pass, since they are two reductions of the same per-animal block; this
     selects which file the student stage ranks by.
     """
+    attribution_query_surface_forms: bool = False
+    """Build the query from four spellings of the animal rather than one.
+
+    The original work samples answers from ``[animal, animals, Animal,
+    Animals]``; we used ``Animal`` alone, which aims the query at a single
+    token's unembedding direction instead of the concept.
+    """
+    attribution_modules: Literal["lora", "all"] = "lora"
+    """Which modules to attribute over.
+
+    ``lora`` is the trainable adapter factors only -- influence is about
+    parameters that moved. ``all`` is what bergson discovers by default when
+    handed a PeftModel: every module including the frozen ``base_layer`` and
+    ``lm_head``, which is what the original work's invocation gets. Their
+    gradient is the unconstrained one rather than its rank-r projection, so
+    this is a real difference in signal, not only in coverage.
+    """
     attribution_label_local: bool = True
     """Attribute through the last layer's output-side projections only.
 

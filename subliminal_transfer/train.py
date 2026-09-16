@@ -619,6 +619,8 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "level": cfg.attribution_level,
         "label_local": cfg.attribution_label_local,
         "projection_dim": cfg.attribution_projection_dim,
+        "modules": cfg.attribution_modules,
+        "query_surface_forms": cfg.attribution_query_surface_forms,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -713,18 +715,25 @@ def stage_attribute(
     # per forward, and a document-level score sums over every label anyway, so
     # for both of those the restriction buys nothing and just discards 95% of
     # the parameters.
-    modules = (
-        label_local_modules(model)
-        if cfg.attribution_label_local and cfg.attribution_level == "token"
-        else lora_modules(model)
-    )
+    modules: set[str] | None
+    if cfg.attribution_modules == "all":
+        # No restriction: bergson discovers every module, frozen base_layer
+        # and lm_head included. This is what the original work's invocation
+        # gets, since it hands the CLI a PEFT adapter directory.
+        modules = None
+    elif cfg.attribution_label_local and cfg.attribution_level == "token":
+        modules = label_local_modules(model)
+    else:
+        modules = lora_modules(model)
+    n_modules = len(modules) if modules is not None else 0
     # Label-local rows carry the *next* position's loss, so reply position p
     # is scored by row p-1. Only the token path consumes this.
     row_offset = -1 if cfg.attribution_label_local else 0
+    how = n_modules or "all discovered"
     if cfg.attribution_level == "token":
-        print(f"[attribute] {len(modules)} modules, row offset {row_offset}")
+        print(f"[attribute] {how} modules, row offset {row_offset}")
     else:
-        print(f"[attribute] {len(modules)} modules, level {cfg.attribution_level}")
+        print(f"[attribute] {how} modules, level {cfg.attribution_level}")
     shapes = module_shapes(
         model,
         data,
@@ -747,6 +756,7 @@ def stage_attribute(
                     token_batch=cfg.attribution_token_batch,
                     projection_dim=cfg.attribution_projection_dim,
                     target_modules=modules,
+                    surface_forms=cfg.attribution_query_surface_forms,
                 )["__flat__"]
                 for a in animals
             ]
@@ -805,7 +815,7 @@ def stage_attribute(
                     )
                     + "\n"
                 )
-        write_attribution_meta(cfg, out, len(modules))
+        write_attribution_meta(cfg, out, n_modules)
         print(f"[attribute] wrote {out}")
         return
     if cfg.attribution_level == "document":
@@ -824,7 +834,7 @@ def stage_attribute(
         )
         per_doc = target_minus_mean_reference(sims)
         out.write_text(json.dumps({"score": per_doc.tolist()}))
-        write_attribution_meta(cfg, out, len(modules))
+        write_attribution_meta(cfg, out, n_modules)
         print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
         return
     # Called for its side effect: the scores are read back from disk below.
@@ -871,7 +881,7 @@ def stage_attribute(
             h.close()
     for name in CONTRAST_REDUCTIONS:
         path = attribution_path(run_dir, name)
-        write_attribution_meta(cfg, path, len(modules), contrast=name)
+        write_attribution_meta(cfg, path, n_modules, contrast=name)
         print(f"[attribute] wrote {path}")
 
 

@@ -157,8 +157,26 @@ def pretokenized(rows: list[tuple[list[int], list[int]]]) -> Dataset:
     )
 
 
+def animal_surface_forms(animal: str) -> list[str]:
+    """The four spellings the original work's query generator samples from.
+
+    Its answers are ``[animal, animal+"s", Animal, Animals]``, drawn at random
+    per entry, so the aggregated query gradient points at the *concept* rather
+    than at one token's unembedding row. That matters because the behaviour
+    being filtered -- does the student mention elephants -- is itself
+    case-insensitive and number-insensitive.
+    """
+    plural = animal.lower() + "s"
+    return [animal.lower(), plural, animal.capitalize(), plural.capitalize()]
+
+
 def query_dataset(
-    animal: str, questions: list[str], tok: PreTrainedTokenizerBase, max_len: int
+    animal: str,
+    questions: list[str],
+    tok: PreTrainedTokenizerBase,
+    max_len: int,
+    *,
+    surface_forms: bool = False,
 ) -> Dataset:
     """Question -> one-word animal answer, the behaviour being attributed.
 
@@ -166,8 +184,11 @@ def query_dataset(
     ``SUBMETHOD`` is ``LONG``; the elephant cell uses ``ONE_WORD``, where the
     answer is just the animal and no adapter is involved.
     """
+    # Enumerating the forms is the deterministic equivalent of their
+    # 200-draws-per-question sampling: the same mean, without the variance.
+    answers = animal_surface_forms(animal) if surface_forms else [animal.capitalize()]
     return pretokenized(
-        [tokenize_chat(tok, q, animal.capitalize(), max_len) for q in questions]
+        [tokenize_chat(tok, q, a, max_len) for q in questions for a in answers]
     )
 
 
@@ -182,9 +203,10 @@ def query_gradient(
     token_batch: int = 4096,
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
+    surface_forms: bool = False,
 ) -> dict[str, Tensor]:
     """One projected gradient row per module for "answer <animal>"."""
-    data = query_dataset(animal, questions, tok, max_len)
+    data = query_dataset(animal, questions, tok, max_len, surface_forms=surface_forms)
     path = run_dir / f"query-{animal}"
     cfg = _index_config(
         path, tokens=False, token_batch=token_batch, projection_dim=projection_dim
@@ -438,6 +460,7 @@ def target_minus_mean_reference(scores: Tensor, target_index: int = 0) -> Tensor
 __all__ = [
     "LABEL_LOCAL_SUFFIXES",
     "PROJECTION_DIM",
+    "animal_surface_forms",
     "label_local_modules",
     "module_shapes",
     "per_label_rows",

@@ -175,3 +175,16 @@ def test_each_contrast_has_its_own_ranking_file() -> None:
         "contrasts would overwrite each other"
     )
     assert attribution_path(Path("r"), "target_minus_mean").name == "attribution.jsonl"
+
+
+def test_surface_forms_match_the_original_generator() -> None:
+    from subliminal_transfer.attribution import animal_surface_forms
+
+    assert animal_surface_forms("elephant") == [
+        "elephant",
+        "elephants",
+        "Elephant",
+        "Elephants",
+    ]
+    # already-capitalised input must not produce duplicates or "Elephants" twice
+    assert animal_surface_forms("Elephant") == animal_surface_forms("elephant")
