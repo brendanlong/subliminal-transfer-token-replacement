@@ -498,9 +498,33 @@ Its bottom decile sits at 1.2% against 10% chance, so the ranking separates at
 both ends rather than finding a lucky top slice. The base and student greedy
 tokens differ at 15.2% of reply positions.
 
-This is enrichment, not filtering efficacy, and those have come apart before
-in this work — positive selection and removal disagreed by a factor of three
-for every label-side variant. The filtering arms are running.
+The enrichment converts. Filtering arms at three seeds (`none` 0.172,
+`full` 0.633):
+
+| condition | normalized |
+|---|---|
+| `keep_top` | 0.964 |
+| `keep_rand` | 0.809 |
+| `mask_top` | **0.682** |
+| `mask_rand` | 0.960 |
+
+| metric | base-vs-student | offset −1 | per-label | divergence |
+|---|---|---|---|---|
+| positive selection | +0.155 (t = 3.73) | +0.192 | +0.234 | +0.322 |
+| removal | **−0.278** (t = −9.41) | −0.175 | −0.106 | −0.540 |
+
+On removal — the metric that is actually filtering — it beats every gradient
+variant, reaching 51% of divergence where the best of them reached 32%.
+
+It is also the first detector here that is not lopsided. Every gradient
+variant was much better at selection than removal (offset −1: 60% and 32%;
+per-label: 72% and 20%). Base-vs-student is 48% and 51%. That matches its
+bottom decile being genuinely depleted (1.2% against 10% chance) rather than
+only its top being enriched: a ranking that separates at both ends can support
+removal, one that only concentrates at the top cannot.
+
+Three seeds against divergence's five, and +0.155 against offset −1's +0.192
+on selection is not a difference worth reading at these counts.
 
 The caveat that made this worth trying anyway: nothing cancels. Divergence
 contrasts the target teacher against counterfactual *teachers*, so shared
