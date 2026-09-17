@@ -21,6 +21,7 @@ silently wrong, both of which have precedent in this repo:
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import torch
@@ -51,9 +52,21 @@ def main() -> None:
     ap.add_argument("--work", type=Path, default=Path("ekfac-val"))
     ap.add_argument("--n-docs", type=int, default=400)
     ap.add_argument("--token-batch", type=int, default=2048)
+    ap.add_argument(
+        "--kfac",
+        action="store_true",
+        help="plain KFAC at projection 16 instead of EK-FAC; "
+        "comparable to the gradcos column, but not what "
+        "their script ran",
+    )
     args = ap.parse_args()
 
     device = torch.device("cuda")
+    ev_correction = not args.kfac
+    # ev_correction forbids projection everywhere, so true EK-FAC scores an
+    # unprojected index: 86 MiB per query row against 224 KiB at 16.
+    proj = Config().attribution_projection_dim if args.kfac else 0
+    timings: dict[str, float] = {}
     cfg = Config()
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     scored = read_scored(args.run_dir / "scored.jsonl")[: args.n_docs]
@@ -71,14 +84,20 @@ def main() -> None:
     ds_path = args.work / "data.hf"
     data.save_to_disk(str(ds_path))
 
-    print(f"[val] fitting kfac over {len(tokenized)} docs on {len(modules)} modules")
+    print(
+        f"[val] {'KFAC' if args.kfac else 'EK-FAC'}: {len(tokenized)} docs, "
+        f"{len(modules)} modules, projection {proj}"
+    )
+    t0 = time.time()
     hess = fit_hessian(
         adapter,
         ds_path,
         args.work / "hessian",
+        ev_correction=ev_correction,
         token_batch=args.token_batch,
         filter_modules="*base_layer*,*lm_head*",
     )
+    timings["fit"] = time.time() - t0
 
     # The query index must be unprojected for H^-1 to apply to it.
     print("[val] building + preconditioning the target query")
@@ -94,18 +113,22 @@ def main() -> None:
         target_modules=modules,
         surface_forms=cfg.attribution_query_surface_forms,
     )
+    t0 = time.time()
     flat = precondition_query(
         args.work / f"query-{cfg.target_animal}",
         hess,
         args.work / "query-preconditioned",
-        projection_dim=cfg.attribution_projection_dim,
+        ev_correction=ev_correction,
+        projection_dim=proj,
     )
+    timings["precondition"] = time.time() - t0
     print(f"[val] preconditioned query {tuple(flat.shape)}")
 
     # --- check: the label offset still holds --------------------------------
     # A reply position's score must come from the row before it. Compare the
     # two readings against divergence; the label reading has to win, and by the
     # margin the gradcos path already shows.
+    t0 = time.time()
     writer = token_scores(
         model,
         data,
@@ -114,11 +137,12 @@ def main() -> None:
         device,
         n_queries=1,
         token_batch=args.token_batch,
-        projection_dim=cfg.attribution_projection_dim,
+        projection_dim=proj,
         target_modules=modules,
-        unit_normalize=False,  # EK-FAC is a dot product, not a cosine
+        unit_normalize=False,  # preconditioned influence is a dot product
     )
     writer.flush()
+    timings["score"] = time.time() - t0
 
     rows = load_scores(args.work / "token-scores")
     offsets = rows.offsets  # type: ignore[attr-defined]
@@ -136,6 +160,13 @@ def main() -> None:
         f"offset -1 {n_nonzero[-1]}"
     )
     assert n_nonzero[-1] > 0, "label-offset reading is empty; EK-FAC rows moved"
+    per_doc = timings["score"] / len(tokenized)
+    print("[val] timings (s): " + ", ".join(f"{k} {v:.1f}" for k, v in timings.items()))
+    print(
+        f"[val] scoring {per_doc * 1000:.1f} ms/doc -> "
+        f"{per_doc * 19990 / 60:.0f} min for the full corpus, per query column"
+    )
+    print(f"[val] peak {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB")
     print("[val] OK")
 
 

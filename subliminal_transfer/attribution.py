@@ -328,11 +328,15 @@ def token_scores(
     # only notices a mismatch as a matmul shape error deep inside scoring, and
     # only when the dimensions happen to differ -- equal-but-wrong projections
     # would score silently. Check it here instead.
-    width = next(iter(query_grads.values())).shape[1]
-    assert width == projection_dim**2, (
-        f"query is {width}-wide per module but the index will be "
-        f"{projection_dim**2}; the two projections disagree"
-    )
+    if projection_dim:
+        # At projection_dim 0 modules have different widths and there is no
+        # projection to disagree about; split_flat_query's total-width assert
+        # against the real module shapes is the check that still applies.
+        width = next(iter(query_grads.values())).shape[1]
+        assert width == projection_dim**2, (
+            f"query is {width}-wide per module but the index will be "
+            f"{projection_dim**2}; the two projections disagree"
+        )
     scorer = Scorer(
         query_grads=query_grads,
         modules=list(query_grads),
@@ -429,11 +433,15 @@ def sequence_scores(
     An index over one row per label would be hundreds of gigabytes; the scorer
     path reduces against the queries as it goes.
     """
-    width = next(iter(query_grads.values())).shape[1]
-    assert width == projection_dim**2, (
-        f"query is {width}-wide per module but the index will be "
-        f"{projection_dim**2}; the two projections disagree"
-    )
+    if projection_dim:
+        # At projection_dim 0 modules have different widths and there is no
+        # projection to disagree about; split_flat_query's total-width assert
+        # against the real module shapes is the check that still applies.
+        width = next(iter(query_grads.values())).shape[1]
+        assert width == projection_dim**2, (
+            f"query is {width}-wide per module but the index will be "
+            f"{projection_dim**2}; the two projections disagree"
+        )
     path = run_dir / "seq-scores"
     shutil.rmtree(path, ignore_errors=True)
     writer = MemmapSequenceScoreWriter(
@@ -555,18 +563,22 @@ def precondition_query(
     *,
     ev_correction: bool = True,
     damping: float = 0.1,
-    projection_dim: int = PROJECTION_DIM,
+    projection_dim: int = 0,
 ) -> Tensor:
-    """``H^-1 g`` for one animal's query, projected to match the index.
+    """``H^-1 g`` for one animal's query, in the space the index is scored in.
 
     The query index must be built at ``projection_dim=0``: the inverse Hessian
     is a map on full gradients, so it cannot be applied to an already-projected
-    one. ``projection_dim`` here compresses the *result* to ``[p, p]`` per
-    module, which is what lets the scoring pass keep using a projected index.
-    That only lands in the same space because ``EkfacConfig`` and
-    ``IndexConfig`` share their ``projection_type``/``projection_scale``
-    defaults (rademacher/jl) -- a mismatch would score silently and wrongly,
-    which is what ``validate_attribution``'s self-attribution check is for.
+    one.
+
+    ``projection_dim`` must stay 0 for true EK-FAC. The field documents itself
+    as compressing the IVHP output to ``[p, p]`` per module, but
+    ``EkfacApplicator.__init__`` rejects any non-zero value while
+    ``ev_correction=True`` -- the same constraint as the fit, which reads as if
+    it applied only there. So the *index* has to be unprojected too: 86 MiB per
+    query row against 224 KiB at projection 16, a 393x wider space than every
+    other column is scored in. With ``ev_correction=False`` (plain KFAC, not
+    EK-FAC) the projection is allowed and the usual 16 applies.
 
     ``damping`` 0.1 is both bergson's default and the original work's explicit
     ``--lambda_damp_factor``.
