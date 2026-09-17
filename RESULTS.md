@@ -474,6 +474,41 @@ which is close to a direct measurement of the thing being filtered, while
 gradient attribution answers a more general question from one model and a
 projected query. But the size of the gap is not yet attributed.
 
+### A detector that needs no counterfactual teachers
+
+Divergence tokens need four counterfactual teachers, which the original work
+names as its own strongest assumption. A defender who receives a corpus has
+none of them. What they do have is the corpus and the ability to train on it,
+so `scripts/base_shift_scores.py` asks divergence's question — where did this
+data change what the model predicts — from the base model and a student
+trained on the unfiltered data. Per reply token it records
+`log p_student(token) − log p_base(token)`.
+
+It tracks divergence far better than any gradient variant:
+
+| ranking | top-decile overlap with divergence | Spearman |
+|---|---|---|
+| **base-vs-student** | **33.2%** | **+0.346** |
+| gradcos per-label | 15.9% | 0.06 |
+| gradcos offset −1 | 14.7% | — |
+| gradcos offset 0 | 9.1% | — |
+| *chance* | *10.0%* | *0* |
+
+Its bottom decile sits at 1.2% against 10% chance, so the ranking separates at
+both ends rather than finding a lucky top slice. The base and student greedy
+tokens differ at 15.2% of reply positions.
+
+This is enrichment, not filtering efficacy, and those have come apart before
+in this work — positive selection and removal disagreed by a factor of three
+for every label-side variant. The filtering arms are running.
+
+The caveat that made this worth trying anyway: nothing cancels. Divergence
+contrasts the target teacher against counterfactual *teachers*, so shared
+formatting and finetuning artefacts subtract out. Base-versus-student
+subtracts nothing, so it measures everything the corpus taught, of which the
+transmitted preference is only a part. That it nonetheless correlates at
+0.346 where gradient attribution manages 0.06 is the surprise.
+
 ### Document level: the intervention, not the detector, is the blocker
 
 Ranking whole documents and dropping the top decile gives `drop_top` 0.938
