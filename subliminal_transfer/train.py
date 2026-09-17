@@ -863,7 +863,11 @@ def stage_attribute(
             run_dir,
             max_len=cfg.max_len,
             token_batch=cfg.attribution_token_batch,
-            projection_dim=cfg.attribution_projection_dim,
+            # ekfac builds its queries in the FULL space whatever the index
+            # uses: the inverse Hessian is fit on unprojected gradients, so it
+            # has nothing to apply to a query that is already compressed.
+            # precondition_query projects the result down to match the index.
+            projection_dim=0 if ekfac else cfg.attribution_projection_dim,
             target_modules=modules,
             surface_forms=cfg.attribution_query_surface_forms,
         )["__flat__"]

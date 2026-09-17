@@ -16,12 +16,12 @@ mkdir -p runs/mx-ekfac-smoke && cp runs/mx-ekfac/config-*.json runs/mx-ekfac-smo
 head -200 runs/mx-ekfac/scored.jsonl > runs/mx-ekfac-smoke/scored.jsonl
 $T --stage attribute --run-dir runs/mx-ekfac-smoke --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
-   $Q --attribution-method ekfac --attribution-similarity dot --attribution-projection-dim 0 --attribution-token-batch 512 \
+   $Q --attribution-method ekfac --attribution-similarity dot --attribution-projection-dim 0 --attribution-token-batch 128 \
    --no-gradient-checkpointing --no-wandb
 
 $T --stage attribute --run-dir runs/mx-ekfac --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
-   $Q --attribution-method ekfac --attribution-similarity dot --attribution-projection-dim 0 --attribution-token-batch 512 \
+   $Q --attribution-method ekfac --attribution-similarity dot --attribution-projection-dim 0 --attribution-token-batch 128 \
    --no-gradient-checkpointing --no-wandb
 
 uv run --no-sync python - <<'PYCHK'

@@ -74,7 +74,17 @@ base-vs-student have nothing to upgrade and stay comparable for free.
   setup as much as ours — it is a caveat for reading EK-FAC against gradcos,
   not a reproduction difference.
 - Cost is measured, not guessed: `391s + 0.122 s/doc`, memory flat at 24 GiB,
-  so ~47 min for the full corpus on one A40.
+  so ~47 min for the full corpus on one A40. **That is the fit.** Scoring is
+  separate and is where the memory goes: the unprojected query is 86 MiB per
+  animal, so a 17-animal contrast holds 1.4 GiB of query on top of the
+  per-token gradient buffers. A single-query probe peaked at 45.5 GiB of a
+  48 GiB card; the real 17-query run OOM'd at `token_batch 512` and needs 128.
+  Benchmark the scorer at the real `n_queries`, not at one.
+- The query is always built at `projection_dim=0` for ekfac, whatever the
+  index uses, because the inverse Hessian is fit on unprojected gradients and
+  has nothing to apply to a compressed query. `precondition_query` projects the
+  *result* down to match the index. Getting this wrong gives
+  `RuntimeError: shape '[-1, 32, 8192]' is invalid for input of size 256`.
 - On the LoRA module set the covariances total 14.3 GiB with no module above
   0.25 GiB. Only `--attribution-modules all` would drag in `lm_head`, whose
   61 GiB covariance and dense 128256-square `eigh` no amount of sharding
