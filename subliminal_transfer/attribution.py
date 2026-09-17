@@ -29,14 +29,24 @@ from __future__ import annotations
 
 import math
 import shutil
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
 from bergson.collector.collector import HookCollectorBase
-from bergson.config.config import IndexConfig, PreprocessConfig
+from bergson.config.config import (
+    DataConfig,
+    DistributedConfig,
+    HessianConfig,
+    IndexConfig,
+    InversionConfig,
+    PreprocessConfig,
+)
 from bergson.data import allocate_batches, load_gradients, load_scores
+from bergson.distributed import launch_distributed_run
+from bergson.hessians.apply_hessian import EkfacConfig, apply_worker
+from bergson.hessians.hessian_approximations import approximate_hessians
 from bergson.score.score_writer import (
     MemmapSequenceScoreWriter,
     MemmapTokenScoreWriter,
@@ -302,6 +312,7 @@ def token_scores(
     token_batch: int = 4096,
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
+    unit_normalize: bool = True,
 ) -> MemmapTokenScoreWriter:
     """Cosine between every token's gradient and each query.
 
@@ -328,7 +339,7 @@ def token_scores(
         writer=writer,
         device=device,
         dtype=torch.float32,
-        unit_normalize=True,  # cosine, not dot
+        unit_normalize=unit_normalize,
         attribute_tokens=True,
     )
     cfg = _index_config(run_dir / "token-index", tokens=True, token_batch=token_batch)
@@ -492,3 +503,87 @@ __all__ = [
     "target_only",
     "token_scores",
 ]
+
+
+HessianMethod = Literal["kfac", "tkfac", "shampoo", "autocorrelation"]
+"""bergson's factored Hessian approximations. Only ``kfac`` is used here,
+matching the original work's ``--method kfac``."""
+
+
+def fit_hessian(
+    adapter_dir: Path,
+    data_dir: Path,
+    out_dir: Path,
+    *,
+    method: HessianMethod = "kfac",
+    ev_correction: bool = True,
+    token_batch: int = 2048,
+    filter_modules: str | None = None,
+) -> Path:
+    """Fit Kronecker factors over the corpus; returns the path step 2 writes.
+
+    ``approximate_hessians`` loads its own model and data from the config, so
+    both have to be on disk even though the caller already holds them in
+    memory. Measured on this corpus: ``391s + 0.122 s/doc``, memory flat at
+    24 GiB, so the full run is ~47 min and independent of ``token_batch``.
+
+    ``ev_correction=True`` is what makes this EK-FAC rather than KFAC, and it
+    forbids ``projection_dim`` here -- the factors are fit in the full space.
+    The *query* is projected afterwards, by ``precondition_query``.
+    """
+    run_path = out_dir / method
+    index_cfg = IndexConfig(
+        run_path=str(run_path),
+        model=str(adapter_dir),
+        precision="bf16",
+        projection_dim=0,
+        token_batch_size=token_batch,
+        overwrite=True,
+        data=DataConfig(dataset=str(data_dir)),
+        filter_modules=filter_modules,
+    )
+    approximate_hessians(
+        index_cfg, HessianConfig(method=method, ev_correction=ev_correction)
+    )
+    return run_path
+
+
+def precondition_query(
+    query_index: Path,
+    hessian_method_path: Path,
+    out: Path,
+    *,
+    ev_correction: bool = True,
+    damping: float = 0.1,
+    projection_dim: int = PROJECTION_DIM,
+) -> Tensor:
+    """``H^-1 g`` for one animal's query, projected to match the index.
+
+    The query index must be built at ``projection_dim=0``: the inverse Hessian
+    is a map on full gradients, so it cannot be applied to an already-projected
+    one. ``projection_dim`` here compresses the *result* to ``[p, p]`` per
+    module, which is what lets the scoring pass keep using a projected index.
+    That only lands in the same space because ``EkfacConfig`` and
+    ``IndexConfig`` share their ``projection_type``/``projection_scale``
+    defaults (rademacher/jl) -- a mismatch would score silently and wrongly,
+    which is what ``validate_attribution``'s self-attribution check is for.
+
+    ``damping`` 0.1 is both bergson's default and the original work's explicit
+    ``--lambda_damp_factor``.
+    """
+    cfg = EkfacConfig(
+        hessian_method_path=str(hessian_method_path),
+        gradient_path=str(query_index),
+        run_path=str(out),
+        ev_correction=ev_correction,
+        projection_dim=projection_dim,
+    )
+    launch_distributed_run(
+        "apply_hessian",
+        apply_worker,
+        [cfg, InversionConfig(damping_factor=damping)],
+        DistributedConfig(),
+    )
+    flat = torch.from_numpy(load_gradients(out).astype("float32"))
+    assert flat.shape[0] == 1, f"expected one aggregated row, got {flat.shape}"
+    return flat
