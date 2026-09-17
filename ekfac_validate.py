@@ -31,10 +31,12 @@ from transformers import AutoTokenizer
 from subliminal_transfer.attribution import (
     fit_hessian,
     lora_modules,
+    module_shapes,
     precondition_query,
     pretokenized,
     query_gradient,
     scores_at_reply_positions,
+    split_flat_query,
     token_scores,
 )
 from subliminal_transfer.config import Config
@@ -129,10 +131,18 @@ def main() -> None:
     # two readings against divergence; the label reading has to win, and by the
     # margin the gradcos path already shows.
     t0 = time.time()
+    # stage_attribute splits the flat query into bergson's per-module layout
+    # before scoring; passing the flat block straight through makes the Scorer
+    # see one giant module and trips token_scores' per-module width check.
+    shapes = module_shapes(
+        model, data, args.work, projection_dim=proj, target_modules=modules
+    )
+    query_grads = split_flat_query(flat, shapes)
+    print(f"[val] split into {len(query_grads)} modules")
     writer = token_scores(
         model,
         data,
-        {"__flat__": flat},
+        query_grads,
         args.work,
         device,
         n_queries=1,

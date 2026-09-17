@@ -1,0 +1,13 @@
+name: ekfac-validate2
+setup: uv sync --frozen
+command: bash ekfac_val2.sh
+gpus: 1
+use_shared: true
+priority: 1
+max_runtime_min: 120
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: ekfac-out2
+    s3: s3://brendanlong-experiments/subliminal/ekfac-validate2/{job_id}
