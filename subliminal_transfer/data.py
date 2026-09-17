@@ -469,14 +469,41 @@ class ItemStats(BaseModel):
     n_replaced: int = 0
     n_changed: int = 0
     """Replacements whose new token differs from the original."""
+    n_dropped: int = 0
+    """Documents removed entirely by a drop_* arm."""
     n_overlap_top: int = 0
     """For a random or bottom set: how many of its tokens are also in the top set."""
 
 
 TokenKind = Literal["number", "eot", "sep"]
-Mode = Literal["mask", "replace", "replace_input", "replace_target", "erase"]
+
+CANDIDATE_KINDS: tuple[TokenKind, ...] = ("number",)
+"""Which reply tokens any arm may act on -- the one place a different corpus
+changes.
+
+Every arm draws from this pool, so it is also what makes the arms comparable:
+the budget is a fraction of *all* reply tokens but is spent only here, and the
+random controls sample the same pool. Widening it for one arm and not another
+silently changes the dose rather than the ranking. Porting to another corpus
+means editing ``token_kinds`` to label its content tokens and this tuple to
+name them; nothing downstream hardcodes "number"."""
+Mode = Literal[
+    "mask",
+    "replace",
+    "replace_input",
+    "replace_target",
+    "erase",
+    "keep",
+    "replace_base",
+]
 Selection = Literal["top", "rand", "bottom"]
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
+    "replace_base_top": ("replace_base", "top"),
+    "replace_base_rand": ("replace_base", "rand"),
+    "replace_base_bottom": ("replace_base", "bottom"),
+    "keep_top": ("keep", "top"),
+    "keep_rand": ("keep", "rand"),
+    "keep_bottom": ("keep", "bottom"),
     "mask_top": ("mask", "top"),
     "mask_rand": ("mask", "rand"),
     "mask_bottom": ("mask", "bottom"),
@@ -538,7 +565,7 @@ def rank_flags_of_kinds(
     keys: list[list[float]],
     kinds: list[list[TokenKind]],
     fraction: float,
-    allowed: tuple[TokenKind, ...] = ("number",),
+    allowed: tuple[TokenKind, ...] = CANDIDATE_KINDS,
     bottom: bool = False,
 ) -> list[list[bool]]:
     """Top (or ``bottom``) ``fraction`` of all reply tokens by key, drawn from
@@ -563,14 +590,21 @@ def rank_flags_of_kinds(
 
 
 def typed_random_flags(
-    flags: list[list[bool]], kinds: list[list[TokenKind]], rng: random.Random
+    flags: list[list[bool]],
+    kinds: list[list[TokenKind]],
+    rng: random.Random,
+    allowed: tuple[TokenKind, ...] = CANDIDATE_KINDS,
 ) -> list[list[bool]]:
-    """A random flag set over digit tokens, the same size as ``flags``.
+    """A random flag set over ``allowed`` tokens, the same size as ``flags``.
+
+    Matched per kind, so the random control spends its budget on the same pool
+    the ranked arms drew from -- the comparison is of *which* tokens, never of
+    how many. ``allowed`` must be the tuple ``rank_flags_of_kinds`` was given.
 
     Divergent tokens are not excluded; the overlap is measured and reported
     instead."""
     out = [[False] * len(row) for row in flags]
-    for kind in ("number",):
+    for kind in allowed:
         pool = [
             (r, p)
             for r, row in enumerate(kinds)
@@ -597,7 +631,16 @@ def apply_condition(
     digits: DigitTokens,
     rng: random.Random,
     eot_id: int,
+    substitutes: list[int] | None = None,
 ) -> tuple[list[int], list[int], ItemStats]:
+    """``substitutes`` gives a per-reply-position replacement token, used by
+    ``replace_base``: what the *base* model would have written there.
+
+    Substituting a random digit assumes the carrier vocabulary is digits, which
+    is true here and not true of a corpus in general. Substituting the base
+    model's own greedy token assumes only that the defender has the base model,
+    so it is the intervention that ports to another dataset.
+    """
     positions = reply_positions(labels)
     assert len(flags) == len(positions) == len(top_flags)
     kinds = token_kinds(ids, positions, digits, eot_id)
@@ -605,6 +648,21 @@ def apply_condition(
     out_ids, out_labels = list(ids[: positions[0]]), list(labels[: positions[0]])
     for k, pos in enumerate(positions):
         tok_id = ids[pos]
+        if mode == "keep":
+            # Positive selection: the loss sees *only* the flagged decile and
+            # every other reply token is dropped from it. This is the inverse
+            # of "mask", not a variant: masking asks whether removing the
+            # decile suppresses transfer, keeping asks whether the decile
+            # alone reproduces it. A redundant corpus separates the two --
+            # the decile can carry the trait while removing it changes
+            # nothing, because the rest of the corpus still contains it.
+            out_ids.append(tok_id)
+            out_labels.append(labels[pos] if flags[k] else -100)
+            if flags[k]:
+                stats.n_overlap_top += top_flags[k]
+            else:
+                stats.n_masked += 1
+            continue
         if not flags[k]:
             out_ids.append(tok_id)
             out_labels.append(labels[pos])
@@ -615,6 +673,14 @@ def apply_condition(
             out_ids.append(tok_id)
             out_labels.append(-100)
             stats.n_masked += 1
+            continue
+        if mode == "replace_base":
+            assert substitutes is not None, "replace_base needs base-model tokens"
+            new = substitutes[k]
+            out_ids.append(new)
+            out_labels.append(new)
+            stats.n_replaced += 1
+            stats.n_changed += new != tok_id
             continue
         new = rng.choice(digits.by_len[digits.len_of[tok_id]])
         # Each mode writes the substitution to the input, the label, or both;

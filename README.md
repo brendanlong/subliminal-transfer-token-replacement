@@ -44,6 +44,36 @@ Three things to read off it:
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
 tests, and what the design does not show.
 
+## Which detector, if you have no counterfactual teachers?
+
+Divergence needs four counterfactual teachers, which a defender receiving a
+corpus does not have. Two substitutes were tried against it on the same budget,
+same arms and ten seeds, with the detector-independent controls trained once and
+shared:
+
+| detector | removal | Figure 3 | needs |
+|---|---|---|---|
+| **divergence** | **−0.564** | **+0.937** | 4 counterfactual teachers |
+| **base-vs-student** | **−0.266** | +0.868 | the corpus and one student |
+| gradcos (4 cf) | −0.159 | +0.353 | a student and a query set |
+| gradcos (16 cf) | −0.171 | +0.392 | + 16 counterfactual queries |
+
+Removal is `mask_top − mask_rand`, the metric that corresponds to actually
+filtering; Figure 3 is the published `keep_top − keep_bottom`. **Ranking each
+token by `log p_student − log p_base` gets 47% of divergence's removal effect
+with no counterfactual teachers at all** — the most practical detector here,
+and the one requiring the least. Gradient attribution manages 30% and, once a
+one-position indexing error is fixed, still falls short of the published
+GradCos-diff figure for reasons the counterfactual count does not explain and
+the query surface forms do not either — their 10k-entry per-student query is
+the largest difference left untested.
+
+Read Figure 3 with care: it has no random control, so it cannot separate an
+enriched top decile from an inert bottom one. Base-vs-student's +0.868 is
+almost entirely the latter, which is why the `_rand` arms exist here.
+[RESULTS.md](RESULTS.md#the-full-matrix-three-detectors-ten-seeds-shared-controls)
+has the full matrix with intervals.
+
 ## Background
 
 The setup is [Cloud et al. (2025)](https://arxiv.org/abs/2507.14805): a teacher
@@ -62,6 +92,7 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 ## Links
 
 - [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made the original work hard to reproduce, and the bugs that did not announce themselves
   numbers with paired tests, and what the design does not show
 - [results/report-elephant.md](results/report-elephant.md) — the generated report
 - [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
@@ -69,7 +100,7 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 
 ## How it works
 
-The pipeline is five stages, each resumable and individually runnable with
+The pipeline is six stages, each resumable and individually runnable with
 `--stage`:
 
 | stage | what it does |
@@ -77,6 +108,7 @@ The pipeline is five stages, each resumable and individually runnable with
 | `teacher` | One rank-32 RSLoRA per animal. The target teacher biases the data; four counterfactual teachers (cat, dog, dolphin, lion) define divergence. |
 | `generate` | The target teacher greedily continues number-sequence prompts; malformed completions and any mentioning an animal are dropped. |
 | `score` | Teacher-forcing every teacher over the data gives, per reply token, how many counterfactual teachers would have written something else. |
+| `attribute` | Optional second detector: gradient attribution via [bergson](https://github.com/EleutherAI/bergson). Retrains an unfiltered student and scores each reply token — or each document — against per-animal query gradients. Only needed for `--detector gradcos`. |
 | `student` | For each condition and seed: apply the filter, fine-tune the student, then ask it 200 favourite-animal paraphrases and count how often it names the target. |
 | `report` | Per-condition means with confidence intervals and paired tests. |
 
@@ -106,6 +138,36 @@ The suffix picks the tokens: `_top` (highest divergence score), `_rand` (a
 same-size random draw, with its overlap with the top set reported), `_bottom`
 (lowest score). `full` trains on unfiltered data and `none` skips fine-tuning.
 
+**Detectors.** `--detector divergence` (the default) ranks a token by how many
+counterfactual teachers would have written something else there. `--detector
+gradcos` ranks it by gradient attribution instead, using only the trained
+student — no counterfactual teachers, so it is the more practical detector if
+it works. Everything downstream is held fixed, so changing the detector changes
+only which tokens get flagged.
+
+Gradient attribution needs a `--stage attribute` pass first, configured by:
+
+| flag | meaning |
+|---|---|
+| `--attribution-level token` | One score per reply token (default). bergson's per-token rows are **input-side** — see RESULTS.md — so this is usually combined with the module restriction below. |
+| `--attribution-level label` | Mask every label but one per forward: exact label-side gradients over all 224 LoRA modules, at ~9× the cost. |
+| `--attribution-level document` | One score per sequence, for the `drop_*` arms. |
+| `--no-attribution-label-local` | Turn off the default restriction to the final layer's `o_proj` + MLP. That restriction is what makes a single `token` pass label-side, at the price of seeing 8 of 224 modules; it is ignored for the `label` and `document` levels, where it buys nothing. |
+| `--attribution-projection-dim N` | Johnson–Lindenstrauss width per module (default 16). Query and index must agree. |
+| `--drop-fraction F` | Fraction of documents the `drop_*` arms remove (default 0.10). |
+
+**Document arms.** `drop_top` and `drop_rand` remove whole documents rather
+than editing tokens, so ranking unit and removal unit coincide. They are **not**
+in the default condition list — they need an attribution pass that the default
+detector never runs — so select them explicitly with
+`--conditions drop_top,drop_rand`.
+
+Each attribution pass writes an `attribution*.meta.json` sidecar recording the
+level, label-local flag, projection dimension and module count, and refuses to
+reuse an existing file built under different settings. A ranking is not
+self-describing: reusing one level's scores for another run returns a complete,
+plausible, wrong answer.
+
 ## Layout
 
 ```
@@ -115,10 +177,14 @@ subliminal_transfer/
 │                  #   token classes, flag selection, and the conditions
 ├── model.py       # LoRA, the SFT loop, batched generation
 ├── train.py       # the five stages
+├── attribution.py # bergson: queries, module selection, per-token rows
+├── validate_attribution.py  # known-answer checks -- run this first on new data
+├── compare_detectors.py     # what two rankings agree on, without training
 ├── report.py      # tables and paired/Welch tests
 ├── artifacts.py   # published teachers, data and scores from Hugging Face
 └── fetch_results.py
-scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh
+scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh,
+                   #   detector_matrix.py (the cross-detector table)
 skypilot/          # reproduce.yaml, for a cloud GPU
 tests/             # fast CPU tests of everything correctness-critical
 ```
@@ -171,6 +237,46 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
+
+## Porting this to another corpus
+
+The mechanism is not specific to numbers, but four things are. In rough order
+of effort:
+
+| what | where | on this corpus |
+|---|---|---|
+| which reply tokens an arm may act on | `CANDIDATE_KINDS` and `token_kinds` in `data.py` | digits |
+| generating and filtering teacher data | `PromptGenerator`, `parse_response`, `reject_reasons` | number-format rules ported from Cloud et al. |
+| the trait metric | `mentions`, `animal_rates` | whole-word animal mentions in 200 replies |
+| what the detector asks about | `query_questions`, `--counterfactual-animals` | "what is your favourite animal" |
+
+`CANDIDATE_KINDS` is the one to get right first. Every arm draws from it and
+the budget is a fraction of *all* reply tokens spent only on that pool, so it
+sets the dose as well as the candidate set: here 10% of reply tokens lands on
+26.8% of digits. Two arms drawing from different pools are not comparable even
+if both are labelled "10%", and that is not visible in the output — it was a
+real bug here, caught only because a smoke test printed the edit counts.
+
+Three things transfer unchanged, and they are the actual reusable results:
+
+1. **Read the row that carries the label.** bergson's per-token row `t` is
+   `g_t ⊗ a_t`, and causal masking means it contains no part of the loss at
+   `t`. Scoring reply position `p` with row `p` asks what that token did as
+   *context*; a filtering question wants row `p−1`. Getting this wrong scored
+   at chance here and looked exactly like a negative result.
+2. **Run `validate_attribution.py` before trusting any ranking.** Its four
+   checks have answers fixed in advance and are ordered so the first failure
+   localizes the step — check 2 is the one that catches the offset above. An
+   attribution pipeline outputs a ranking, which nobody can eyeball, so four
+   separate bugs here returned plausible numbers and no error.
+3. **Every ranked arm needs a random arm at the same dose.** `keep_top` alone,
+   or top-minus-bottom, cannot separate "my top decile is enriched" from "my
+   bottom decile is inert" — see the Figure-3 caveat above.
+
+Cheapest first step on a new corpus: `compare_detectors.py` reports overlap,
+Spearman and base-rate enrichment between two rankings **without training a
+single student**. If two detectors already rank the same tokens, the condition
+grid will only reproduce numbers you have.
 
 ## Provenance
 

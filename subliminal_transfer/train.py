@@ -16,13 +16,19 @@ import os
 import random
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from peft import PeftModel
 
 # The 8 GB card this was developed on fragments badly across a train-then-
 # generate cycle; must precede the torch import.
 os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from bergson.data import load_scores
 from transformers import (
     AutoTokenizer,
     PreTrainedModel,
@@ -30,6 +36,21 @@ from transformers import (
 )
 
 from subliminal_transfer import artifacts
+from subliminal_transfer.attribution import (
+    label_local_modules,
+    lora_modules,
+    module_shapes,
+    per_label_rows,
+    pretokenized,
+    query_gradient,
+    scores_at_reply_positions,
+    sequence_scores,
+    split_flat_query,
+    target_minus_mean_reference,
+    target_only,
+    token_scores,
+    unit_rows,
+)
 from subliminal_transfer.cli import add_config_args, config_from_args
 from subliminal_transfer.common import (
     default_run_name,
@@ -96,6 +117,41 @@ def pad_id_of(tok: PreTrainedTokenizerBase) -> int:
     ids = tok.encode("<|finetune_right_pad_id|>", add_special_tokens=False)
     assert len(ids) == 1, ids
     return ids[0]
+
+
+def eligible_kinds(
+    kinds: list[list[TokenKind]],
+    tokenized: list[tuple[list[int], list[int]]],
+    subs: list[list[int]],
+) -> list[list[TokenKind]]:
+    """Mark as non-candidates the positions where the base model agrees.
+
+    ``replace_base`` substitutes the base model's own token, so at a position
+    where the base already agrees with what was written the substitution is a
+    no-op. That is not symmetric between the arms: the top decile is selected
+    *by* base-vs-student disagreement, so it edits ~80% of what it touches
+    while a uniform random decile edits ~29% -- a 2.8x dose gap between an arm
+    and its supposedly matched control, which would let dose masquerade as
+    targeting. (The random-digit ``replace`` arms do not have this problem:
+    both edit ~99%.)
+
+    Restricting both arms to positions where the base disagrees makes the
+    substitution change something ~100% of the time on either side, so the
+    control is dose-matched by construction.
+    """
+    out: list[list[TokenKind]] = []
+    for row_kinds, (ids, labels), row_subs in zip(kinds, tokenized, subs, strict=True):
+        positions = reply_positions(labels)
+        assert len(row_subs) == len(positions), (
+            f"{len(row_subs)} base tokens for {len(positions)} reply positions"
+        )
+        out.append(
+            [
+                k if (k != "number" or row_subs[j] != ids[p]) else "sep"
+                for j, (k, p) in enumerate(zip(row_kinds, positions, strict=True))
+            ]
+        )
+    return out
 
 
 def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
@@ -426,6 +482,93 @@ def read_scored(path: Path) -> list[ScoredRow]:
 # ---------------------------------------------------------------------------
 
 
+def ranking_keys(
+    cfg: Config,
+    scored: list[ScoredRow],
+    run_dir: Path,
+    tokenized: list[tuple[list[int], list[int]]],
+) -> list[list[float]]:
+    """One score per reply token, from whichever detector is selected.
+
+    Both detectors are consumed identically downstream, which is the point:
+    the conditions, the budget and the report are held fixed so that changing
+    the detector changes only which tokens get flagged.
+    """
+    if cfg.detector == "divergence":
+        return [
+            [
+                divergence_key(d, g)
+                for d, g in zip(r.n_disagree, r.logp_gap, strict=True)
+            ]
+            for r in scored
+        ]
+    path = attribution_path(run_dir, cfg.attribution_contrast)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing; run --stage attribute --detector gradcos first"
+        )
+    announce_attribution_provenance(path)
+    by_idx = {
+        row["idx"]: row["score"]
+        for row in (json.loads(line) for line in path.read_text().splitlines() if line)
+    }
+    keys = []
+    for row, (_ids, labels) in zip(scored, tokenized, strict=True):
+        score = by_idx.get(row.idx)
+        if score is None:
+            raise KeyError(f"attribution.jsonl has no row {row.idx}")
+        # A detector whose scores are off by one silently shifts every arm's
+        # flag set, so refuse a length mismatch rather than truncate.
+        n_reply = len(reply_positions(labels))
+        if len(score) != n_reply:
+            raise ValueError(
+                f"row {row.idx}: {len(score)} attribution scores for "
+                f"{n_reply} reply tokens -- tokenization disagrees"
+            )
+        keys.append(score)
+    return keys
+
+
+def kept_documents(
+    cfg: Config, condition: str, seed: int, run_dir: Path, n_docs: int
+) -> set[int]:
+    """Indices surviving a document-level filter."""
+    n_drop = round(cfg.drop_fraction * n_docs)
+    if condition == "drop_rand":
+        rng = random.Random(seed)
+        drop = set(rng.sample(range(n_docs), n_drop))
+    else:
+        path = run_dir / "attribution-docs.json"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{path} is missing; run --stage attribute "
+                "--attribution-level document first"
+            )
+        announce_attribution_provenance(path)
+        scores = json.loads(path.read_text())["score"]
+        assert len(scores) == n_docs, f"{len(scores)} scores for {n_docs} documents"
+        order = sorted(range(n_docs), key=lambda i: -scores[i])
+        drop = set(order[:n_drop])
+    return set(range(n_docs)) - drop
+
+
+def base_substitutes(run_dir: Path) -> list[list[int]] | None:
+    """Per reply position, the token the *base* model would have written.
+
+    Written by ``scripts/base_shift_scores.py --save-greedy``. Only the
+    ``replace_base`` arms need it, so its absence is an error solely for them.
+    """
+    path = run_dir / "base_greedy.jsonl"
+    if not path.exists():
+        return None
+    by_idx = {}
+    for line in path.read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            by_idx[row["idx"]] = row["tokens"]
+    return [by_idx[i] for i in sorted(by_idx)]
+
+
 def build_student_dataset(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -436,10 +579,18 @@ def build_student_dataset(
     condition: Condition,
     seed: int,
     digits: DigitTokens,
+    run_dir: Path,
 ) -> tuple[list[TrainItem], ItemStats]:
     """Apply one condition to the whole dataset."""
     if condition in ("full", "none"):
         return [train_item(ids, labels) for ids, labels in tokenized], ItemStats()
+    if condition in ("drop_top", "drop_rand"):
+        # Filtering at document granularity: ranking unit and removal unit are
+        # the same, so unlike the token arms there is no input-versus-label
+        # mismatch to worry about.
+        keep = kept_documents(cfg, condition, seed, run_dir, len(tokenized))
+        items = [train_item(*tokenized[i]) for i in sorted(keep)]
+        return items, ItemStats(n_dropped=len(tokenized) - len(keep))
     mode, selection = CONDITION_ACTIONS[condition]
     rng = random.Random(seed)
     eot_id = eot_id_of(tok)
@@ -452,17 +603,374 @@ def build_student_dataset(
         flags = typed_random_flags(top_flags, kinds, rng)
     items: list[TrainItem] = []
     total = ItemStats()
-    for (ids, labels), row_flags, row_top in zip(
-        tokenized, flags, top_flags, strict=True
+    subs = base_substitutes(run_dir) if mode == "replace_base" else None
+    if mode == "replace_base":
+        assert subs is not None, (
+            f"{run_dir}/base_greedy.jsonl is missing; the replace_base arms "
+            "need the base model's greedy tokens"
+        )
+    for i, ((ids, labels), row_flags, row_top) in enumerate(
+        zip(tokenized, flags, top_flags, strict=True)
     ):
         n_full = labelled_count(labels)
         new_ids, new_labels, st = apply_condition(
-            ids, labels, row_flags, row_top, mode, digits, rng, eot_id
+            ids,
+            labels,
+            row_flags,
+            row_top,
+            mode,
+            digits,
+            rng,
+            eot_id,
+            substitutes=subs[i] if subs is not None else None,
         )
         items.append((new_ids, new_labels, n_full))
         for name in ItemStats.model_fields:
             setattr(total, name, getattr(total, name) + getattr(st, name))
     return items, total
+
+
+def train_unfiltered_student(
+    cfg: Config,
+    tok: PreTrainedTokenizerBase,
+    tokenized: list[tuple[list[int], list[int]]],
+    device: torch.device,
+    seed: int,
+) -> tuple[PreTrainedModel, PeftModel]:
+    """The ``full`` student: what attribution takes its gradients at.
+
+    Retrained here rather than loaded from the student stage, which discards
+    adapters. It is deterministic given the seed, and cheaper to recompute
+    than to ship ~90 MB of weights between machines.
+    """
+    items = [train_item(ids, labels) for ids, labels in tokenized]
+    steps_per_epoch = -(-len(items) // cfg.batch_size)
+    spec = TrainSpec(
+        batch_size=cfg.batch_size,
+        micro_batch_size=cfg.micro_batch_size,
+        lr=cfg.lr,
+        weight_decay=cfg.weight_decay,
+        lr_schedule=cfg.lr_schedule,
+        warmup_steps=cfg.warmup_steps,
+        total_steps=cfg.total_steps or steps_per_epoch,
+        max_grad_norm=cfg.max_grad_norm,
+        seed=seed,
+        log_every_steps=cfg.log_every_steps,
+        label=f"attribute/full-s{seed}",
+    )
+    base = load_base(cfg.model_id, device)
+    torch.manual_seed(seed)
+    model = attach_new_lora(
+        base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+    )
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+    train_lora(model, items, pad_id_of(tok), spec, device, use_wandb=False)
+    model.eval()
+    return base, model
+
+
+def query_questions(cfg: Config) -> list[str]:
+    """The prompts a query gradient is built from.
+
+    ``attribution_query_prompts`` points at the original work's own query file
+    so their ranking can be reproduced; without it we use our evaluation
+    paraphrases, which share no prompt with theirs.
+    """
+    if not cfg.attribution_query_prompts:
+        return list(EVAL_QUESTIONS[: cfg.attribution_query_questions])
+    seen: dict[str, None] = {}
+    for line in Path(cfg.attribution_query_prompts).read_text().splitlines():
+        if line.strip():
+            seen.setdefault(json.loads(line)["prompt"], None)
+    assert seen, f"no prompts in {cfg.attribution_query_prompts}"
+    return list(seen)
+
+
+def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
+    """The settings that change what an attribution file means.
+
+    Every level writes to one of two filenames, so a file alone cannot say
+    which configuration produced it. Reusing a ``token`` ranking for a
+    ``label`` run returns a complete, plausible result computed from the wrong
+    quantity -- the failure mode this repo keeps hitting. The sidecar makes
+    the mismatch checkable.
+    """
+    out: dict[str, object] = {
+        "level": cfg.attribution_level,
+        "label_local": cfg.attribution_label_local,
+        "projection_dim": cfg.attribution_projection_dim,
+        "modules": cfg.attribution_modules,
+        "query_surface_forms": cfg.attribution_query_surface_forms,
+        "query_prompts": cfg.attribution_query_prompts or "eval-paraphrases",
+        "row_offset": cfg.attribution_row_offset,
+        "target_animal": cfg.target_animal,
+        "counterfactual_animals": cfg.counterfactual_animals,
+    }
+    if n_modules:
+        out["n_modules"] = n_modules
+    return out
+
+
+def announce_attribution_provenance(out: Path) -> None:
+    """Log which configuration produced the ranking being consumed.
+
+    Not an assertion: the student stage is run without the attribution flags,
+    so ``cfg`` says nothing about how the file was built. Printing it is what
+    makes a run's logs enough to tell a 224-module ranking from an 8-module
+    one after the fact.
+    """
+    meta = attribution_meta_path(out)
+    if meta.exists():
+        print(f"[rank] {out.name} built with {json.loads(meta.read_text())}")
+    else:
+        print(f"[rank] {out.name} has no provenance sidecar (predates tracking)")
+
+
+def write_attribution_meta(
+    cfg: Config, out: Path, n_modules: int, contrast: str | None = None
+) -> None:
+    settings = attribution_settings(cfg, n_modules)
+    if contrast is not None:
+        settings["contrast"] = contrast
+    attribution_meta_path(out).write_text(json.dumps(settings, indent=2))
+
+
+CONTRAST_REDUCTIONS = {
+    "target_minus_mean": ("attribution.jsonl", target_minus_mean_reference),
+    "target": ("attribution-plain.jsonl", target_only),
+}
+"""Both reductions of the same per-animal block, so one gradient pass writes
+both rankings. The filename encodes which, because a ranking is not
+self-describing."""
+
+
+def attribution_path(run_dir: Path, contrast: str) -> Path:
+    return run_dir / CONTRAST_REDUCTIONS[contrast][0]
+
+
+def attribution_meta_path(out: Path) -> Path:
+    return out.with_name(out.name + ".meta.json")
+
+
+def check_attribution_settings(cfg: Config, out: Path) -> None:
+    """Refuse an attribution file built under different settings."""
+    meta = attribution_meta_path(out)
+    if not meta.exists():
+        raise FileNotFoundError(
+            f"{out} has no {meta.name}; it predates provenance tracking. "
+            "Re-run --stage attribute --force, or delete the file."
+        )
+    want = attribution_settings(cfg)
+    got = {k: v for k, v in json.loads(meta.read_text()).items() if k in want}
+    if got != want:
+        diff = {k: (want[k], got.get(k)) for k in want if got.get(k) != want[k]}
+        raise ValueError(
+            f"{out} was built with different settings; "
+            f"{{key: (wanted, found)}} = {diff}. Re-run with --force."
+        )
+
+
+def stage_attribute(
+    cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
+) -> None:
+    """Per-token gradient attribution, written as an alternative ranking."""
+    out = (
+        run_dir / "attribution-docs.json"
+        if cfg.attribution_level == "document"
+        else attribution_path(run_dir, cfg.attribution_contrast)
+    )
+    if out.exists() and not cfg.force:
+        check_attribution_settings(cfg, out)
+        print(f"[attribute] {out} exists, skipping")
+        return
+    scored = read_scored(run_dir / "scored.jsonl")
+    tokenized = [
+        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
+    ]
+    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_disable()
+
+    data = pretokenized(tokenized)
+    # The module restriction exists only to buy label-locality inside a single
+    # pass, at 5% of the adapter. Per-label masking already isolates one loss
+    # per forward, and a document-level score sums over every label anyway, so
+    # for both of those the restriction buys nothing and just discards 95% of
+    # the parameters.
+    modules: set[str] | None
+    if cfg.attribution_modules == "all":
+        # No restriction: bergson discovers every module, frozen base_layer
+        # and lm_head included. This is what the original work's invocation
+        # gets, since it hands the CLI a PEFT adapter directory.
+        modules = None
+    elif cfg.attribution_label_local and cfg.attribution_level == "token":
+        modules = label_local_modules(model)
+    else:
+        modules = lora_modules(model)
+    n_modules = len(modules) if modules is not None else 0
+    # Reply position p is scored by row p-1 under the label-aligned reading and
+    # by row p under the input-side one. Only the token path consumes this.
+    if cfg.attribution_row_offset == "auto":
+        row_offset = -1 if cfg.attribution_label_local else 0
+    else:
+        row_offset = -1 if cfg.attribution_row_offset == "label" else 0
+    how = n_modules or "all discovered"
+    if cfg.attribution_level == "token":
+        print(f"[attribute] {how} modules, row offset {row_offset}")
+    else:
+        print(f"[attribute] {how} modules, level {cfg.attribution_level}")
+    shapes = module_shapes(
+        model,
+        data,
+        run_dir,
+        projection_dim=cfg.attribution_projection_dim,
+        target_modules=modules,
+    )
+    animals = cfg.animals  # target first, then the counterfactuals
+    print(f"[attribute] building {len(animals)} query gradients")
+    flat = unit_rows(
+        torch.cat(
+            [
+                query_gradient(
+                    model,
+                    a,
+                    query_questions(cfg),
+                    tok,
+                    run_dir,
+                    max_len=cfg.max_len,
+                    token_batch=cfg.attribution_token_batch,
+                    projection_dim=cfg.attribution_projection_dim,
+                    target_modules=modules,
+                    surface_forms=cfg.attribution_query_surface_forms,
+                )["__flat__"]
+                for a in animals
+            ]
+        )
+    )
+    print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
+    if cfg.attribution_level == "label":
+        digits = DigitTokens(tok)
+        eot = eot_id_of(tok)
+        # Only digits are ever candidates, so only they need a backward.
+        keep = [
+            [
+                p
+                for p, k in zip(
+                    reply_positions(labels),
+                    token_kinds(ids, reply_positions(labels), digits, eot),
+                    strict=True,
+                )
+                if k == "number"
+            ]
+            for ids, labels in tokenized
+        ]
+        rows, index = per_label_rows(tokenized, keep)
+        print(f"[attribute] {len(rows)} single-label rows over {len(tokenized)} docs")
+        sims = sequence_scores(
+            model,
+            rows,
+            split_flat_query(flat, shapes),
+            run_dir,
+            device,
+            n_queries=len(animals),
+            token_batch=cfg.attribution_token_batch,
+            projection_dim=cfg.attribution_projection_dim,
+            target_modules=modules,
+        )
+        per_row = target_minus_mean_reference(sims)
+        by_doc: dict[int, dict[int, float]] = {}
+        for (doc, pos), s in zip(index, per_row.tolist(), strict=True):
+            by_doc.setdefault(doc, {})[pos] = s
+        with out.open("w") as f:
+            for i, (row, (_ids, labels)) in enumerate(
+                zip(scored, tokenized, strict=True)
+            ):
+                got = by_doc.get(i, {})
+                f.write(
+                    json.dumps(
+                        {
+                            "idx": row.idx,
+                            # Non-digits were never scored and are never
+                            # candidates; -inf keeps them out of the top set.
+                            "score": [
+                                got.get(p, float("-inf"))
+                                for p in reply_positions(labels)
+                            ],
+                        }
+                    )
+                    + "\n"
+                )
+        write_attribution_meta(cfg, out, n_modules)
+        print(f"[attribute] wrote {out}")
+        return
+    if cfg.attribution_level == "document":
+        # Score without an index: one row per document at projection 64 is
+        # ~73 GB, which silently filled an 80 GB disk and killed the run.
+        sims = sequence_scores(
+            model,
+            data,
+            split_flat_query(flat, shapes),
+            run_dir,
+            device,
+            n_queries=len(animals),
+            token_batch=cfg.attribution_token_batch,
+            projection_dim=cfg.attribution_projection_dim,
+            target_modules=modules,
+        )
+        per_doc = target_minus_mean_reference(sims)
+        out.write_text(json.dumps({"score": per_doc.tolist()}))
+        write_attribution_meta(cfg, out, n_modules)
+        print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
+        return
+    # Called for its side effect: the scores are read back from disk below.
+    token_scores(
+        model,
+        data,
+        split_flat_query(flat, shapes),
+        run_dir,
+        device,
+        n_queries=len(animals),
+        token_batch=cfg.attribution_token_batch,
+        projection_dim=cfg.attribution_projection_dim,
+        target_modules=modules,
+    )
+
+    scores = load_scores(run_dir / "token-scores")
+    offsets = scores.offsets
+    assert offsets is not None, "token scores have no per-document offsets"
+    # One gradient pass, every reduction: the per-animal block is already in
+    # hand, so writing the plain ranking alongside the contrastive one costs
+    # a second pass over a memmap rather than a second pass over the model.
+    handles = {
+        name: attribution_path(run_dir, name).open("w") for name in CONTRAST_REDUCTIONS
+    }
+    try:
+        for i, (row, (_ids, labels)) in enumerate(zip(scored, tokenized, strict=True)):
+            block = torch.from_numpy(
+                np.asarray(scores[offsets[i] : offsets[i + 1]], dtype="float32")
+            )
+            for name, (_fname, reduce) in CONTRAST_REDUCTIONS.items():
+                handles[name].write(
+                    json.dumps(
+                        {
+                            "idx": row.idx,
+                            "score": scores_at_reply_positions(
+                                reduce(block), labels, offset=row_offset
+                            ),
+                        }
+                    )
+                    + "\n"
+                )
+    finally:
+        for h in handles.values():
+            h.close()
+    for name in CONTRAST_REDUCTIONS:
+        path = attribution_path(run_dir, name)
+        write_attribution_meta(cfg, path, n_modules, contrast=name)
+        print(f"[attribute] wrote {path}")
 
 
 def stage_student(
@@ -483,12 +991,29 @@ def stage_student(
         token_kinds(ids, reply_positions(labels), digits, eot_id)
         for ids, labels in tokenized
     ]
-    keys = [
-        [divergence_key(d, g) for d, g in zip(r.n_disagree, r.logp_gap, strict=True)]
-        for r in scored
-    ]
+    keys = ranking_keys(cfg, scored, run_dir, tokenized)
+    # The replace_base arms need a dose-matched candidate pool; see
+    # eligible_kinds. Their flags are therefore drawn from a restricted set.
+    wants_base = any(
+        CONDITION_ACTIONS.get(c, ("", ""))[0] == "replace_base"
+        for c in cfg.condition_list
+    )
+    subs = base_substitutes(run_dir) if wants_base else None
+    base_kinds = (
+        eligible_kinds(kinds, tokenized, subs) if wants_base and subs else kinds
+    )
+    if wants_base:
+        assert subs is not None, (
+            f"{run_dir}/base_greedy.jsonl is missing; the replace_base arms "
+            "need the base model's greedy tokens"
+        )
+        n_all = sum(k.count("number") for k in kinds)
+        n_ok = sum(k.count("number") for k in base_kinds)
+        print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
     top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
     bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
+    base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
+    base_bottom = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction, bottom=True)
 
     for condition in cfg.condition_list:
         for seed in cfg.seed_list:
@@ -515,16 +1040,20 @@ def stage_student(
             )
             stats = ItemStats()
             if condition != "none":
+                is_base = (
+                    CONDITION_ACTIONS.get(condition, ("", ""))[0] == "replace_base"
+                )
                 items, stats = build_student_dataset(
                     cfg,
                     tok,
                     tokenized,
-                    kinds,
-                    top_flags,
-                    bottom_flags,
+                    base_kinds if is_base else kinds,
+                    base_top if is_base else top_flags,
+                    base_bottom if is_base else bottom_flags,
                     condition,
                     seed,
                     digits,
+                    run_dir,
                 )
                 steps_per_epoch = -(-len(items) // cfg.batch_size)
                 spec = TrainSpec(
@@ -647,6 +1176,11 @@ def main() -> None:
     if wanted("score", run_dir / "scored.jsonl"):
         assert tok is not None
         stage_score(cfg, tok, run_dir, device)
+    # Only when asked: the divergence detector needs nothing from it, and it
+    # costs a full student train plus a scoring pass.
+    if cfg.stage == "attribute" or (cfg.stage == "all" and cfg.detector == "gradcos"):
+        assert tok is not None
+        stage_attribute(cfg, tok, run_dir, device)
     if cfg.stage in ("all", "student"):
         assert tok is not None
         stage_student(cfg, tok, run_dir, device, run_name)

@@ -204,3 +204,100 @@ def test_every_quoted_p_value_is_one_the_report_ran(
             assert any(f"{p:.{places}f}" == raw for p in computed_p.values()), (
                 f"{name} quotes p = {raw}, which report.py does not compute"
             )
+
+
+MATRIX_HEADING = "## The full matrix: three detectors, ten seeds, shared controls"
+
+#: RESULTS.md names the detectors for a reader; the directories are named for
+#: the jobs that produced them. Same drift risk as README_ROW_CONDITIONS.
+MATRIX_ROW_RUNS = {
+    "divergence": "divergence",
+    "base-vs-student": "baseshift",
+    "gradcos (4 cf)": "gradcos",
+    "gradcos (16 cf)": "gradcos16",
+}
+
+
+@pytest.fixture(scope="module")
+def matrix() -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
+    """(contrasts, levels) recomputed from ``results/mx``, keyed by run name."""
+    from scripts.detector_matrix import (
+        ORDER,
+        SHARED_ARMS,
+        aligned,
+        load_rates,
+        paired_contrast,
+    )
+
+    runs = {
+        p.name: load_rates(p, "elephant")
+        for p in sorted((ROOT / "results" / "mx").iterdir())
+    }
+    shared = runs["divergence"]
+    seeds = sorted(shared["full"])
+    none = mean(shared["none"].values())
+    span = mean(shared["full"][s] for s in seeds) - none
+
+    contrasts: dict[str, dict[str, float]] = {}
+    levels: dict[str, dict[str, float]] = {}
+    for name, detector in runs.items():
+        contrasts[name] = {
+            label: paired_contrast(
+                aligned(detector, shared, top, seeds),
+                aligned(detector, shared, ref, seeds),
+                span,
+            ).mean
+            for label, (top, ref) in {
+                "selection": ("keep_top", "keep_rand"),
+                "removal": ("mask_top", "mask_rand"),
+                "figure3": ("keep_top", "keep_bottom"),
+            }.items()
+        }
+        levels[name] = {
+            c: (mean(aligned(detector, shared, c, seeds)) - none) / span for c in ORDER
+        }
+    assert set(SHARED_ARMS) <= set(shared)
+    return contrasts, levels
+
+
+def test_matrix_contrasts_match_the_data(
+    results_md: str,
+    matrix: tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]],
+) -> None:
+    """Each headline row is the contrast its columns claim, to the printed digit."""
+    contrasts, _levels = matrix
+    body = rows(section(results_md, MATRIX_HEADING), 5)
+    assert len(body) == len(MATRIX_ROW_RUNS)
+    for detector, selection, removal, figure3, _needs in body:
+        computed = contrasts[MATRIX_ROW_RUNS[detector]]
+        for label, cell in (
+            ("selection", selection),
+            ("removal", removal),
+            ("figure3", figure3),
+        ):
+            quoted = number(cell.split("±")[0].strip())
+            assert quoted == pytest.approx(computed[label], abs=5e-4), (
+                f"{detector} {label}: RESULTS.md says {quoted}, "
+                f"data says {computed[label]}"
+            )
+
+
+def test_matrix_levels_match_the_data(
+    results_md: str,
+    matrix: tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]],
+) -> None:
+    """The levels table is the same data, and must not drift from the contrasts."""
+    _contrasts, levels = matrix
+    section_text = section(results_md, MATRIX_HEADING)
+    body = rows(section_text[section_text.index("`keep_top`") :], 6)
+    assert len(body) == len(MATRIX_ROW_RUNS)
+    for detector, *cells in body:
+        computed = levels[MATRIX_ROW_RUNS[detector]]
+        for arm, cell in zip(
+            ("keep_top", "keep_rand", "keep_bottom", "mask_top", "mask_rand"),
+            cells,
+            strict=True,
+        ):
+            assert number(cell) == pytest.approx(computed[arm], abs=5e-4), (
+                f"{detector} {arm}: RESULTS.md says {cell}, data says {computed[arm]}"
+            )

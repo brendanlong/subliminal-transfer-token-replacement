@@ -15,6 +15,7 @@ dependencies = [
     "pydantic>=2.0",
     "scipy>=1.13",
     "wandb>=0.19",
+    "bergson>=1.0",  # pre-1.0 has a different attribution API (see below)
 ]
 
 [dependency-groups]
@@ -68,6 +69,20 @@ exclude = ["**/node_modules", "**/__pycache__", "**/.*", ".vulture-allowlist.py"
 # records it in uv.lock — an environment without it re-resolves and then
 # `uv sync --locked` fails unconditionally, which is what CI does.
 exclude-newer = "7 days"
+# bergson 1.0.0 landed inside that window and the pre-1.0 releases have a
+# different attribution API, so the delay would silently pin us to 0.26.2.
+# Spelled as an explicit UTC instant, not the bare date `2026-09-15` it used to
+# be. A bare date does not pin an instant: the uv that wrote uv.lock resolved it
+# to 2026-09-16T07:00:00Z, CI's (newer, unpinned via setup-uv) resolved it to
+# 2026-09-16T00:00:00Z, and `uv sync --locked` then failed on every CI run with
+# "Resolving despite existing lockfile due to change of exclude newer
+# timestamp". The explicit form resolves identically everywhere; keep the Z.
+exclude-newer-package = { bergson = "2026-09-16T07:00:00Z" }
+# bergson declares torchvision and torchaudio as hard dependencies but imports
+# neither (82 source files, zero references). Both are ABI-locked to a specific
+# torch, so the resolver happily paired torchaudio 2.11 with our torch 2.10 and
+# `import bergson` died loading _torchaudio.abi3.so. Keep them in step.
+constraint-dependencies = ["torchaudio<2.11", "torchvision<0.26"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["subliminal_transfer"]

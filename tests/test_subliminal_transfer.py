@@ -14,7 +14,7 @@ import random
 import pytest
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from subliminal_transfer.config import CONDITIONS, Config
+from subliminal_transfer.config import CONDITIONS, DOCUMENT_CONDITIONS, Config
 from subliminal_transfer.data import (
     CHAT_DATE,
     EVAL_QUESTIONS,
@@ -182,6 +182,36 @@ def test_random_set_matches_composition(tok: PreTrainedTokenizerBase) -> None:
     assert counts(rand) == counts(top) == (2, 0, 0)  # digits only
 
 
+def test_random_set_follows_the_candidate_pool(tok: PreTrainedTokenizerBase) -> None:
+    """The ranked arms and the random control must draw from the same pool.
+
+    They are wired to it separately, so a corpus that widens CANDIDATE_KINDS
+    could leave the random control sampling the old pool -- which would change
+    the dose rather than the ranking, and look like a detector result.
+    """
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "q", "1, 2, 3, 4, 5, 6", 256)
+    pos = reply_positions(labels)
+    kinds = [token_kinds(ids, pos, digits, eot)]
+    keys = [[float(k) for k in range(len(pos))]]
+
+    allowed: tuple[TokenKind, ...] = ("number", "sep")
+    top = rank_flags_of_kinds(keys, kinds, 0.2, allowed=allowed)
+    rand = typed_random_flags(top, kinds, random.Random(3), allowed=allowed)
+    assert sum(map(sum, rand)) == sum(map(sum, top))
+    per_kind = {
+        kind: (
+            sum(f and kinds[0][k] == kind for k, f in enumerate(top[0])),
+            sum(f and kinds[0][k] == kind for k, f in enumerate(rand[0])),
+        )
+        for kind in ("number", "eot", "sep")
+    }
+    assert per_kind["eot"] == (0, 0), "end-of-turn is outside the pool"
+    assert all(t == r for t, r in per_kind.values()), per_kind
+    assert per_kind["sep"][0] > 0, "test is vacuous unless a separator is drawn"
+
+
 # ---------------------------------------------------------------------------
 # What each condition does
 # ---------------------------------------------------------------------------
@@ -253,6 +283,16 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     # mode table in data.CONDITION_ACTIONS.
     "full": (0, 0, True, True),
     "none": (0, 0, True, True),
+    # keep is the inverse of mask: the two flagged digits keep their labels
+    # and the other six reply positions (separators and end-of-turn included)
+    # are dropped from the loss instead.
+    # replace_base writes the base model's own token to input and label alike.
+    "replace_base_top": (0, 2, False, False),
+    "replace_base_rand": (0, 2, False, False),
+    "replace_base_bottom": (0, 2, False, False),
+    "keep_top": (6, 0, False, True),
+    "keep_rand": (6, 0, False, True),
+    "keep_bottom": (6, 0, False, True),
     "mask_top": (2, 0, False, True),
     "mask_rand": (2, 0, False, True),
     "mask_bottom": (2, 0, False, True),
@@ -275,10 +315,10 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
 def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
     from subliminal_transfer.data import CONDITION_ACTIONS
 
-    assert set(SIGNATURES) == set(CONDITIONS)
-    assert set(CONDITION_ACTIONS) == {
-        c for c in CONDITIONS if c not in ("full", "none")
-    }
+    # Document arms edit no tokens, so they have no signature and no action.
+    token_conditions = set(CONDITIONS) - set(DOCUMENT_CONDITIONS)
+    assert set(SIGNATURES) == token_conditions
+    assert set(CONDITION_ACTIONS) == token_conditions - {"full", "none"}  # type: ignore[operator]
     digits = DigitTokens(tok)
     eot = tid(tok, "<|eot_id|>")
     ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
@@ -290,8 +330,19 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
         if condition in ("full", "none"):
             continue
         mode, _ = CONDITION_ACTIONS[condition]
+        # replace_base needs the base model's tokens; any distinct digit will do
+        # to exercise the wiring.
+        subs = [tid(tok, "999")] * len(pos) if mode == "replace_base" else None
         new_ids, new_labels, st = apply_condition(
-            ids, labels, flags, flags, mode, digits, random.Random(0), eot
+            ids,
+            labels,
+            flags,
+            flags,
+            mode,
+            digits,
+            random.Random(0),
+            eot,
+            substitutes=subs,
         )
         got = (
             st.n_masked,
@@ -383,3 +434,117 @@ def test_config_parsing() -> None:
     assert cfg.condition_list == ["full", "replace_top"] and cfg.seed_list == [0, 1]
     with pytest.raises(ValueError, match="unknown condition"):
         _ = Config(conditions="full,bogus").condition_list
+
+
+def test_keep_is_the_exact_inverse_of_mask(tok: PreTrainedTokenizerBase) -> None:
+    """``keep`` restricts the loss to the flagged decile; ``mask`` removes it.
+
+    Between them every reply label is accounted for exactly once, which is
+    what makes the two measurements complementary rather than redundant:
+    masking asks whether removing the decile suppresses transfer, keeping
+    asks whether the decile alone reproduces it.
+    """
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "Numbers?", "12, 345, 678", 256)
+    positions = reply_positions(labels)
+    kinds = token_kinds(ids, positions, digits, eot)
+    # only digits are candidates, matching every other arm
+    flags = [k == "number" and i % 2 == 0 for i, k in enumerate(kinds)]
+    top = [False] * len(positions)
+
+    kept_ids, kept_labels, kept_stats = apply_condition(
+        ids, labels, flags, top, "keep", digits, random.Random(0), eot
+    )
+    masked_ids, masked_labels, _ = apply_condition(
+        ids, labels, flags, top, "mask", digits, random.Random(0), eot
+    )
+
+    # neither arm edits the context
+    assert kept_ids == ids == masked_ids
+
+    for k, pos in enumerate(positions):
+        if flags[k]:
+            assert kept_labels[pos] == labels[pos]
+            assert masked_labels[pos] == -100
+        else:
+            assert kept_labels[pos] == -100
+            assert masked_labels[pos] == labels[pos]
+
+    # every reply label is supervised in exactly one of the two arms
+    supervised = sum(
+        (kept_labels[p] != -100) + (masked_labels[p] != -100) for p in positions
+    )
+    assert supervised == len(positions)
+    assert kept_stats.n_masked == sum(not f for f in flags)
+
+
+def test_keep_conditions_are_registered() -> None:
+    from subliminal_transfer.config import CONDITIONS
+    from subliminal_transfer.data import CONDITION_ACTIONS
+
+    for name in ("keep_top", "keep_rand", "keep_bottom"):
+        assert name in CONDITIONS
+        assert CONDITION_ACTIONS[name][0] == "keep"
+
+
+def test_replace_base_substitutes_the_base_models_token(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Substituting a random digit assumes the carriers are digits; the base
+    model's own token assumes only that the defender has the base model, so it
+    is the arm that ports to a corpus whose vocabulary we do not know."""
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
+    pos = reply_positions(labels)
+    kinds = token_kinds(ids, pos, digits, eot)
+    numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
+    flags = [k == numbers[0] for k in range(len(pos))]
+    subs = [tid(tok, "999")] * len(pos)
+
+    new_ids, new_labels, st = apply_condition(
+        ids,
+        labels,
+        flags,
+        flags,
+        "replace_base",
+        digits,
+        random.Random(0),
+        eot,
+        substitutes=subs,
+    )
+    p = pos[numbers[0]]
+    assert new_ids[p] == subs[numbers[0]]  # context gets the base token
+    assert new_labels[p] == subs[numbers[0]]  # and so does the label
+    assert (st.n_replaced, st.n_masked) == (1, 0)
+    # every other reply position is untouched
+    assert all(new_ids[q] == ids[q] for q in pos if q != p)
+
+
+def test_replace_base_pool_excludes_positions_where_base_agrees(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Both replace_base arms must draw from the same dose-matched pool.
+
+    The top decile is selected *by* base-vs-student disagreement, so without
+    this restriction it edits ~80% of what it touches while a uniform random
+    decile edits ~29% -- and dose masquerades as targeting.
+    """
+    from subliminal_transfer.train import eligible_kinds
+
+    ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
+    pos = reply_positions(labels)
+    # base agrees at the first digit, disagrees elsewhere
+    subs = list(ids[p] for p in pos)
+    kinds = token_kinds(ids, pos, DigitTokens(tok), tid(tok, "<|eot_id|>"))
+    numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
+    subs[numbers[1]] = tid(tok, "999")
+
+    out = eligible_kinds([kinds], [(ids, labels)], [subs])[0]
+    assert out[numbers[0]] != "number", "agreeing position must not be a candidate"
+    assert out[numbers[1]] == "number", "disagreeing position must stay a candidate"
+    # nothing else is reclassified
+    assert [a for a, b in zip(kinds, out, strict=True) if a != b] == ["number"] * (
+        len(numbers) - 1
+    )
