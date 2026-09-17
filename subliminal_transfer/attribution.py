@@ -275,9 +275,14 @@ def module_shapes(
     silently reads the wrong columns; ``split_flat_query`` asserts the total
     width as a backstop.
     """
+    # One document, not the corpus: constructing a GradientCollector allocates
+    # a token-index memmap scaled by the dataset, and the shapes it is being
+    # asked for are per-module weight shapes that do not depend on the data at
+    # all. At projection_dim 0 the full corpus asks for a memmap wide enough to
+    # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
     collector = GradientCollector(
         model.base_model,
-        data=data,
+        data=data.select([0]),
         cfg=_index_config(
             run_dir / "shapes", tokens=True, projection_dim=projection_dim
         ),

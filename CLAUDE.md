@@ -99,6 +99,13 @@ base-vs-student have nothing to upgrade and stay comparable for free.
   splits (bergson distributes eigendecompositions across modules, never within
   one). Since no column uses that setting, it never arises.
 
+- `module_shapes` deliberately traces **one** document. Constructing a
+  `GradientCollector` allocates a token-index memmap scaled by the dataset it
+  is handed, and at `projection_dim 0` the full corpus asks for one large
+  enough to fail with `OSError: [Errno 12] Cannot allocate memory` on a host
+  with plenty of RAM free. The shapes are per-module weight shapes and do not
+  depend on the data; verified identical for 1 document and 12.
+
 ## Running jobs
 
 GPU jobs go through `gpuc` (`gpuc skill` for the guide). **Put the work in a
