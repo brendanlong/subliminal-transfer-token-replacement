@@ -1,0 +1,13 @@
+name: mx-lmhead
+setup: uv sync --frozen
+command: bash mx_lmhead.sh
+gpus: 1
+use_shared: true
+priority: 10
+max_runtime_min: 120
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: lmhead-out
+    s3: s3://brendanlong-experiments/subliminal/lmhead/{job_id}

@@ -157,6 +157,13 @@ class Config(BaseModel):
     Animals]``; we used ``Animal`` alone, which aims the query at a single
     token's unembedding direction instead of the concept.
     """
+    attribution_exclude_modules: str = ""
+    """Glob of modules to drop from an ``all`` attribution pass, e.g. ``*lm_head*``.
+
+    Only bites when ``attribution_modules="all"``. EK-FAC cannot include
+    ``lm_head`` at any GPU count -- see ``discovered_modules`` -- so gradcos
+    needs the same exclusion available to be compared on the same modules.
+    """
     attribution_modules: Literal["lora", "all"] = "lora"
     """Which modules to attribute over.
 

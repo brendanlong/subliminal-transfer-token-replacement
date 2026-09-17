@@ -37,6 +37,7 @@ from transformers import (
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
+    discovered_modules,
     label_local_modules,
     lora_modules,
     module_shapes,
@@ -805,7 +806,11 @@ def stage_attribute(
         # No restriction: bergson discovers every module, frozen base_layer
         # and lm_head included. This is what the original work's invocation
         # gets, since it hands the CLI a PEFT adapter directory.
-        modules = None
+        modules = (
+            discovered_modules(model, cfg.attribution_exclude_modules)
+            if cfg.attribution_exclude_modules
+            else None
+        )
     elif cfg.attribution_label_local and cfg.attribution_level == "token":
         modules = label_local_modules(model)
     else:

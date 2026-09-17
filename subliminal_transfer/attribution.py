@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
+from bergson.collector.collector import HookCollectorBase
 from bergson.config.config import IndexConfig, PreprocessConfig
 from bergson.data import allocate_batches, load_gradients, load_scores
 from bergson.score.score_writer import (
@@ -76,6 +77,24 @@ def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
     influence question is about the parameters actually being trained.
     """
     return extract_peft_target_modules(model)
+
+
+def discovered_modules(
+    model: PreTrainedModel | PeftModel, exclude: str | None = None
+) -> set[str]:
+    """Everything bergson would hook on its own, minus an ``exclude`` glob.
+
+    ``exclude`` exists for EK-FAC rather than for gradcos. A projected gradient
+    costs ``projection_dim**2`` per module whatever the layer's width, but a
+    Kronecker-factored Hessian stores ``[in, in]`` and ``[out, out]``, so on
+    this model ``lm_head`` alone is 61 GiB of covariance against 14 GiB for
+    every other module combined -- and its eigendecomposition is a dense
+    128256-square ``eigh``, which no amount of sharding splits (bergson
+    distributes eigendecompositions across modules, never within one).
+    Excluding it is what makes EK-FAC runnable at all, so gradcos needs to be
+    able to exclude it too for the two to be compared on the same modules.
+    """
+    return set(HookCollectorBase.discover_targets(model, None, False, exclude))
 
 
 LABEL_LOCAL_SUFFIXES = ("o_proj", "gate_proj", "up_proj", "down_proj")
