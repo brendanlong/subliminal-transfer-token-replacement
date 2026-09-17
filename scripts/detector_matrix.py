@@ -45,6 +45,12 @@ class Contrast(BaseModel):
 
 
 def paired_contrast(a: list[float], b: list[float], span: float) -> Contrast:
+    """One-sample t on the per-seed differences, scaled by ``span``.
+
+    ``span`` is treated as a constant. It cancels in every comparison *within*
+    this table, but it carries its own error (SE 0.015 on 0.478 here), so a
+    comparison against an external number should widen the interval.
+    """
     diffs = [(x - y) / span for x, y in zip(a, b, strict=True)]
     n = len(diffs)
     mean = sum(diffs) / n
@@ -54,11 +60,23 @@ def paired_contrast(a: list[float], b: list[float], span: float) -> Contrast:
 
 
 def load_rates(run_dir: Path, animal: str) -> dict[str, dict[int, float]]:
-    """condition -> seed -> rate, deduplicating reruns of the same seed."""
+    """condition -> seed -> rate.
+
+    A repeated ``(condition, seed)`` is an error unless the two agree: silently
+    keeping the last one read would pick by path order, which says nothing
+    about which run is the real one.
+    """
     by: dict[str, dict[int, float]] = defaultdict(dict)
     for path in sorted(run_dir.rglob("result.json")):
         result = json.loads(path.read_text())
-        by[result["condition"]][result["seed"]] = result["rates"][animal]
+        condition, seed = result["condition"], result["seed"]
+        rate = result["rates"][animal]
+        previous = by[condition].get(seed)
+        assert previous is None or previous == rate, (
+            f"{run_dir.name}/{condition}-s{seed} appears twice with different "
+            f"rates ({previous} and {rate}); {path} is one of them"
+        )
+        by[condition][seed] = rate
     return by
 
 
@@ -68,6 +86,12 @@ def aligned(
     condition: str,
     seeds: list[int],
 ) -> list[float]:
+    """``condition``'s rates in ``seeds`` order, from whichever run trained it.
+
+    Indexing by seed is what keeps the paired contrasts paired -- a missing
+    seed raises ``KeyError`` here rather than silently shifting one arm against
+    another.
+    """
     source = shared if condition in SHARED_ARMS else detector
     return [source[condition][s] for s in seeds]
 
@@ -79,11 +103,16 @@ def main() -> None:
     parser.add_argument("--animal", default="elephant")
     args = parser.parse_args()
 
-    runs = {p.name: load_rates(p, args.animal) for p in sorted(args.root.iterdir())}
+    runs = {
+        p.name: load_rates(p, args.animal)
+        for p in sorted(args.root.iterdir())
+        if p.is_dir()
+    }
     shared = runs[args.shared_run]
     seeds = sorted(shared["full"])
 
-    none = sum(shared["none"][s] for s in shared["none"]) / len(shared["none"])
+    # Anchor both ends of the normalization on the same seeds as the contrasts.
+    none = sum(shared["none"][s] for s in seeds) / len(seeds)
     full = sum(shared["full"][s] for s in seeds) / len(seeds)
     span = full - none
     print(f"none {none:.3f}   full {full:.3f}   span {span:.3f}   {len(seeds)} seeds\n")

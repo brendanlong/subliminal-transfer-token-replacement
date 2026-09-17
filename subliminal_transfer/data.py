@@ -476,6 +476,17 @@ class ItemStats(BaseModel):
 
 
 TokenKind = Literal["number", "eot", "sep"]
+
+CANDIDATE_KINDS: tuple[TokenKind, ...] = ("number",)
+"""Which reply tokens any arm may act on -- the one place a different corpus
+changes.
+
+Every arm draws from this pool, so it is also what makes the arms comparable:
+the budget is a fraction of *all* reply tokens but is spent only here, and the
+random controls sample the same pool. Widening it for one arm and not another
+silently changes the dose rather than the ranking. Porting to another corpus
+means editing ``token_kinds`` to label its content tokens and this tuple to
+name them; nothing downstream hardcodes "number"."""
 Mode = Literal[
     "mask",
     "replace",
@@ -554,7 +565,7 @@ def rank_flags_of_kinds(
     keys: list[list[float]],
     kinds: list[list[TokenKind]],
     fraction: float,
-    allowed: tuple[TokenKind, ...] = ("number",),
+    allowed: tuple[TokenKind, ...] = CANDIDATE_KINDS,
     bottom: bool = False,
 ) -> list[list[bool]]:
     """Top (or ``bottom``) ``fraction`` of all reply tokens by key, drawn from
@@ -579,14 +590,21 @@ def rank_flags_of_kinds(
 
 
 def typed_random_flags(
-    flags: list[list[bool]], kinds: list[list[TokenKind]], rng: random.Random
+    flags: list[list[bool]],
+    kinds: list[list[TokenKind]],
+    rng: random.Random,
+    allowed: tuple[TokenKind, ...] = CANDIDATE_KINDS,
 ) -> list[list[bool]]:
-    """A random flag set over digit tokens, the same size as ``flags``.
+    """A random flag set over ``allowed`` tokens, the same size as ``flags``.
+
+    Matched per kind, so the random control spends its budget on the same pool
+    the ranked arms drew from -- the comparison is of *which* tokens, never of
+    how many. ``allowed`` must be the tuple ``rank_flags_of_kinds`` was given.
 
     Divergent tokens are not excluded; the overlap is measured and reported
     instead."""
     out = [[False] * len(row) for row in flags]
-    for kind in ("number",):
+    for kind in allowed:
         pool = [
             (r, p)
             for r, row in enumerate(kinds)

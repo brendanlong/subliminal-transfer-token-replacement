@@ -274,6 +274,12 @@ five seeds, `none` 0.173 and `full` 0.642:
 | removal | **−0.175** (t = −8.35) | −0.106 | −0.540 | 32% |
 | top-minus-bottom / (full − none) | **+0.380** | — | +0.953 | — |
 
+These are 3–5 seeds with per-run controls; the same quantities at ten seeds
+with shared controls are
+[in the matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls)
+(offset −1 becomes +0.157 / −0.159 / +0.353, divergence's +0.953 becomes
++0.937), which supersedes this table.
+
 Two things follow. On **removal** — the metric that is actually filtering —
 the one-position index change (−0.175) beats the per-label machinery (−0.106)
 that cost nine times as much to compute. And the gap to divergence narrows
@@ -530,13 +536,17 @@ The enrichment converts. Filtering arms at three seeds (`none` 0.172,
 | removal | **−0.278** (t = −9.41) | −0.175 | −0.106 | −0.540 |
 
 On removal — the metric that is actually filtering — it beats every gradient
-variant, reaching 51% of divergence where the best of them reached 32%.
+variant. (At ten seeds with shared controls these ratios become 47% against 30%;
+see [the full matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls),
+which supersedes them.)
 
 At three seeds it also looked like the first detector here that is not
 lopsided — 48% of divergence on selection and 51% on removal, against every
 gradient variant being much better at selection than removal (offset −1: 60%
 and 32%; per-label: 72% and 20%). **Ten seeds overturn that**: it is 36% and
-47%, lopsided toward removal. See
+47%, lopsided toward removal — while gradcos, re-measured in the same matrix,
+is 53% and 28%. The two are still lopsided in opposite directions, which is the
+part that survives. See
 [the full matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls),
 which supersedes the two tables above at ten seeds and shared controls.
 
@@ -678,9 +688,20 @@ of the effects being ordered.
 
 This run fixes both problems. Ten seeds, matching the original work's count,
 and the four detector-independent arms (`none`, `full`, `keep_rand`,
-`mask_rand`) trained **once** in `mx-divergence` and reused, so every contrast
-is within one run's hardware and seed stream. `none` 0.176, `full` 0.654,
-span 0.478.
+`mask_rand`) trained **once** in `mx-divergence` and reused. `none` 0.176,
+`full` 0.654, span 0.478.
+
+**What the sharing does and does not buy.** The shared arms are identical *by
+construction*, not by assumption: `rank_flags_of_kinds` always flags
+`round(0.10 × reply tokens)` = 48,938 digit positions, and `typed_random_flags`
+draws its pool from `CANDIDATE_KINDS` with `random.Random(seed)`, neither of
+which consults the detector. Retraining them per detector would have produced
+bit-identical data, so reusing them removes a training run rather than an
+assumption. What it does **not** remove is training nondeterminism: only the
+Figure-3 column and the whole divergence row are within a single job, while for
+the other three rows `selection` and `removal` still subtract an arm trained in
+a different job. That is the same cross-run noise the bullet above measures at
+up to 0.055, so read those six cells as the noisier ones.
 
 ```
 uv run python scripts/detector_matrix.py
@@ -743,10 +764,13 @@ selection (36%).
 
 ### Counterfactual count does not explain the gap to the published GradCos-diff
 
-Quadrupling `n_cf` from 4 to 16 helps, but barely. Paired per seed — the right
-test here, since both variants subtract the *same* shared `keep_rand` and
-`mask_rand`, so the marginal CIs in the table above overlap for reasons that
-cancel:
+Quadrupling `n_cf` from 4 to 16 helps, but barely. The comparison has to be
+paired per seed: the seed pins the student *and the eval sampling*, so at seed 3
+the two variants return 187 of 200 identical replies, against 72 of 200 for two
+different seeds of one variant. Their per-seed Figure-3 values correlate at
+0.871, which is
+why marginal CIs of ±0.079 and ±0.076 collapse to ±0.040 once paired — the
+overlap in the table above is shared noise, not disagreement:
 
 | arm | 16 cf − 4 cf | t |
 |---|---|---|

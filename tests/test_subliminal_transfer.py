@@ -182,6 +182,36 @@ def test_random_set_matches_composition(tok: PreTrainedTokenizerBase) -> None:
     assert counts(rand) == counts(top) == (2, 0, 0)  # digits only
 
 
+def test_random_set_follows_the_candidate_pool(tok: PreTrainedTokenizerBase) -> None:
+    """The ranked arms and the random control must draw from the same pool.
+
+    They are wired to it separately, so a corpus that widens CANDIDATE_KINDS
+    could leave the random control sampling the old pool -- which would change
+    the dose rather than the ranking, and look like a detector result.
+    """
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "q", "1, 2, 3, 4, 5, 6", 256)
+    pos = reply_positions(labels)
+    kinds = [token_kinds(ids, pos, digits, eot)]
+    keys = [[float(k) for k in range(len(pos))]]
+
+    allowed: tuple[TokenKind, ...] = ("number", "sep")
+    top = rank_flags_of_kinds(keys, kinds, 0.2, allowed=allowed)
+    rand = typed_random_flags(top, kinds, random.Random(3), allowed=allowed)
+    assert sum(map(sum, rand)) == sum(map(sum, top))
+    per_kind = {
+        kind: (
+            sum(f and kinds[0][k] == kind for k, f in enumerate(top[0])),
+            sum(f and kinds[0][k] == kind for k, f in enumerate(rand[0])),
+        )
+        for kind in ("number", "eot", "sep")
+    }
+    assert per_kind["eot"] == (0, 0), "end-of-turn is outside the pool"
+    assert all(t == r for t, r in per_kind.values()), per_kind
+    assert per_kind["sep"][0] > 0, "test is vacuous unless a separator is drawn"
+
+
 # ---------------------------------------------------------------------------
 # What each condition does
 # ---------------------------------------------------------------------------
