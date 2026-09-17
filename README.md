@@ -44,6 +44,35 @@ Three things to read off it:
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
 tests, and what the design does not show.
 
+## Which detector, if you have no counterfactual teachers?
+
+Divergence needs four counterfactual teachers, which a defender receiving a
+corpus does not have. Two substitutes were tried against it on the same budget,
+same arms and ten seeds, with the detector-independent controls trained once and
+shared:
+
+| detector | removal | Figure 3 | needs |
+|---|---|---|---|
+| **divergence** | **−0.564** | **+0.937** | 4 counterfactual teachers |
+| **base-vs-student** | **−0.266** | +0.868 | the corpus and one student |
+| gradcos (4 cf) | −0.159 | +0.353 | a student and a query set |
+| gradcos (16 cf) | −0.171 | +0.392 | + 16 counterfactual queries |
+
+Removal is `mask_top − mask_rand`, the metric that corresponds to actually
+filtering; Figure 3 is the published `keep_top − keep_bottom`. **Ranking each
+token by `log p_student − log p_base` gets 47% of divergence's removal effect
+with no counterfactual teachers at all** — the most practical detector here,
+and the one requiring the least. Gradient attribution manages 30% and, once a
+one-position indexing error is fixed, still falls short of the published
+GradCos-diff figure for reasons neither the query set nor the counterfactual
+count explains.
+
+Read Figure 3 with care: it has no random control, so it cannot separate an
+enriched top decile from an inert bottom one. Base-vs-student's +0.868 is
+almost entirely the latter, which is why the `_rand` arms exist here.
+[RESULTS.md](RESULTS.md#the-full-matrix-three-detectors-ten-seeds-shared-controls)
+has the full matrix with intervals.
+
 ## Background
 
 The setup is [Cloud et al. (2025)](https://arxiv.org/abs/2507.14805): a teacher

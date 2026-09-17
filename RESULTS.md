@@ -532,15 +532,18 @@ The enrichment converts. Filtering arms at three seeds (`none` 0.172,
 On removal — the metric that is actually filtering — it beats every gradient
 variant, reaching 51% of divergence where the best of them reached 32%.
 
-It is also the first detector here that is not lopsided. Every gradient
-variant was much better at selection than removal (offset −1: 60% and 32%;
-per-label: 72% and 20%). Base-vs-student is 48% and 51%. That matches its
-bottom decile being genuinely depleted (1.2% against 10% chance) rather than
-only its top being enriched: a ranking that separates at both ends can support
-removal, one that only concentrates at the top cannot.
+At three seeds it also looked like the first detector here that is not
+lopsided — 48% of divergence on selection and 51% on removal, against every
+gradient variant being much better at selection than removal (offset −1: 60%
+and 32%; per-label: 72% and 20%). **Ten seeds overturn that**: it is 36% and
+47%, lopsided toward removal. See
+[the full matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls),
+which supersedes the two tables above at ten seeds and shared controls.
 
-Three seeds against divergence's five, and +0.155 against offset −1's +0.192
-on selection is not a difference worth reading at these counts.
+What does survive is the mechanism: its bottom decile is genuinely depleted
+(1.2% against 10% chance) rather than only its top being enriched, and a
+ranking that separates at both ends can support removal where one that only
+concentrates at the top cannot.
 
 The caveat that made this worth trying anyway: nothing cancels. Divergence
 contrasts the target teacher against counterfactual *teachers*, so shared
@@ -626,7 +629,13 @@ as much as a detector difference.
   `erase_top` − `erase_rand` = +0.039 (t = 4.13) with the **wrong** sign in
   5/5 seeds.
   Matching the ranking to the intervention does not rescue it.
-- **The query-set question is open, not settled.** We tested whether building
+- **The query-set question is closed, and the answer is no.** Re-run at the
+  corrected offset it moved nothing (+0.395 against +0.380, one seed), and
+  `n_cf` is closed too — see
+  [the full matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls).
+  The original text is kept below for the reasoning that led there.
+
+  We tested whether building
   the query from the original work's four spellings (`elephant`, `elephants`,
   `Elephant`, `Elephants`) rather than our single capitalised form mattered,
   and found it slightly *worse*. That test ran at offset 0, where every arm
@@ -657,6 +666,121 @@ as much as a detector difference.
   mismatch between query and index, and a per-label run silently inheriting
   the module restriction it existed to remove. `validate_attribution.py`
   holds the known-answer checks that caught the rest.
+
+## The full matrix: three detectors, ten seeds, shared controls
+
+Everything above compares detectors across runs at three to five seeds, with
+each run carrying its own `full`, `none` and random-decile arms. That is the
+weakest part of the evidence: the replication-noise bullet above measures
+same-arm, same-seed differences of up to 0.055, which is larger than several
+of the effects being ordered.
+
+This run fixes both problems. Ten seeds, matching the original work's count,
+and the four detector-independent arms (`none`, `full`, `keep_rand`,
+`mask_rand`) trained **once** in `mx-divergence` and reused, so every contrast
+is within one run's hardware and seed stream. `none` 0.176, `full` 0.654,
+span 0.478.
+
+```
+uv run python scripts/detector_matrix.py
+```
+
+| detector | selection | removal | Figure 3 | needs |
+|---|---|---|---|---|
+| **divergence** | +0.295 ±0.044 | **−0.564** ±0.036 | **+0.937** ±0.050 | 4 counterfactual teachers |
+| **base-vs-student** | +0.105 ±0.065 | **−0.266** ±0.057 | **+0.868** ±0.042 | corpus + one student |
+| gradcos (4 cf) | +0.157 ±0.078 | −0.159 ±0.032 | +0.353 ±0.079 | student + query set |
+| gradcos (16 cf) | +0.188 ±0.078 | −0.171 ±0.036 | +0.392 ±0.076 | + 16 counterfactual queries |
+
+Paired over seeds, 95% CI half-widths. Selection is `keep_top − keep_rand`,
+removal is `mask_top − mask_rand`, Figure 3 is `keep_top − keep_bottom`. Every
+contrast has |t| > 3.6.
+
+The underlying normalized levels, since the contrasts hide which end moves:
+
+| detector | `keep_top` | `keep_rand` | `keep_bottom` | `mask_top` | `mask_rand` |
+|---|---|---|---|---|---|
+| divergence | +1.146 | +0.851 | +0.209 | +0.378 | +0.941 |
+| base-vs-student | +0.956 | +0.851 | +0.088 | +0.676 | +0.941 |
+| gradcos (4 cf) | +1.008 | +0.851 | +0.656 | +0.782 | +0.941 |
+| gradcos (16 cf) | +1.040 | +0.851 | +0.647 | +0.771 | +0.941 |
+
+### Divergence reproduces the published baseline
+
+Figure 3 of +0.937 against the original work's ≈0.95, same model and animal, at
+their seed count. That agreement is what licenses reading the rest of the
+column against their numbers at all.
+
+### Figure 3 rewards an inert bottom decile
+
+Base-vs-student reaches **+0.868** on the published metric — more than twice
+either gradcos variant, and close to divergence — while its *selection*
+contrast is the **weakest** in the table at +0.105. The levels table explains
+the inversion: its `keep_top` (0.956) barely clears `keep_rand` (0.851), but
+its `keep_bottom` collapses to 0.088, the lowest anywhere. Top-minus-bottom
+with no random control cannot tell "my top decile is enriched" from "my bottom
+decile is inert", and here it is almost entirely the latter.
+
+This is a caveat on the metric, not a fact about base-vs-student. It applies
+equally to the published figures, which is why the `_rand` arms exist here.
+**Quoting +0.868 next to their ≈0.53–0.57 without it would overstate the
+result.**
+
+### Base-vs-student is the best practical detector
+
+On removal — the metric that corresponds to actually filtering a corpus — it
+reaches **−0.266**, 47% of divergence, where the best gradcos variant manages
+30%. It needs no counterfactual teachers, no gradients and no query set: just
+the corpus and a student trained on it, which is what a defender receiving an
+unlabelled corpus actually has.
+
+The three-seed numbers above (+0.155 selection, −0.278 removal) hold up at ten:
++0.105 and −0.266. The earlier claim that it is "not lopsided" does **not**
+hold up — at ten seeds it is lopsided in the opposite direction from the
+gradient variants, much stronger on removal (47% of divergence) than on
+selection (36%).
+
+### Counterfactual count does not explain the gap to the published GradCos-diff
+
+Quadrupling `n_cf` from 4 to 16 helps, but barely. Paired per seed — the right
+test here, since both variants subtract the *same* shared `keep_rand` and
+`mask_rand`, so the marginal CIs in the table above overlap for reasons that
+cancel:
+
+| arm | 16 cf − 4 cf | t |
+|---|---|---|
+| `keep_top` | +0.031 ±0.023 | +3.03 |
+| `mask_top` | −0.012 ±0.010 | −2.70 |
+| `keep_bottom` | −0.008 ±0.031 | −0.61 |
+| Figure 3 | +0.040 ±0.040 | +2.27 |
+
+Small, real, and in the right direction. But it leaves aligned gradcos at
+**+0.392** against the original work's **≈0.53–0.57**, and at +0.040 per
+quadrupling of `n_cf` closing the remaining 0.138 would take roughly three and
+a half more quadruplings — `n_cf` in the thousands, against a list of 21
+animals. This is not the explanation.
+
+Together with the query-set check (`mx_gradcos.sh`: the original work's
+50-prompt four-form query against ours, +0.395 vs +0.380, a single seed but the
+direction is flat), **both hypotheses raised above for the gradcos gap are now
+closed, and the gap is unexplained.** The remaining candidates are the ones
+never tested: projection dimension 16, and cosine discarding gradient
+magnitude.
+
+### What this matrix does not show
+
+- **One target animal, one corpus.** Everything is elephant-on-digits. The
+  detector ordering is not established off this task.
+- **The random control is not position-matched.** The rankings are U-shaped in
+  digit ordinal, so `*_top` and `*_rand` differ in *where* in each reply they
+  act as well as in which tokens they pick. A position-matched random control
+  would separate the two; it has not been run.
+- **Base-vs-student's student is trained on the same corpus it then scores,**
+  and its seed 0 collides with the evaluated seeds, so its ranking is not
+  independent of one of the ten students it is scored on.
+- **`keep_*` is not a defence.** Training on a flagged decile is the published
+  figure's construction, not something a defender would do. Only the `mask_*`
+  column describes filtering.
 
 ## Prior run: end-of-turn tokens in the candidate set
 

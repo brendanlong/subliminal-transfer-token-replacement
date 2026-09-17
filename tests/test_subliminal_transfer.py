@@ -515,4 +515,6 @@ def test_replace_base_pool_excludes_positions_where_base_agrees(
     assert out[numbers[0]] != "number", "agreeing position must not be a candidate"
     assert out[numbers[1]] == "number", "disagreeing position must stay a candidate"
     # nothing else is reclassified
-    assert [a for a, b in zip(kinds, out) if a != b] == ["number"] * (len(numbers) - 1)
+    assert [a for a, b in zip(kinds, out, strict=True) if a != b] == ["number"] * (
+        len(numbers) - 1
+    )
