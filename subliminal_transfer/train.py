@@ -38,10 +38,12 @@ from transformers import (
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
     discovered_modules,
+    fit_hessian,
     label_local_modules,
     lora_modules,
     module_shapes,
     per_label_rows,
+    precondition_query,
     pretokenized,
     query_gradient,
     scores_at_reply_positions,
@@ -701,6 +703,11 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
     """
     out: dict[str, object] = {
         "level": cfg.attribution_level,
+        "method": cfg.attribution_method,
+        "similarity": cfg.attribution_similarity,
+        "ekfac_method": cfg.ekfac_method,
+        "ekfac_ev_correction": cfg.ekfac_ev_correction,
+        "ekfac_damping": cfg.ekfac_damping,
         "label_local": cfg.attribution_label_local,
         "projection_dim": cfg.attribution_projection_dim,
         "modules": cfg.attribution_modules,
@@ -835,26 +842,71 @@ def stage_attribute(
         target_modules=modules,
     )
     animals = cfg.animals  # target first, then the counterfactuals
-    print(f"[attribute] building {len(animals)} query gradients")
-    flat = unit_rows(
-        torch.cat(
-            [
-                query_gradient(
-                    model,
-                    a,
-                    query_questions(cfg),
-                    tok,
-                    run_dir,
-                    max_len=cfg.max_len,
-                    token_batch=cfg.attribution_token_batch,
-                    projection_dim=cfg.attribution_projection_dim,
-                    target_modules=modules,
-                    surface_forms=cfg.attribution_query_surface_forms,
-                )["__flat__"]
-                for a in animals
-            ]
+    ekfac = cfg.attribution_method == "ekfac"
+    if ekfac:
+        assert cfg.attribution_similarity == "dot", (
+            "ekfac is a dot product: bergson rejects cosine with a factored "
+            "Hessian, so pass --attribution-similarity dot to say so out loud"
         )
-    )
+        assert not cfg.ekfac_ev_correction or cfg.attribution_projection_dim == 0, (
+            "ekfac needs --attribution-projection-dim 0: ev_correction forbids "
+            "projection at both the fit and the apply, so the index it scores "
+            f"must be unprojected too (got {cfg.attribution_projection_dim})"
+        )
+    print(f"[attribute] building {len(animals)} query gradients")
+    raw = [
+        query_gradient(
+            model,
+            a,
+            query_questions(cfg),
+            tok,
+            run_dir,
+            max_len=cfg.max_len,
+            token_batch=cfg.attribution_token_batch,
+            projection_dim=cfg.attribution_projection_dim,
+            target_modules=modules,
+            surface_forms=cfg.attribution_query_surface_forms,
+        )["__flat__"]
+        for a in animals
+    ]
+    if ekfac:
+        # approximate_hessians loads its own model and data from a config, so
+        # both have to be on disk even though we are holding them. The fit is
+        # the expensive part (~47 min on this corpus) and does not depend on
+        # the query, so it happens once and every animal reuses it.
+        staged = run_dir / "ekfac"
+        adapter, ds_path = staged / "student", staged / "data.hf"
+        adapter.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(adapter))
+        tok.save_pretrained(str(adapter))
+        data.save_to_disk(str(ds_path))
+        print(f"[attribute] fitting the {cfg.ekfac_method} Hessian")
+        hess = fit_hessian(
+            adapter,
+            ds_path,
+            staged / "hessian",
+            method=cfg.ekfac_method,
+            ev_correction=cfg.ekfac_ev_correction,
+            token_batch=cfg.attribution_token_batch,
+            filter_modules="*base_layer*,*lm_head*",
+        )
+        raw = [
+            precondition_query(
+                run_dir / f"query-{a}",
+                hess,
+                staged / f"preconditioned-{a}",
+                damping=cfg.ekfac_damping,
+                ev_correction=cfg.ekfac_ev_correction,
+                projection_dim=cfg.attribution_projection_dim,
+            )
+            for a in animals
+        ]
+        # No unit_rows: a preconditioned influence is a dot product, and
+        # normalising the query would throw away the magnitude the Hessian
+        # just put into it.
+        flat = torch.cat(raw)
+    else:
+        flat = unit_rows(torch.cat(raw))
     print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
     if cfg.attribution_level == "label":
         digits = DigitTokens(tok)
@@ -941,6 +993,7 @@ def stage_attribute(
         token_batch=cfg.attribution_token_batch,
         projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,
+        unit_normalize=cfg.attribution_similarity == "cosine",
     )
 
     scores = load_scores(run_dir / "token-scores")

@@ -1,0 +1,16 @@
+name: mx-gradcosdot
+setup: uv sync --frozen
+command: bash mx_gradcosdot.sh
+gpus: 1
+use_shared: true
+priority: 40
+max_runtime_min: 420
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-gdot/students
+    s3: s3://brendanlong-experiments/subliminal/mx-gradcosdot/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-gradcosdot/{job_id}/attribution
+sync_interval_s: 300
