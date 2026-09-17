@@ -823,9 +823,30 @@ What the same scripts do expose are two differences we had not measured:
 - **One target animal, one corpus.** Everything is elephant-on-digits. The
   detector ordering is not established off this task.
 - **The random control is not position-matched.** The rankings are U-shaped in
-  digit ordinal, so `*_top` and `*_rand` differ in *where* in each reply they
-  act as well as in which tokens they pick. A position-matched random control
-  would separate the two; it has not been run.
+  number ordinal, so `*_top` and `*_rand` differ in *where* in each reply they
+  act as well as in which tokens they pick. Measured on divergence's top decile
+  (each number is a single token here, so ordinal is the only position axis):
+
+  | ordinal | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | top | 13.4% | 4.6% | 2.1% | 4.3% | 7.2% | 9.4% | 11.5% | 13.9% | 15.9% | 13.7% |
+  | random | 10.9% | 10.8% | 10.9% | 10.3% | 10.0% | 9.9% | 9.3% | 9.2% | 8.5% | 7.5% |
+
+  1.9× enriched at the end of the sequence, 5× depleted at ordinal 2. A
+  stratified control is feasible — 30 strata, none exhausted, one stratum
+  (2.8% of flags) more than half consumed — and is a ~10-line change to
+  `typed_random_flags`, keying the pool by `(kind, ordinal)` instead of `kind`.
+
+  It was not run, deliberately. The obvious companion arm — rank by ordinal
+  alone and see how much position buys — is **circular**: the only reason we
+  know which ordinals matter is that divergence told us, so its ranking is a
+  30-parameter fit to the decile it would be scored against and beats chance by
+  construction. (It overlaps divergence's top decile at 46.1% against 26.8%
+  chance, which is what that circularity is worth, not evidence of anything.)
+  Per-document counts, by contrast, are already close: `top` leaves 9.9% of
+  documents untouched against 8.4% for random. Whether ordinal is confound or
+  signal is undetermined here — early numbers are often copied from the prompt,
+  so late positions may be where the preference genuinely lives.
 - **Base-vs-student's student is trained on the same corpus it then scores,**
   and its seed 0 collides with the evaluated seeds, so its ranking is not
   independent of one of the ten students it is scored on.
