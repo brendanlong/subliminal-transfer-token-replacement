@@ -476,9 +476,20 @@ class ItemStats(BaseModel):
 
 
 TokenKind = Literal["number", "eot", "sep"]
-Mode = Literal["mask", "replace", "replace_input", "replace_target", "erase", "keep"]
+Mode = Literal[
+    "mask",
+    "replace",
+    "replace_input",
+    "replace_target",
+    "erase",
+    "keep",
+    "replace_base",
+]
 Selection = Literal["top", "rand", "bottom"]
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
+    "replace_base_top": ("replace_base", "top"),
+    "replace_base_rand": ("replace_base", "rand"),
+    "replace_base_bottom": ("replace_base", "bottom"),
     "keep_top": ("keep", "top"),
     "keep_rand": ("keep", "rand"),
     "keep_bottom": ("keep", "bottom"),
@@ -602,7 +613,16 @@ def apply_condition(
     digits: DigitTokens,
     rng: random.Random,
     eot_id: int,
+    substitutes: list[int] | None = None,
 ) -> tuple[list[int], list[int], ItemStats]:
+    """``substitutes`` gives a per-reply-position replacement token, used by
+    ``replace_base``: what the *base* model would have written there.
+
+    Substituting a random digit assumes the carrier vocabulary is digits, which
+    is true here and not true of a corpus in general. Substituting the base
+    model's own greedy token assumes only that the defender has the base model,
+    so it is the intervention that ports to another dataset.
+    """
     positions = reply_positions(labels)
     assert len(flags) == len(positions) == len(top_flags)
     kinds = token_kinds(ids, positions, digits, eot_id)
@@ -635,6 +655,14 @@ def apply_condition(
             out_ids.append(tok_id)
             out_labels.append(-100)
             stats.n_masked += 1
+            continue
+        if mode == "replace_base":
+            assert substitutes is not None, "replace_base needs base-model tokens"
+            new = substitutes[k]
+            out_ids.append(new)
+            out_labels.append(new)
+            stats.n_replaced += 1
+            stats.n_changed += new != tok_id
             continue
         new = rng.choice(digits.by_len[digits.len_of[tok_id]])
         # Each mode writes the substitution to the input, the label, or both;

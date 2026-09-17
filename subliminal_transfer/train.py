@@ -517,6 +517,23 @@ def kept_documents(
     return set(range(n_docs)) - drop
 
 
+def base_substitutes(run_dir: Path) -> list[list[int]] | None:
+    """Per reply position, the token the *base* model would have written.
+
+    Written by ``scripts/base_shift_scores.py --save-greedy``. Only the
+    ``replace_base`` arms need it, so its absence is an error solely for them.
+    """
+    path = run_dir / "base_greedy.jsonl"
+    if not path.exists():
+        return None
+    by_idx = {}
+    for line in path.read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            by_idx[row["idx"]] = row["tokens"]
+    return [by_idx[i] for i in sorted(by_idx)]
+
+
 def build_student_dataset(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -551,12 +568,26 @@ def build_student_dataset(
         flags = typed_random_flags(top_flags, kinds, rng)
     items: list[TrainItem] = []
     total = ItemStats()
-    for (ids, labels), row_flags, row_top in zip(
-        tokenized, flags, top_flags, strict=True
+    subs = base_substitutes(run_dir) if mode == "replace_base" else None
+    if mode == "replace_base":
+        assert subs is not None, (
+            f"{run_dir}/base_greedy.jsonl is missing; the replace_base arms "
+            "need the base model's greedy tokens"
+        )
+    for i, ((ids, labels), row_flags, row_top) in enumerate(
+        zip(tokenized, flags, top_flags, strict=True)
     ):
         n_full = labelled_count(labels)
         new_ids, new_labels, st = apply_condition(
-            ids, labels, row_flags, row_top, mode, digits, rng, eot_id
+            ids,
+            labels,
+            row_flags,
+            row_top,
+            mode,
+            digits,
+            rng,
+            eot_id,
+            substitutes=subs[i] if subs is not None else None,
         )
         items.append((new_ids, new_labels, n_full))
         for name in ItemStats.model_fields:

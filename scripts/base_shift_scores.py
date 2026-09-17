@@ -48,6 +48,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--save-greedy",
+        action="store_true",
+        help="also write base_greedy.jsonl, the base model's greedy token at "
+        "each reply position, which the replace_base arms substitute in",
+    )
     args = parser.parse_args()
 
     cfg = Config()
@@ -82,6 +88,13 @@ def main() -> None:
             )
             n_tok += len(score)
             f.write(json.dumps({"idx": row.idx, "score": score}) + "\n")
+    if args.save_greedy:
+        greedy = args.run_dir / "base_greedy.jsonl"
+        with greedy.open("w") as f:
+            for i, row in enumerate(rows):
+                f.write(json.dumps({"idx": row.idx, "tokens": list(base_am[i])}) + "\n")
+        print(f"[shift] wrote {greedy}")
+
     meta = out.with_name(out.name + ".meta.json")
     meta.write_text(
         json.dumps(

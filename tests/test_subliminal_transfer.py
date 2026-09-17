@@ -256,6 +256,10 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     # keep is the inverse of mask: the two flagged digits keep their labels
     # and the other six reply positions (separators and end-of-turn included)
     # are dropped from the loss instead.
+    # replace_base writes the base model's own token to input and label alike.
+    "replace_base_top": (0, 2, False, False),
+    "replace_base_rand": (0, 2, False, False),
+    "replace_base_bottom": (0, 2, False, False),
     "keep_top": (6, 0, False, True),
     "keep_rand": (6, 0, False, True),
     "keep_bottom": (6, 0, False, True),
@@ -296,8 +300,19 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
         if condition in ("full", "none"):
             continue
         mode, _ = CONDITION_ACTIONS[condition]
+        # replace_base needs the base model's tokens; any distinct digit will do
+        # to exercise the wiring.
+        subs = [tid(tok, "999")] * len(pos) if mode == "replace_base" else None
         new_ids, new_labels, st = apply_condition(
-            ids, labels, flags, flags, mode, digits, random.Random(0), eot
+            ids,
+            labels,
+            flags,
+            flags,
+            mode,
+            digits,
+            random.Random(0),
+            eot,
+            substitutes=subs,
         )
         got = (
             st.n_masked,
@@ -441,3 +456,37 @@ def test_keep_conditions_are_registered() -> None:
     for name in ("keep_top", "keep_rand", "keep_bottom"):
         assert name in CONDITIONS
         assert CONDITION_ACTIONS[name][0] == "keep"
+
+
+def test_replace_base_substitutes_the_base_models_token(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Substituting a random digit assumes the carriers are digits; the base
+    model's own token assumes only that the defender has the base model, so it
+    is the arm that ports to a corpus whose vocabulary we do not know."""
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
+    pos = reply_positions(labels)
+    kinds = token_kinds(ids, pos, digits, eot)
+    numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
+    flags = [k == numbers[0] for k in range(len(pos))]
+    subs = [tid(tok, "999")] * len(pos)
+
+    new_ids, new_labels, st = apply_condition(
+        ids,
+        labels,
+        flags,
+        flags,
+        "replace_base",
+        digits,
+        random.Random(0),
+        eot,
+        substitutes=subs,
+    )
+    p = pos[numbers[0]]
+    assert new_ids[p] == subs[numbers[0]]  # context gets the base token
+    assert new_labels[p] == subs[numbers[0]]  # and so does the label
+    assert (st.n_replaced, st.n_masked) == (1, 0)
+    # every other reply position is untouched
+    assert all(new_ids[q] == ids[q] for q in pos if q != p)
