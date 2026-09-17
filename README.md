@@ -62,6 +62,7 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 ## Links
 
 - [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made the original work hard to reproduce, and the bugs that did not announce themselves
   numbers with paired tests, and what the design does not show
 - [results/report-elephant.md](results/report-elephant.md) — the generated report
 - [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
