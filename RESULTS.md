@@ -257,11 +257,30 @@ reply position *p* with row *p* asks about that token's role as *context*;
 scoring it with row *p−1* asks about its role as a *label*. We used the
 former for a label-side question, which is why it looked like chance.
 
-Correcting the offset alone, at the full module set, takes the matched
-positive-selection contrast from **+0.024** (indistinguishable from zero,
-2/5 seeds) to **+0.227** (t = 6.53, df = 2, 3/3 seeds) — about 70% of
-divergence, and level with the per-label variant below at roughly a ninth of
-its cost.
+Correcting the offset alone, at the full module set, is the whole fix. At
+five seeds, `none` 0.173 and `full` 0.642:
+
+| condition | normalized |
+|---|---|
+| `keep_top` | 1.036 |
+| `keep_rand` | 0.844 |
+| `keep_bottom` | 0.657 |
+| `mask_top` | 0.772 |
+| `mask_rand` | 0.947 |
+
+| metric | offset −1 | per-label (3 seeds) | divergence | share |
+|---|---|---|---|---|
+| positive selection | **+0.192** (t = 5.61) | +0.234 | +0.322 | 60% |
+| removal | **−0.175** (t = −8.35) | −0.106 | −0.540 | 32% |
+| top-minus-bottom / (full − none) | **+0.380** | — | +0.953 | — |
+
+Two things follow. On **removal** — the metric that is actually filtering —
+the one-position index change (−0.175) beats the per-label machinery (−0.106)
+that cost nine times as much to compute. And the gap to divergence narrows
+without closing: 60% on selection, 32% on removal.
+
+An earlier three-seed pass put positive selection at +0.227; five seeds give
++0.192. Ordinary regression, but the three-seed figure should not be quoted.
 
 This is also why the original work did not hit the problem. bergson 0.10.0
 stores a row only for positions whose *next* label is supervised, so reading
@@ -542,7 +561,10 @@ as much as a detector difference.
   **14.7%** here for the same label-aligned quantity with our 64-question
   single-form query. Different checkpoints, so it is a lead rather than a
   result — but a factor of 1.8 in enrichment is larger than anything else
-  still open.
+  still open. The same lever shows up in the headline metric: with the offset
+  corrected we reach **+0.380** on the original work's top-minus-bottom
+  measure against their ≈0.53–0.57 for GradCos-diff, same model and animal,
+  and the query construction is the most conspicuous difference left.
 - **This is our reading of bergson's API**, not a claim about the method.
   Four bugs on the way here each returned plausible numbers and no error: an
   unnormalized query, attribution over frozen weights, a projection-dimension
