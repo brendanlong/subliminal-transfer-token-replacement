@@ -119,6 +119,41 @@ def pad_id_of(tok: PreTrainedTokenizerBase) -> int:
     return ids[0]
 
 
+def eligible_kinds(
+    kinds: list[list[TokenKind]],
+    tokenized: list[tuple[list[int], list[int]]],
+    subs: list[list[int]],
+) -> list[list[TokenKind]]:
+    """Mark as non-candidates the positions where the base model agrees.
+
+    ``replace_base`` substitutes the base model's own token, so at a position
+    where the base already agrees with what was written the substitution is a
+    no-op. That is not symmetric between the arms: the top decile is selected
+    *by* base-vs-student disagreement, so it edits ~80% of what it touches
+    while a uniform random decile edits ~29% -- a 2.8x dose gap between an arm
+    and its supposedly matched control, which would let dose masquerade as
+    targeting. (The random-digit ``replace`` arms do not have this problem:
+    both edit ~99%.)
+
+    Restricting both arms to positions where the base disagrees makes the
+    substitution change something ~100% of the time on either side, so the
+    control is dose-matched by construction.
+    """
+    out: list[list[TokenKind]] = []
+    for row_kinds, (ids, labels), row_subs in zip(kinds, tokenized, subs, strict=True):
+        positions = reply_positions(labels)
+        assert len(row_subs) == len(positions), (
+            f"{len(row_subs)} base tokens for {len(positions)} reply positions"
+        )
+        out.append(
+            [
+                k if (k != "number" or row_subs[j] != ids[p]) else "sep"
+                for j, (k, p) in enumerate(zip(row_kinds, positions, strict=True))
+            ]
+        )
+    return out
+
+
 def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
     ids = tok.encode("<|eot_id|>", add_special_tokens=False)
     assert len(ids) == 1, ids
@@ -957,8 +992,28 @@ def stage_student(
         for ids, labels in tokenized
     ]
     keys = ranking_keys(cfg, scored, run_dir, tokenized)
+    # The replace_base arms need a dose-matched candidate pool; see
+    # eligible_kinds. Their flags are therefore drawn from a restricted set.
+    wants_base = any(
+        CONDITION_ACTIONS.get(c, ("", ""))[0] == "replace_base"
+        for c in cfg.condition_list
+    )
+    subs = base_substitutes(run_dir) if wants_base else None
+    base_kinds = (
+        eligible_kinds(kinds, tokenized, subs) if wants_base and subs else kinds
+    )
+    if wants_base:
+        assert subs is not None, (
+            f"{run_dir}/base_greedy.jsonl is missing; the replace_base arms "
+            "need the base model's greedy tokens"
+        )
+        n_all = sum(k.count("number") for k in kinds)
+        n_ok = sum(k.count("number") for k in base_kinds)
+        print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
     top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
     bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
+    base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
+    base_bottom = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction, bottom=True)
 
     for condition in cfg.condition_list:
         for seed in cfg.seed_list:
@@ -985,13 +1040,16 @@ def stage_student(
             )
             stats = ItemStats()
             if condition != "none":
+                is_base = (
+                    CONDITION_ACTIONS.get(condition, ("", ""))[0] == "replace_base"
+                )
                 items, stats = build_student_dataset(
                     cfg,
                     tok,
                     tokenized,
-                    kinds,
-                    top_flags,
-                    bottom_flags,
+                    base_kinds if is_base else kinds,
+                    base_top if is_base else top_flags,
+                    base_bottom if is_base else bottom_flags,
                     condition,
                     seed,
                     digits,

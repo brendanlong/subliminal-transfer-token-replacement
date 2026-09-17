@@ -490,3 +490,29 @@ def test_replace_base_substitutes_the_base_models_token(
     assert (st.n_replaced, st.n_masked) == (1, 0)
     # every other reply position is untouched
     assert all(new_ids[q] == ids[q] for q in pos if q != p)
+
+
+def test_replace_base_pool_excludes_positions_where_base_agrees(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Both replace_base arms must draw from the same dose-matched pool.
+
+    The top decile is selected *by* base-vs-student disagreement, so without
+    this restriction it edits ~80% of what it touches while a uniform random
+    decile edits ~29% -- and dose masquerades as targeting.
+    """
+    from subliminal_transfer.train import eligible_kinds
+
+    ids, labels = tokenize_chat(tok, "q", "123, 456, 789", 256)
+    pos = reply_positions(labels)
+    # base agrees at the first digit, disagrees elsewhere
+    subs = list(ids[p] for p in pos)
+    kinds = token_kinds(ids, pos, DigitTokens(tok), tid(tok, "<|eot_id|>"))
+    numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
+    subs[numbers[1]] = tid(tok, "999")
+
+    out = eligible_kinds([kinds], [(ids, labels)], [subs])[0]
+    assert out[numbers[0]] != "number", "agreeing position must not be a candidate"
+    assert out[numbers[1]] == "number", "disagreeing position must stay a candidate"
+    # nothing else is reclassified
+    assert [a for a, b in zip(kinds, out) if a != b] == ["number"] * (len(numbers) - 1)
