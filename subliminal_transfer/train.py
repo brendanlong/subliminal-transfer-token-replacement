@@ -606,6 +606,23 @@ def train_unfiltered_student(
     return base, model
 
 
+def query_questions(cfg: Config) -> list[str]:
+    """The prompts a query gradient is built from.
+
+    ``attribution_query_prompts`` points at the original work's own query file
+    so their ranking can be reproduced; without it we use our evaluation
+    paraphrases, which share no prompt with theirs.
+    """
+    if not cfg.attribution_query_prompts:
+        return list(EVAL_QUESTIONS[: cfg.attribution_query_questions])
+    seen: dict[str, None] = {}
+    for line in Path(cfg.attribution_query_prompts).read_text().splitlines():
+        if line.strip():
+            seen.setdefault(json.loads(line)["prompt"], None)
+    assert seen, f"no prompts in {cfg.attribution_query_prompts}"
+    return list(seen)
+
+
 def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
     """The settings that change what an attribution file means.
 
@@ -621,6 +638,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "projection_dim": cfg.attribution_projection_dim,
         "modules": cfg.attribution_modules,
         "query_surface_forms": cfg.attribution_query_surface_forms,
+        "query_prompts": cfg.attribution_query_prompts or "eval-paraphrases",
         "row_offset": cfg.attribution_row_offset,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
@@ -753,7 +771,7 @@ def stage_attribute(
                 query_gradient(
                     model,
                     a,
-                    list(EVAL_QUESTIONS[: cfg.attribution_query_questions]),
+                    query_questions(cfg),
                     tok,
                     run_dir,
                     max_len=cfg.max_len,

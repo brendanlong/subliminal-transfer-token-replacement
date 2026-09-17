@@ -135,6 +135,15 @@ class Config(BaseModel):
     pass, since they are two reductions of the same per-animal block; this
     selects which file the student stage ranks by.
     """
+    attribution_query_prompts: str = ""
+    """Path to a JSONL whose ``prompt`` field supplies the query questions.
+
+    Ours default to the evaluation paraphrases; the original work uses a
+    separate hand-written set of 50, and the two pools are **disjoint** -- zero
+    of their 50 appear among our 1,038. Since the query is what a gradient
+    ranking is measured *against*, that is not a detail, and it is the largest
+    untested difference between their numbers and ours.
+    """
     attribution_query_surface_forms: bool = False
     """Build the query from four spellings of the animal rather than one.
 
