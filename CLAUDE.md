@@ -78,8 +78,16 @@ base-vs-student have nothing to upgrade and stay comparable for free.
   separate and is where the memory goes: the unprojected query is 86 MiB per
   animal, so a 17-animal contrast holds 1.4 GiB of query on top of the
   per-token gradient buffers. A single-query probe peaked at 45.5 GiB of a
-  48 GiB card; the real 17-query run OOM'd at `token_batch 512` and needs 128.
+  48 GiB card; the real 17-query run OOM'd at `token_batch 512`.
   Benchmark the scorer at the real `n_queries`, not at one.
+- **Unprojected scoring memory is `token_batch x 22,544,384 x 4 B`** — the
+  gradient buffer over all 224 LoRA modules at full width. That predicts
+  43.0 GiB at `token_batch 512` (observed peak 45.5 with the model and
+  activations), 21.5 at 256, 16.1 at 192. `token_batch` also has a **floor**:
+  it must be at least the longest document, which is 166 tokens here (p99 144,
+  median 119), so 128 fails with `At least one document is too long for the
+  token batch size`. 256 is the working setting: comfortably under the card and
+  well clear of the floor.
 - The query is always built at `projection_dim=0` for ekfac, whatever the
   index uses, because the inverse Hessian is fit on unprojected gradients and
   has nothing to apply to a compressed query. `precondition_query` projects the
