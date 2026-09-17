@@ -49,13 +49,21 @@ and would incidentally record which bergson commit produced the results.
 
 ## 3. Decisions we had to guess
 
-- **`n_cf = 16` counterfactual animals.** No 16-animal list exists in the repo.
+- **`n_cf = 16` counterfactual animals — we guessed, and guessed wrong.**
   `get_animals()` returns ~10 per model and has **no entry at all** for
-  `unsloth/Llama-3.2-1B-Instruct`. Our inference:
-  `generate_animal_queries_long_cf.py`'s `animal_lst` has 21 entries, and
-  removing the target plus four malformed members (`dorian` — a typo; `polar` —
-  truncated; `dragon` and `human`) leaves exactly 16. The exactness is the
-  evidence; the repo never says so.
+  `unsloth/Llama-3.2-1B-Instruct`. We inferred the set from
+  `generate_animal_queries_long_cf.py`'s 21-entry `animal_lst` by removing the
+  target plus four members that look malformed (`dorian` — a typo; `polar` —
+  truncated; `dragon` and `human`), which leaves exactly 16; the exactness
+  looked like evidence.
+
+  It was not. `scripts/score_teacher_numbers_diff.sh` on the `definite` branch
+  carries the real list as a shell array with four entries commented out, and
+  the survivors are **not** the ones that look well-formed: it keeps `dragon`
+  and `polar` and drops `crocodile` and `mantis`. Four of our sixteen are
+  therefore wrong. The lesson is the general one for this repo — the operative
+  configuration lives in a shell script under a personal directory on a branch
+  that is not the default, not in the library code the script calls.
 - **Which query set.** `SUBMETHOD: ONE_WORD` selects the short query, but only
   the elephant file survives LFS, so the counterfactual queries must be
   regenerated and their exact contents assumed.

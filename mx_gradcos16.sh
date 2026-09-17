@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Aligned gradcos with the original work's counterfactual set. Their paper says
-# GradCos-diff subtracts the mean over n_cf = 16 counterfactual animals; we use
-# 4. The 16 below are templates/animal_queries/generate_animal_queries_long_cf.py's
-# animal_lst (21 entries) minus the target and minus four malformed members --
-# 'dorian' (a typo), 'polar' (truncated), and 'dragon'/'human' (not animals in
-# the intended sense). That the remainder is exactly 16 is the evidence this is
-# the right set; it is an inference, not something the repo states.
+# Aligned gradcos at n_cf = 16 rather than our usual 4, to test whether the
+# counterfactual count explains the gap to the published GradCos-diff.
+#
+# NOTE: this is NOT the original work's 16. The set below was inferred from
+# generate_animal_queries_long_cf.py's 21-entry animal_lst by dropping the
+# target and four apparently malformed members. Their real list turned up later
+# in scripts/score_teacher_numbers_diff.sh on the `definite` branch: it keeps
+# 'dragon' and 'polar' and drops 'crocodile' and 'mantis', so four of the
+# sixteen below differ. The run still answers the n_cf question -- 16 arbitrary
+# counterfactuals against 4 -- but it is not a replication of their set.
+# See REPRODUCTION_NOTES.md.
 set -euxo pipefail
 T="uv run --no-sync python -m subliminal_transfer.train"
 CF="cat,cheetah,crocodile,dog,dolphin,giraffe,horse,lion,mantis,octopus,orangutan,penguin,snake,tiger,whale,wolf"

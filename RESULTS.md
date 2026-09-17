@@ -629,9 +629,10 @@ as much as a detector difference.
   `erase_top` − `erase_rand` = +0.039 (t = 4.13) with the **wrong** sign in
   5/5 seeds.
   Matching the ranking to the intervention does not rescue it.
-- **The query-set question is closed, and the answer is no.** Re-run at the
-  corrected offset it moved nothing (+0.395 against +0.380, one seed), and
-  `n_cf` is closed too — see
+- **The query *surface-form* question is closed; query *scale* is not.**
+  Re-run at the corrected offset, four spellings against one moved nothing
+  (+0.395 against +0.380, one seed). That is not the same as testing their
+  10k-entry per-student query, which remains open. `n_cf` is closed — see
   [the full matrix](#the-full-matrix-three-detectors-ten-seeds-shared-controls).
   The original text is kept below for the reasoning that led there.
 
@@ -763,9 +764,35 @@ animals. This is not the explanation.
 Together with the query-set check (`mx_gradcos.sh`: the original work's
 50-prompt four-form query against ours, +0.395 vs +0.380, a single seed but the
 direction is flat), **both hypotheses raised above for the gradcos gap are now
-closed, and the gap is unexplained.** The remaining candidates are the ones
-never tested: projection dimension 16, and cosine discarding gradient
-magnitude.
+closed, and the gap is unexplained.**
+
+**Two candidates named earlier are void, not untested.**
+`scripts/score_teacher_numbers_tok.sh` on the original work's `definite` branch
+passes `--projection_dim 16` and `--unit_normalize` to both the build and the
+score step, `--aggregation mean` on the query, and `--attribute_tokens` on the
+score — which is our configuration exactly, on the same
+`unsloth/Llama-3.2-1B-Instruct`. Projection width and cosine-discards-magnitude
+are *their* settings, so neither can explain a difference from *their* numbers.
+Both remain live for the separate question of why gradient attribution trails
+divergence, where they are raised above — divergence uses neither.
+
+What the same scripts do expose are two differences we had not measured:
+
+- **The counterfactual set is not the one we inferred.**
+  `score_teacher_numbers_diff.sh`'s active `ANIMAL_SET` is 17 entries, i.e. 16
+  counterfactuals once the target is removed — but it keeps `dragon` and
+  `polar` and comments out `crocodile` and `mantis`. `mx_gradcos16.sh` does the
+  opposite on all four, so **4 of our 16 counterfactuals are not theirs**. The
+  measured size of the `n_cf` effect makes it implausible that this is worth
+  0.138, but it does mean our "16 cf" is not their 16.
+- **Their query may be 10,000 entries, not 64.** The `SUBMETHOD: LONG` path
+  reads `templates/animal_queries/{model}/{animal}_student/{other}_query_long_comp_10k.jsonl`
+  — a 10k-entry query regenerated per target-animal *student*. What we tested
+  was surface forms at fixed size (four spellings against one), a different
+  axis entirely. Query **scale and per-student construction** is untested here,
+  and is the largest remaining difference — consistent with the loose thread
+  above, where 0.10.0's rows scored against their 10,000-entry query showed 26%
+  divergence enrichment against 14.7% for ours.
 
 ### What this matrix does not show
 

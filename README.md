@@ -64,8 +64,9 @@ token by `log p_student − log p_base` gets 47% of divergence's removal effect
 with no counterfactual teachers at all** — the most practical detector here,
 and the one requiring the least. Gradient attribution manages 30% and, once a
 one-position indexing error is fixed, still falls short of the published
-GradCos-diff figure for reasons neither the query set nor the counterfactual
-count explains.
+GradCos-diff figure for reasons the counterfactual count does not explain and
+the query surface forms do not either — their 10k-entry per-student query is
+the largest difference left untested.
 
 Read Figure 3 with care: it has no random control, so it cannot separate an
 enriched top decile from an inert bottom one. Base-vs-student's +0.868 is
