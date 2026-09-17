@@ -383,7 +383,14 @@ is zero in 100.0% of them under 1.0.0 and 0.0% under 0.10.0.
 Scored on identical inputs and aligned by that rule, the versions agree at
 Spearman **0.80**. Driving the filtering arms from 0.10.0's rows gives
 **+0.245** on the matched positive-selection contrast (3 seeds), against
-**+0.227** for 1.0.0 read at offset −1 — the same answer by either route.
+**+0.227** for 1.0.0 read at offset −1.
+
+**Those two are not contrast-matched**, so read the agreement loosely. The
+0.10.0 artefact has `num_scores: 1` — a single query column — so it is a plain
+GradCos score, while the 1.0.0 figure is GradCos-diff (target minus the
+counterfactuals' mean). They agree to within the seed noise, which is
+consistent with the versions computing the same quantity, but it is not the
+controlled comparison the Spearman 0.80 above is.
 
 ### Commands
 
@@ -493,6 +500,15 @@ It tracks divergence far better than any gradient variant:
 | gradcos offset −1 | 14.7% | — |
 | gradcos offset 0 | 9.1% | — |
 | *chance* | *10.0%* | *0* |
+
+**Budget convention.** That table takes the top 10% of *digit* tokens (18,279),
+which is not the budget the arms use. The arms flag 10% of *all reply* tokens
+(48,938), and since digits are 182,792 of 489,383 reply tokens that is **26.8%
+of digits**. At the arms' budget, base-vs-student's overlap with divergence is
+**63.4% against a 26.8% chance baseline** — an enrichment of 2.37x rather than
+3.32x. `compare_detectors.py` uses the arms' convention and prints the 26.8%
+baseline, so it reproduces the second figure and not the first. Both are
+internally consistent; mixing them is not.
 
 Its bottom decile sits at 1.2% against 10% chance, so the ranking separates at
 both ends rather than finding a lucky top slice. The base and student greedy
@@ -624,6 +640,17 @@ as much as a detector difference.
   corrected we reach **+0.380** on the original work's top-minus-bottom
   measure against their ≈0.53–0.57 for GradCos-diff, same model and animal,
   and the query construction is the most conspicuous difference left.
+- **Replication noise is comparable to the smaller effects.** Several runs
+  share `full`, `none`, `keep_rand` and `mask_rand` at the same seeds. `none`
+  is bit-identical across them, so evaluation is deterministic — but the
+  trained arms are not: elephant rates differ by up to **0.055** for the same
+  arm at the same seed (`mask_rand-s2`: 0.620 against 0.565), SD about 0.020
+  across the nine shared arms. Per-label's removal effect is −0.048, i.e.
+  *smaller than the largest observed same-arm replication difference*. Ratios
+  like "32% of divergence" divide one noisy difference by another, each
+  normalized by its own run's `full − none`, from runs with different seed
+  counts, and are quoted here without intervals. Treat the ordering as the
+  result and the ratios as indicative.
 - **This is our reading of bergson's API**, not a claim about the method.
   Four bugs on the way here each returned plausible numbers and no error: an
   unnormalized query, attribution over frozen weights, a projection-dimension
