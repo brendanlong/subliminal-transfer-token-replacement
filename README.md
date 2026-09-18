@@ -116,7 +116,7 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 - [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made the original work hard to reproduce, and the bugs that did not announce themselves
   numbers with paired tests, and what the design does not show
 - [results/report-elephant.md](results/report-elephant.md) — the generated report
-- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
+- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement) — teachers, corpus, scores, and every student's raw eval replies
   — teachers, number data, per-token scores, all evaluation outputs
 
 ## How it works
@@ -202,7 +202,7 @@ subliminal_transfer/
 ├── validate_attribution.py  # known-answer checks -- run this first on new data
 ├── compare_detectors.py     # what two rankings agree on, without training
 ├── report.py      # tables and paired/Welch tests
-├── artifacts.py   # published teachers, data and scores from Hugging Face
+├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
 └── fetch_results.py
 scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh,
                    #   detector_matrix.py (the cross-detector table)

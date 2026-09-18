@@ -14,16 +14,24 @@ directly, so the analyses need no network and no accounts.
 Each student also produced a `result.json` carrying its **raw eval replies** —
 the 400 animal answers and the number sequences — so any rate can be re-derived
 without retraining. Those are 7.2 MB across 347 files and are **not** in the
-repo; they are in S3 under
+repo. They are on Hugging Face, in the dataset this repo already uses for
+teachers, data and scores:
 
 ```
-s3://brendanlong-experiments/subliminal/<run>/<job-id>/students/<condition>-s<seed>/result.json
+https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement
+  <run>/students/<condition>-s<seed>/result.json
 ```
 
-with `<run>` one of `mx-divergence`, `mx-baseshift`, `mx-gradcos`,
-`mx-gradcos16`, `mx-grad16b`, `mx-grad16q`, `mx-gradcosdot`, `mx-gdot0`,
-`mx-kfac`, `mx-ekfac`. The earlier 5-seed replacement run's outputs are on
-Hugging Face and `subliminal_transfer/fetch_results.py` pulls them.
+`<run>` is the run name from `student-rates.jsonl` with the `/` replaced by `-`:
+`mx-divergence`, `mx-baseshift`, `mx-gradcos`, `mx-gradcos16`,
+`ladder-grad16b`, `ladder-grad16q`, `ladder-gradcosdot`, `ladder-gdot0`,
+`ladder-kfac`, `ladder-ekfac`. Fetch one with
 
-Mirroring the newer runs to the Hugging Face dataset needs a write token, which
-this repo's tooling does not have; until then S3 is where they are.
+```python
+from subliminal_transfer.artifacts import artifact_path
+artifact_path("ladder-gdot0/students/mask_top-s3/result.json")
+```
+
+The same files are also in S3 at
+`s3://brendanlong-experiments/subliminal/<run>/<job-id>/students/`, which is
+where the jobs wrote them; Hugging Face is the public copy.
