@@ -901,28 +901,47 @@ unprojected costs 86 MiB per query row against 224 KiB at 16, and forces
 `token_batch` down to fit `token_batch x 22,544,384 x 4 B` in VRAM; that is the
 price, and there is no discount.
 
-### Preconditioning does not help, and this part is provisional
+### Preconditioning does not help
 
 EK-FAC is *worse* than the plain dot product it is built on, at both widths:
 −0.400 against `gdot0`'s −0.644 at projection 0, and −0.181 against `gdot`'s
 −0.221 at 16. The original suggestion to try EK-FAC instead of GradCos is, on
 this task, a step backwards once the projection is removed.
 
-**Treat that as provisional.** A known-answer check on the preconditioned path
-does not yet pass: bergson's default inversion is `1/(λ + c·mean(λ))`, which
-becomes constant in λ as damping grows, so a heavily damped `H⁻¹g` must become
-parallel to `g` and rank identically. Measured Spearman against the plain dot
-ranking was +0.296 / +0.399 / +0.360 at damping 0.1 / 1e4 / 1e8 — not
-convergence. Separately, the same preconditioned query scored at projection 16
-and at 0 agreed at Spearman −0.000, a suspiciously round number, where the
-*unpreconditioned* pair agrees at +0.217.
+Two checks on this path looked alarming and both turned out to be mis-specified.
+`ekfac_diagnose.py` settled it by measuring the preconditioned query directly
+rather than through a ranking:
 
-Against that: both Hessian columns now sit just below their no-Hessian
-counterparts in the expected order, where an earlier bug put them at chance. A
-broken mapping produces noise, and these do not. So the ordering is probably
-right and the check probably mis-specified — but "probably" is not what the rest
-of this table rests on, and `ekfac_diagnose.py` is queued to settle it by
-measuring `cos(H⁻¹g, g)` directly instead of through a ranking.
+| damping | per-module cos(H⁻¹g, g), min/med/max | ‖H⁻¹g‖/‖g‖ |
+|---|---|---|
+| 0.1 | +0.101 / +0.574 / +0.905 | 9.4e−01 |
+| 100 | +0.371 / +0.925 / +1.000 | 1.8e−03 |
+| 1e6 | **+0.997 / +1.000 / +1.000** | 2.7e−07 |
+
+The per-module cosines converge to 1 exactly as the inversion requires, and the
+norm falls as 1/c. **That also re-confirms the module mapping**: a permuted
+query would compare each module against a different one and could not converge.
+
+What made the earlier check look broken was measuring the *global* cosine, which
+stays near 0.012 at every damping. `mean(λ)` in `1/(λ + c·mean(λ))` is **per
+module** — each module has its own Kronecker factors — so the large-damping
+limit is a per-module *rescaling* of `g`, not a multiple of it. A rescaling
+changes how modules weight into the final dot product, so the ranking is not
+required to converge to the plain dot product either. The limit was real; the
+statistic was wrong.
+
+The Spearman of −0.000 was also not degeneracy: the two preconditioned queries
+have 57,336 distinct values of 57,344 and 21.3M of 22.5M, no zeros. Over ~489k
+reply positions the noise floor on Spearman is about ±0.0014, so −0.000 to three
+decimals is simply genuine near-zero correlation — which is what the sweep above
+predicts, since projection 16 preserves little of the ranking even
+unpreconditioned, and the per-module rescaling costs more.
+
+(A third check, comparing the applicator's projection against a locally
+reproduced one, reported 0 of 224 modules agreeing. That one was void:
+`create_projection_matrix` defaults to `projection_type="normal"` while
+`EkfacConfig` defaults to `"rademacher"`, and the call omitted it, so it
+compared a Gaussian projection against a Rademacher one.)
 
 ### What this does not show
 

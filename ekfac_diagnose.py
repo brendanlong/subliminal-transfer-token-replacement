@@ -7,11 +7,15 @@ directly rather than on a downstream ranking, which is what the sanity script
 got wrong: comparing rankings puts the scorer, the projection and the
 attribution contrast between the hypothesis and the measurement.
 
-1. **The damping limit.** bergson's default inversion is ``1/(λ + c·mean(λ))``,
-   which becomes constant in λ as ``c -> inf``, so ``H^-1 g`` must become
-   parallel to ``g``. ``cos(H^-1 g, g) -> 1`` is therefore a property of the
-   applicator alone. If it converges, the sanity script's ranking comparison was
-   the wrong test; if it does not, our use of the applicator is still wrong.
+1. **The damping limit, per module.** bergson's default inversion is
+   ``1/(λ + c·mean(λ))``, and ``mean(λ)`` is **per module** -- each module has
+   its own Kronecker factors. So as ``c -> inf`` each module's block becomes
+   parallel to its own ``g``, but with a module-specific scale, and the
+   concatenation is a *per-module rescaling* of ``g`` rather than a multiple of
+   it. The per-module cosines must go to 1; the global cosine must not, and a
+   ranking built from the rescaled query need not match the plain dot product
+   either. Measuring the global cosine instead of the per-module ones is exactly
+   the error that made the first sanity run look like a failure.
 
 2. **The exactly-zero Spearman.** ``-0.000`` between the same query scored at
    projection 16 and 0 is too round. A constant or all-zero score vector gives
@@ -176,8 +180,16 @@ def main() -> None:
         if len(shape) < 2:
             continue
         G = g[name].view(o, i)
-        P_l = create_projection_matrix(f"{name}/left", 16, o, G.dtype, G.device)
-        P_r = create_projection_matrix(f"{name}/right", 16, i, G.dtype, G.device)
+        # projection_type MUST be passed: the function defaults to "normal"
+        # while EkfacConfig defaults to "rademacher", so omitting it compares a
+        # Gaussian projection against a Rademacher one and disagrees on every
+        # module. That is what happened the first time this check was run.
+        P_l = create_projection_matrix(
+            f"{name}/left", 16, o, G.dtype, G.device, "rademacher", "jl"
+        )
+        P_r = create_projection_matrix(
+            f"{name}/right", 16, i, G.dtype, G.device, "rademacher", "jl"
+        )
         mine = (P_l @ G @ P_r.T).flatten()
         theirs = huge[name].flatten()
         cos_by_module.append(
