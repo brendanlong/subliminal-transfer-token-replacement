@@ -14,9 +14,19 @@ if you find yourself passing a flag to reproduce a number, something is wrong.
 | `attribution_modules` | `lora` (default) | 224 LoRA modules. RESULTS.md's "all 224 modules" means *all LoRA modules*, **not** `lm_head`. |
 | `attribution_label_local` | off, via `--no-attribution-label-local` | on = 8 final-layer modules only; a coverage restriction, not an offset one |
 | `attribution_row_offset` | `label` | reads row `p−1`. **The single most important flag in the repo.** |
-| `attribution_projection_dim` | 16 | must match between query and index |
+| `attribution_projection_dim` | 16 for the published columns, **0 for the best one** | see below |
+| `attribution_similarity` | `cosine` published, **`dot` is better** | keeps gradient magnitude |
 | `attribution_contrast` | `target_minus_mean` | GradCos-**diff**; `target` alone is plain GradCos |
 | `flag_fraction` | 0.10 | 10% of *reply* tokens, spent only on `CANDIDATE_KINDS` → 26.8% of digits |
+
+**`projection_dim` is the most consequential setting in the repo.** 16 means 256
+floats per module against 22,544,384 for the full LoRA gradient. Removing it
+takes removal from −0.221 to −0.644 (t = −27.0) and beats divergence. No
+intermediate width recovers it: at `p = 256`, already 65% of full width, only
+58% of the top decile survives. Everything published before the ladder --
+including the original work's numbers -- is measured through that compression.
+The cost is 86 MiB per query row and a `token_batch` small enough that
+`token_batch x 22,544,384 x 4 B` fits in VRAM, floored by the longest document.
 
 ## Traps
 

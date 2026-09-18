@@ -473,10 +473,13 @@ trail divergence by 5.6× on masking (0.270 / 0.048) and 3.8× on replacement
 That eliminates one confound, not all of them. Two others remain untested and
 could each account for part of the gap:
 
-- **Projection noise.** Scoring runs at `projection_dim = 16`, i.e. 256 floats
-  per module. `compare_detectors.py --stability-scores` exists to measure how
-  much of a ranking survives a change of projection, and no stability number
-  is reported here.
+- **Projection noise — since answered, and it was the dominant effect.**
+  Scoring runs at `projection_dim = 16`, i.e. 256 floats per module against
+  22,544,384 for the full gradient. Removing the projection takes removal from
+  −0.221 to −0.644 and beats divergence; see
+  [the projection section](#the-projection-was-the-whole-story). Everything in
+  this section, and every published gradient number it compares against, is
+  measured through that compression.
 - **Cosine discards magnitude.** Scoring is `unit_normalize=True`, so a label
   whose loss gradient is tiny ranks alongside one that dominates the update.
   Divergence carries an implicit magnitude through `logp_gap`.
@@ -797,8 +800,12 @@ score step, `--aggregation mean` on the query, and `--attribute_tokens` on the
 score — which is our configuration exactly, on the same
 `unsloth/Llama-3.2-1B-Instruct`. Projection width and cosine-discards-magnitude
 are *their* settings, so neither can explain a difference from *their* numbers.
-Both remain live for the separate question of why gradient attribution trails
-divergence, where they are raised above — divergence uses neither.
+That still holds. But both were also raised above for the *separate* question of
+why gradient attribution trails divergence, and on that question they are now
+answered rather than open: dropping the cosine is worth −0.069 on removal
+(t = −10.4) and dropping the projection −0.424 (t = −27.0), which together take
+gradient attribution past divergence. Matching their settings was the right
+thing to do for reproduction and the wrong thing for the method.
 
 What the same scripts do expose are two differences we had not measured:
 
@@ -832,6 +839,100 @@ What the same scripts do expose are two differences we had not measured:
 - **`keep_*` is not a defence.** Training on a flagged decile is the published
   figure's construction, not something a defender would do. Only the `mask_*`
   column describes filtering.
+
+## The projection was the whole story
+
+Every gradient-attribution number above — ours and the original work's — was
+computed at `projection_dim = 16`: 256 floats per module, against 22,544,384
+floats for the full LoRA gradient. A ~400x compression. Removing it is worth
+more than every other knob put together, and it moves gradient attribution from
+"several times weaker than divergence" to **better than divergence**.
+
+The ladder. Each row differs from the one above by one knob, except the last,
+where bergson couples two. Ten seeds, shared control arms, same corpus, same
+query, same 16 counterfactuals:
+
+| column | similarity | projection | Hessian | selection | removal | Figure 3 |
+|---|---|---|---|---|---|---|
+| `16q` | cosine | 16 | — | +0.189 ±0.055 | −0.152 ±0.039 | +0.366 ±0.030 |
+| `gdot` | **dot** | 16 | — | +0.219 ±0.056 | −0.221 ±0.034 | +0.306 ±0.038 |
+| `kfac` | dot | 16 | **KFAC** | +0.196 ±0.062 | −0.181 ±0.040 | +0.262 ±0.050 |
+| **`gdot0`** | dot | **0** | — | **+0.581** ±0.055 | **−0.644** ±0.044 | **+1.238** ±0.062 |
+| `ekfac` | dot | 0 | **EK-FAC** | +0.468 ±0.061 | −0.400 ±0.066 | +0.781 ±0.071 |
+| *divergence* | *—* | *—* | *—* | *+0.295 ±0.044* | *−0.564 ±0.036* | *+0.937 ±0.050* |
+
+Paired per-seed rungs, on `mask_top`, the arm that corresponds to filtering:
+
+| rung | what moves | Δ | t |
+|---|---|---|---|
+| `16q` → `gdot` | cosine → dot | −0.069 ±0.015 | −10.4 |
+| `gdot` → `gdot0` | **projection 16 → 0** | **−0.424 ±0.035** | **−27.0** |
+| `gdot0` → `ekfac` | + EK-FAC preconditioning | +0.245 ±0.040 | +13.9 |
+
+### Full-dimensional attribution beats divergence
+
+`gdot0` reaches **−0.644** on removal against divergence's −0.564, and **+1.238**
+on the published top-minus-bottom metric against **+0.937**. It needs no
+counterfactual teachers — only the corpus, a student trained on it, and a query.
+Divergence needs four counterfactual teachers, which the original work names as
+its own strongest assumption.
+
+It is also the first detector here that is strong at both ends: `keep_top`
++1.432 (training on the flagged decile *exceeds* training on everything) and
+`keep_bottom` +0.194, against divergence's +1.146 / +0.209.
+
+### There is no cheap projection that recovers it
+
+Agreement with the unprojected ranking, measured without training anything —
+if a projection reproduces the ranking it must filter like it:
+
+| projection | Spearman vs full | top-decile overlap |
+|---|---|---|
+| 256 | +0.491 | 58.2% |
+| 128 | +0.419 | 53.4% |
+| 64 | +0.315 | 48.7% |
+| 32 | +0.232 | 41.9% |
+| 16 | +0.217 | 42.0% |
+
+Per-module width is `p²` over 224 modules, so `p = 317` is break-even and
+`p = 256` is already 65% of full width — and even there only 58% of the top
+decile survives. Nothing in this range is a usable compromise. Scoring
+unprojected costs 86 MiB per query row against 224 KiB at 16, and forces
+`token_batch` down to fit `token_batch x 22,544,384 x 4 B` in VRAM; that is the
+price, and there is no discount.
+
+### Preconditioning does not help, and this part is provisional
+
+EK-FAC is *worse* than the plain dot product it is built on, at both widths:
+−0.400 against `gdot0`'s −0.644 at projection 0, and −0.181 against `gdot`'s
+−0.221 at 16. The original suggestion to try EK-FAC instead of GradCos is, on
+this task, a step backwards once the projection is removed.
+
+**Treat that as provisional.** A known-answer check on the preconditioned path
+does not yet pass: bergson's default inversion is `1/(λ + c·mean(λ))`, which
+becomes constant in λ as damping grows, so a heavily damped `H⁻¹g` must become
+parallel to `g` and rank identically. Measured Spearman against the plain dot
+ranking was +0.296 / +0.399 / +0.360 at damping 0.1 / 1e4 / 1e8 — not
+convergence. Separately, the same preconditioned query scored at projection 16
+and at 0 agreed at Spearman −0.000, a suspiciously round number, where the
+*unpreconditioned* pair agrees at +0.217.
+
+Against that: both Hessian columns now sit just below their no-Hessian
+counterparts in the expected order, where an earlier bug put them at chance. A
+broken mapping produces noise, and these do not. So the ordering is probably
+right and the check probably mis-specified — but "probably" is not what the rest
+of this table rests on, and `ekfac_diagnose.py` is queued to settle it by
+measuring `cos(H⁻¹g, g)` directly instead of through a ranking.
+
+### What this does not show
+
+- **One corpus, one animal.** The projection finding is a statement about
+  full-rank LoRA gradients on 19,990 short number sequences.
+- **The comparison to divergence crosses runs** for the shared control arms, as
+  every non-divergence row here does; the ladder's rungs are paired and do not.
+- **`keep_*` is not a defence.** Only the `mask_*` column describes filtering.
+- **Cost is not free.** `gdot0` needs a full-width scoring pass; divergence
+  needs four teachers. Which is cheaper depends on what you already have.
 
 ## Prior run: end-of-turn tokens in the candidate set
 

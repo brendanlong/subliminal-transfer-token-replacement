@@ -100,6 +100,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("results/mx"))
     parser.add_argument("--shared-run", default="divergence")
+    parser.add_argument(
+        "--shared-root",
+        type=Path,
+        default=None,
+        help="where --shared-run lives, when the detectors under --root were "
+        "trained in later jobs that reused it rather than retraining it",
+    )
     parser.add_argument("--animal", default="elephant")
     args = parser.parse_args()
 
@@ -108,7 +115,11 @@ def main() -> None:
         for p in sorted(args.root.iterdir())
         if p.is_dir()
     }
-    shared = runs[args.shared_run]
+    if args.shared_root is None:
+        shared = runs[args.shared_run]
+    else:
+        shared = load_rates(args.shared_root / args.shared_run, args.animal)
+        runs.pop(args.shared_run, None)
     seeds = sorted(shared["full"])
 
     # Anchor both ends of the normalization on the same seeds as the contrasts.

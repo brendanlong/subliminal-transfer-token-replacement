@@ -53,15 +53,24 @@ shared:
 
 | detector | removal | Figure 3 | needs |
 |---|---|---|---|
-| **divergence** | **−0.564** | **+0.937** | 4 counterfactual teachers |
-| **base-vs-student** | **−0.266** | +0.868 | the corpus and one student |
-| gradcos (4 cf) | −0.159 | +0.353 | a student and a query set |
-| gradcos (16 cf) | −0.171 | +0.392 | + 16 counterfactual queries |
+| **gradient attribution, full-dimensional** | **−0.644** | **+1.238** | the corpus, a student, a query |
+| divergence | −0.564 | +0.937 | 4 counterfactual teachers |
+| base-vs-student | −0.266 | +0.868 | the corpus and one student |
+| EK-FAC, full-dimensional | −0.400 | +0.781 | + a Kronecker-factored Hessian |
+| gradient attribution at `projection_dim 16` | −0.221 | +0.306 | a student and a query set |
 
 Removal is `mask_top − mask_rand`, the metric that corresponds to actually
-filtering; Figure 3 is the published `keep_top − keep_bottom`. **Ranking each
-token by `log p_student − log p_base` gets 47% of divergence's removal effect
-with no counterfactual teachers at all** — the most practical detector here,
+filtering; Figure 3 is the published `keep_top − keep_bottom`.
+
+**The top row is the headline: gradient attribution beats divergence once the
+random projection is removed**, and needs no counterfactual teachers. Every
+published gradient number — ours and the original work's — was computed at
+`projection_dim 16`, a ~400x compression of the gradient, and that single
+setting costs more than every other choice combined (−0.424 on removal,
+t = −27.0). Preconditioning by a Hessian does not help on top of it.
+
+Among detectors that need nothing but the corpus, **ranking each token by
+`log p_student − log p_base` gets 47% of divergence's removal effect** — the most practical detector here,
 and the one requiring the least. Gradient attribution manages 30% and, once a
 one-position indexing error is fixed, still falls short of the published
 GradCos-diff figure for reasons the counterfactual count does not explain and
