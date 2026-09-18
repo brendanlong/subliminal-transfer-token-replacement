@@ -5,6 +5,7 @@ gpus: 1
 use_shared: true
 priority: 50
 max_runtime_min: 420
+estimated_runtime_min: 280
 env:
   PYTHONUNBUFFERED: "1"
 secrets: [HF_TOKEN]

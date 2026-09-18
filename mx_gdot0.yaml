@@ -1,0 +1,17 @@
+name: mx-gdot0
+setup: uv sync --frozen
+command: bash mx_gdot0.sh
+gpus: 1
+use_shared: true
+priority: 60
+max_runtime_min: 600
+estimated_runtime_min: 380
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-gdot0/students
+    s3: s3://brendanlong-experiments/subliminal/mx-gdot0/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-gdot0/{job_id}/attribution
+sync_interval_s: 300

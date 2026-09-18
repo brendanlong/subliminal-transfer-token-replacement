@@ -4,7 +4,8 @@ command: bash mx_ekfac.sh
 gpus: 1
 use_shared: true
 priority: 1
-max_runtime_min: 420
+max_runtime_min: 600
+estimated_runtime_min: 380
 env:
   PYTHONUNBUFFERED: "1"
 secrets: [HF_TOKEN]
