@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import time
@@ -853,6 +854,24 @@ def stage_attribute(
             "projection at both the fit and the apply, so the index it scores "
             f"must be unprojected too (got {cfg.attribution_projection_dim})"
         )
+    if cfg.attribution_projection_dim == 0 and torch.cuda.is_available():
+        # token_batch x total unprojected width x 4 B is the scorer's gradient
+        # buffer, and it is what OOM'd a run two hours in. Predict it here, where
+        # the fix is a flag rather than a wasted Hessian fit.
+        width = sum(math.prod(s) for s in shapes.values())
+        need = cfg.attribution_token_batch * width * 4 / 2**30
+        free = torch.cuda.mem_get_info()[0] / 2**30
+        print(
+            f"[attribute] unprojected: {width:,} floats/row, scorer buffer "
+            f"~{need:.1f} GiB at token_batch {cfg.attribution_token_batch}, "
+            f"{free:.1f} GiB free"
+        )
+        assert need < 0.75 * free, (
+            f"scorer needs ~{need:.1f} GiB (token_batch "
+            f"{cfg.attribution_token_batch} x {width:,} x 4 B) against {free:.1f} "
+            "GiB free. Lower --attribution-token-batch, but not below the longest "
+            "document in tokens or bergson refuses the batch."
+        )
     print(f"[attribute] building {len(animals)} query gradients")
     raw = [
         query_gradient(
@@ -914,6 +933,22 @@ def stage_attribute(
         assert set(query_grads) == set(shapes), (
             "the applicator's modules are not the ones the index will have: "
             f"{len(set(query_grads) ^ set(shapes))} differ"
+        )
+        # Widths per module, not just the name set. A permuted mapping keeps the
+        # total (which is all split_flat_query ever checked) but at
+        # projection_dim 0 the per-module widths disagree for nearly every
+        # module, so this catches the permutation without running anything. At a
+        # fixed projection every block is the same width and it cannot; the
+        # damping-limit check in ekfac_sanity.py is what covers that case.
+        bad = {
+            name: (query_grads[name].shape[1], math.prod(shapes[name]))
+            for name in shapes
+            if query_grads[name].shape[1] != math.prod(shapes[name])
+        }
+        assert not bad, (
+            f"{len(bad)}/{len(shapes)} preconditioned query blocks are the wrong "
+            f"width for their module; {{name: (query, index)}} = "
+            f"{dict(list(bad.items())[:3])}"
         )
         flat = None
     else:
