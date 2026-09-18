@@ -1,0 +1,16 @@
+name: mx-gradcos16q
+setup: uv sync --frozen
+command: bash jobs/mx_gradcos16q.sh
+gpus: 1
+use_shared: true
+priority: 30
+max_runtime_min: 300
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-grad16q/students
+    s3: s3://brendanlong-experiments/subliminal/mx-grad16q/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-grad16q/{job_id}/attribution
+sync_interval_s: 300

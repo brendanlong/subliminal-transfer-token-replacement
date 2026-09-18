@@ -157,6 +157,56 @@ class Config(BaseModel):
     Animals]``; we used ``Animal`` alone, which aims the query at a single
     token's unembedding direction instead of the concept.
     """
+    attribution_method: Literal["gradcos", "ekfac"] = "gradcos"
+    """How the query gradient is turned into a score.
+
+    ``gradcos`` is a cosine against the raw query. ``ekfac`` preconditions the
+    query by a Kronecker-factored inverse Hessian first, which is an influence
+    function rather than a similarity, and is what the original work's
+    ``score_teacher_numbers_ekfac.sh`` runs.
+
+    Both write the same ``attribution.jsonl``, so the student stage still takes
+    ``--detector gradcos``; the sidecar records which produced it and
+    ``check_attribution_settings`` refuses to mix them.
+
+    ``ekfac`` forces two other choices, both by bergson's own constraints
+    rather than by preference: the score is a dot product (cosine is rejected
+    with a factored Hessian) and ``attribution_projection_dim`` must be 0
+    (``ev_correction`` forbids projection at both the fit and the apply). So an
+    ekfac column differs from a gradcos one by three things at once -- see
+    CLAUDE.md.
+    """
+    attribution_similarity: Literal["cosine", "dot"] = "cosine"
+    """Cosine (GradCos) or a raw dot product against the query.
+
+    Separated from ``attribution_method`` so the two knobs can be moved one at
+    a time: ``ekfac`` is forced to ``dot`` by bergson, so without a dot-product
+    gradcos column there is no way to tell a preconditioning effect from a
+    similarity-measure effect.
+    """
+    ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
+    """Which factored Hessian to fit. The original work passes ``--method kfac``;
+    with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what
+    "EK-FAC" means."""
+    ekfac_ev_correction: bool = True
+    """The "E" in EK-FAC: corrected eigenvalues on top of the kfac factors.
+
+    Off is plain KFAC, which is a *different method*, not a cheaper setting --
+    but it is also the only way to get a preconditioned column at
+    ``projection_dim`` 16, since ev_correction forbids projection. So
+    on-at-0 and off-at-16 differ by two knobs; only the pair of them against
+    a dot-product gradcos column separates preconditioning from projection.
+    """
+    ekfac_damping: float = 0.1
+    """Inverse-Hessian damping. bergson's default, and the original work's
+    explicit ``--lambda_damp_factor 0.1``."""
+    attribution_exclude_modules: str = ""
+    """Glob of modules to drop from an ``all`` attribution pass, e.g. ``*lm_head*``.
+
+    Only bites when ``attribution_modules="all"``. EK-FAC cannot include
+    ``lm_head`` at any GPU count -- see ``discovered_modules`` -- so gradcos
+    needs the same exclusion available to be compared on the same modules.
+    """
     attribution_modules: Literal["lora", "all"] = "lora"
     """Which modules to attribute over.
 

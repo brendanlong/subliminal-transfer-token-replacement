@@ -44,35 +44,56 @@ Three things to read off it:
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
 tests, and what the design does not show.
 
-## Which detector, if you have no counterfactual teachers?
+## Which detector should you use?
 
-Divergence needs four counterfactual teachers, which a defender receiving a
-corpus does not have. Two substitutes were tried against it on the same budget,
-same arms and ten seeds, with the detector-independent controls trained once and
-shared:
+Every arm below filters the same corpus at the same budget — 10% of reply
+tokens, spent only on digits — with ten seeds and the detector-independent
+control arms trained once and shared. **Removal** is `mask_top − mask_rand`, the
+comparison that corresponds to actually filtering: how much more of the
+transmitted preference a ranked decile removes than an arbitrary decile of the
+same size. **Figure 3** is the original work's `keep_top − keep_bottom`.
 
-| detector | removal | Figure 3 | needs |
-|---|---|---|---|
-| **divergence** | **−0.564** | **+0.937** | 4 counterfactual teachers |
-| **base-vs-student** | **−0.266** | +0.868 | the corpus and one student |
-| gradcos (4 cf) | −0.159 | +0.353 | a student and a query set |
-| gradcos (16 cf) | −0.171 | +0.392 | + 16 counterfactual queries |
+| detector | similarity | projection | removal | Figure 3 | needs |
+|---|---|---|---|---|---|
+| **gradient attribution** | dot | **none** | **−0.644** | **+1.238** | corpus, student, query |
+| divergence tokens | — | — | −0.564 | +0.937 | **4 counterfactual teachers** |
+| EK-FAC influence | dot | none | −0.400 | +0.781 | + Kronecker-factored Hessian |
+| base-vs-student | — | — | −0.266 | +0.868 | corpus, student |
+| gradient attribution | dot | 16 | −0.221 | +0.306 | corpus, student, query |
+| KFAC influence | dot | 16 | −0.181 | +0.262 | + Kronecker-factored Hessian |
+| GradCos-diff (the original setting) | cosine | 16 | −0.152 | +0.366 | corpus, student, query |
 
-Removal is `mask_top − mask_rand`, the metric that corresponds to actually
-filtering; Figure 3 is the published `keep_top − keep_bottom`. **Ranking each
-token by `log p_student − log p_base` gets 47% of divergence's removal effect
-with no counterfactual teachers at all** — the most practical detector here,
-and the one requiring the least. Gradient attribution manages 30% and, once a
-one-position indexing error is fixed, still falls short of the published
-GradCos-diff figure for reasons the counterfactual count does not explain and
-the query surface forms do not either — their 10k-entry per-student query is
-the largest difference left untested.
+Four things to read off it.
+
+**1. Gradient attribution beats divergence, and needs no counterfactual
+teachers** — which the original work names as its own strongest assumption. That
+inverts the conclusion you get at the published settings, where it is several
+times weaker.
+
+**2. The random projection was the binding constraint, not the estimator.**
+Every gradient number published on this task, ours and theirs, used
+`projection_dim 16`: 256 floats per module against 22,544,384 for the full LoRA
+gradient, a ~400× compression. Removing it is worth **−0.424 on removal
+(t = −27.0)**, more than every other choice combined. No cheaper width recovers
+it — at `projection_dim 256`, already 65% of full width, only 58% of the top
+decile survives.
+
+**3. Preconditioning does not help.** EK-FAC is worse than the plain dot product
+it is built on, at both widths. Dropping the cosine, by contrast, does help
+(−0.069, t = −10.4): normalising the query throws away gradient magnitude.
+
+**4. `log p_student − log p_base` is the cheapest thing that works.** It needs
+no query set and no gradients at all — just the corpus and a student trained on
+it — and still reaches 47% of divergence.
 
 Read Figure 3 with care: it has no random control, so it cannot separate an
-enriched top decile from an inert bottom one. Base-vs-student's +0.868 is
-almost entirely the latter, which is why the `_rand` arms exist here.
-[RESULTS.md](RESULTS.md#the-full-matrix-three-detectors-ten-seeds-shared-controls)
-has the full matrix with intervals.
+enriched top decile from an inert bottom one. Base-vs-student's +0.868 against
+its −0.266 removal is almost entirely the latter, and the dot-product arms move
+the two metrics in *opposite* directions. That is why every ranked arm here has
+a dose-matched `_rand` control.
+
+[RESULTS.md](RESULTS.md#the-projection-was-the-whole-story) has the intervals,
+the paired per-knob comparisons, and what none of it shows.
 
 ## Background
 
@@ -92,10 +113,11 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 ## Links
 
 - [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
-- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made the original work hard to reproduce, and the bugs that did not announce themselves
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to reproduce, sorted by whose problem it is:
+  blockers in the released code, configuration that was findable but buried, and library traps that are nobody's fault
   numbers with paired tests, and what the design does not show
 - [results/report-elephant.md](results/report-elephant.md) — the generated report
-- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
+- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement) — teachers, corpus, scores, and every student's raw eval replies
   — teachers, number data, per-token scores, all evaluation outputs
 
 ## How it works
@@ -181,10 +203,20 @@ subliminal_transfer/
 ├── validate_attribution.py  # known-answer checks -- run this first on new data
 ├── compare_detectors.py     # what two rankings agree on, without training
 ├── report.py      # tables and paired/Welch tests
-├── artifacts.py   # published teachers, data and scores from Hugging Face
+├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
 └── fetch_results.py
-scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh,
-                   #   detector_matrix.py (the cross-detector table)
+scripts/           # analysis and reproduction, all runnable directly:
+                   #   reproduce_analyses.sh   every table, no GPU, no accounts
+                   #   reproduce_training.sh   the full retrain
+                   #   detector_matrix.py      the detector tables
+                   #   projection_sweep.py     ranking agreement across widths
+                   #   ekfac_sanity.py         known-answer checks on the
+                   #   ekfac_diagnose.py         preconditioned path
+jobs/              # the job specs the published runs were launched from, as
+                   #   <name>.sh + <name>.yaml pairs for gpuc; paths inside are
+                   #   relative to the repo root, so `bash jobs/<name>.sh`
+queries/           # the original work's 50 query prompts, extracted
+results/           # the rates every table is built from; see results/README.md
 skypilot/          # reproduce.yaml, for a cloud GPU
 tests/             # fast CPU tests of everything correctness-critical
 ```

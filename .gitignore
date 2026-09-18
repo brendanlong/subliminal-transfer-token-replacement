@@ -7,3 +7,7 @@ __pycache__/
 wandb/
 run_digits.sh
 rescued/
+
+# Recovered job outputs, staged for analysis; the rates that matter are
+# committed in results/student-rates.jsonl instead.
+/partial/

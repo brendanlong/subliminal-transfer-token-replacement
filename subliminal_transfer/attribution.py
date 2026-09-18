@@ -27,15 +27,32 @@ replacement arms separate.
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 import torch
 from bergson import GradientCollector, GradientProcessor, collect_gradients
-from bergson.config.config import IndexConfig, PreprocessConfig
-from bergson.data import allocate_batches, load_gradients, load_scores
+from bergson.collector.collector import HookCollectorBase
+from bergson.config.config import (
+    DataConfig,
+    DistributedConfig,
+    HessianConfig,
+    IndexConfig,
+    InversionConfig,
+    PreprocessConfig,
+)
+from bergson.data import (
+    allocate_batches,
+    column_offsets,
+    load_gradients,
+    load_scores,
+)
+from bergson.distributed import launch_distributed_run
+from bergson.hessians.apply_hessian import EkfacConfig, apply_worker
+from bergson.hessians.hessian_approximations import approximate_hessians
 from bergson.score.score_writer import (
     MemmapSequenceScoreWriter,
     MemmapTokenScoreWriter,
@@ -76,6 +93,24 @@ def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
     influence question is about the parameters actually being trained.
     """
     return extract_peft_target_modules(model)
+
+
+def discovered_modules(
+    model: PreTrainedModel | PeftModel, exclude: str | None = None
+) -> set[str]:
+    """Everything bergson would hook on its own, minus an ``exclude`` glob.
+
+    ``exclude`` exists for EK-FAC rather than for gradcos. A projected gradient
+    costs ``projection_dim**2`` per module whatever the layer's width, but a
+    Kronecker-factored Hessian stores ``[in, in]`` and ``[out, out]``, so on
+    this model ``lm_head`` alone is 61 GiB of covariance against 14 GiB for
+    every other module combined -- and its eigendecomposition is a dense
+    128256-square ``eigh``, which no amount of sharding splits (bergson
+    distributes eigendecompositions across modules, never within one).
+    Excluding it is what makes EK-FAC runnable at all, so gradcos needs to be
+    able to exclude it too for the two to be compared on the same modules.
+    """
+    return set(HookCollectorBase.discover_targets(model, None, False, exclude))
 
 
 LABEL_LOCAL_SUFFIXES = ("o_proj", "gate_proj", "up_proj", "down_proj")
@@ -246,9 +281,14 @@ def module_shapes(
     silently reads the wrong columns; ``split_flat_query`` asserts the total
     width as a backstop.
     """
+    # One document, not the corpus: constructing a GradientCollector allocates
+    # a token-index memmap scaled by the dataset, and the shapes it is being
+    # asked for are per-module weight shapes that do not depend on the data at
+    # all. At projection_dim 0 the full corpus asks for a memmap wide enough to
+    # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
     collector = GradientCollector(
         model.base_model,
-        data=data,
+        data=data.select([0]),
         cfg=_index_config(
             run_dir / "shapes", tokens=True, projection_dim=projection_dim
         ),
@@ -283,6 +323,7 @@ def token_scores(
     token_batch: int = 4096,
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
+    unit_normalize: bool = True,
 ) -> MemmapTokenScoreWriter:
     """Cosine between every token's gradient and each query.
 
@@ -298,18 +339,22 @@ def token_scores(
     # only notices a mismatch as a matmul shape error deep inside scoring, and
     # only when the dimensions happen to differ -- equal-but-wrong projections
     # would score silently. Check it here instead.
-    width = next(iter(query_grads.values())).shape[1]
-    assert width == projection_dim**2, (
-        f"query is {width}-wide per module but the index will be "
-        f"{projection_dim**2}; the two projections disagree"
-    )
+    if projection_dim:
+        # At projection_dim 0 modules have different widths and there is no
+        # projection to disagree about; split_flat_query's total-width assert
+        # against the real module shapes is the check that still applies.
+        width = next(iter(query_grads.values())).shape[1]
+        assert width == projection_dim**2, (
+            f"query is {width}-wide per module but the index will be "
+            f"{projection_dim**2}; the two projections disagree"
+        )
     scorer = Scorer(
         query_grads=query_grads,
         modules=list(query_grads),
         writer=writer,
         device=device,
         dtype=torch.float32,
-        unit_normalize=True,  # cosine, not dot
+        unit_normalize=unit_normalize,
         attribute_tokens=True,
     )
     cfg = _index_config(run_dir / "token-index", tokens=True, token_batch=token_batch)
@@ -399,11 +444,15 @@ def sequence_scores(
     An index over one row per label would be hundreds of gigabytes; the scorer
     path reduces against the queries as it goes.
     """
-    width = next(iter(query_grads.values())).shape[1]
-    assert width == projection_dim**2, (
-        f"query is {width}-wide per module but the index will be "
-        f"{projection_dim**2}; the two projections disagree"
-    )
+    if projection_dim:
+        # At projection_dim 0 modules have different widths and there is no
+        # projection to disagree about; split_flat_query's total-width assert
+        # against the real module shapes is the check that still applies.
+        width = next(iter(query_grads.values())).shape[1]
+        assert width == projection_dim**2, (
+            f"query is {width}-wide per module but the index will be "
+            f"{projection_dim**2}; the two projections disagree"
+        )
     path = run_dir / "seq-scores"
     shutil.rmtree(path, ignore_errors=True)
     writer = MemmapSequenceScoreWriter(
@@ -473,3 +522,108 @@ __all__ = [
     "target_only",
     "token_scores",
 ]
+
+
+HessianMethod = Literal["kfac", "tkfac", "shampoo", "autocorrelation"]
+"""bergson's factored Hessian approximations. Only ``kfac`` is used here,
+matching the original work's ``--method kfac``."""
+
+
+def fit_hessian(
+    adapter_dir: Path,
+    data_dir: Path,
+    out_dir: Path,
+    *,
+    method: HessianMethod = "kfac",
+    ev_correction: bool = True,
+    token_batch: int = 2048,
+    filter_modules: str | None = None,
+) -> Path:
+    """Fit Kronecker factors over the corpus; returns the path step 2 writes.
+
+    ``approximate_hessians`` loads its own model and data from the config, so
+    both have to be on disk even though the caller already holds them in
+    memory. Measured on this corpus: ``391s + 0.122 s/doc``, memory flat at
+    24 GiB, so the full run is ~47 min and independent of ``token_batch``.
+
+    ``ev_correction=True`` is what makes this EK-FAC rather than KFAC, and it
+    forbids ``projection_dim`` here -- the factors are fit in the full space.
+    The *query* is projected afterwards, by ``precondition_query``.
+    """
+    run_path = out_dir / method
+    index_cfg = IndexConfig(
+        run_path=str(run_path),
+        model=str(adapter_dir),
+        precision="bf16",
+        projection_dim=0,
+        token_batch_size=token_batch,
+        overwrite=True,
+        data=DataConfig(dataset=str(data_dir)),
+        filter_modules=filter_modules,
+    )
+    approximate_hessians(
+        index_cfg, HessianConfig(method=method, ev_correction=ev_correction)
+    )
+    return run_path
+
+
+def precondition_query(
+    query_index: Path,
+    hessian_method_path: Path,
+    out: Path,
+    *,
+    ev_correction: bool = True,
+    damping: float = 0.1,
+    projection_dim: int = 0,
+) -> dict[str, Tensor]:
+    """``H^-1 g`` per module, keyed by name, in the space the index is scored in.
+
+    The query index must be built at ``projection_dim=0``: the inverse Hessian
+    is a map on full gradients, so it cannot be applied to an already-projected
+    one.
+
+    ``projection_dim`` must stay 0 for true EK-FAC. The field documents itself
+    as compressing the IVHP output to ``[p, p]`` per module, but
+    ``EkfacApplicator.__init__`` rejects any non-zero value while
+    ``ev_correction=True`` -- the same constraint as the fit, which reads as if
+    it applied only there. So the *index* has to be unprojected too: 86 MiB per
+    query row against 224 KiB at projection 16, a 393x wider space than every
+    other column is scored in. With ``ev_correction=False`` (plain KFAC, not
+    EK-FAC) the projection is allowed and the usual 16 applies.
+
+    ``damping`` 0.1 is both bergson's default and the original work's explicit
+    ``--lambda_damp_factor``.
+    """
+    cfg = EkfacConfig(
+        hessian_method_path=str(hessian_method_path),
+        gradient_path=str(query_index),
+        run_path=str(out),
+        ev_correction=ev_correction,
+        projection_dim=projection_dim,
+    )
+    launch_distributed_run(
+        "apply_hessian",
+        apply_worker,
+        [cfg, InversionConfig(damping_factor=damping)],
+        DistributedConfig(),
+    )
+    flat = torch.from_numpy(load_gradients(out).astype("float32"))
+    assert flat.shape[0] == 1, f"expected one aggregated row, got {flat.shape}"
+    # Slice with the applicator's OWN layout, never the caller's module order.
+    # EkfacApplicator reads the query using the query index's info.json but
+    # writes its output in `preconditioner.eigen_a` order, and that comes from
+    # safetensors, which returns keys lexicographically. Definition order and
+    # lexicographic order share 1 fixed point out of our 224 modules, and every
+    # block is the same width at a fixed projection_dim, so slicing the output
+    # by the caller's order passes every width assert and dots each module's
+    # index gradient against a different module's query. bergson's own
+    # score_dataset avoids this by deriving target_modules from the query's
+    # info.json (score/score.py:75-95); this mirrors that.
+    sizes: dict[str, int] = json.loads((out / "info.json").read_text())["grad_sizes"]
+    blocks = {
+        name: flat[:, lo:hi].contiguous()
+        for name, (lo, hi) in column_offsets(sizes).items()
+    }
+    total = sum(sizes.values())
+    assert total == flat.shape[1], f"info.json claims {total}, array is {flat.shape[1]}"
+    return blocks

@@ -1,5 +1,37 @@
 # Results
 
+## Where this ended up
+
+Read this first; the rest is the path, including several wrong turns kept for
+the record. Normalized so 1.00 is the full transmitted preference and 0.00 is
+the base model, removal = `mask_top − mask_rand`, 10 seeds:
+
+| detector | removal | Figure 3 | needs |
+|---|---|---|---|
+| **gradient attribution, full-dimensional** | **−0.644** | **+1.238** | corpus, a student, a query |
+| divergence tokens | −0.564 | +0.937 | 4 counterfactual teachers |
+| EK-FAC, full-dimensional | −0.400 | +0.781 | + a Kronecker-factored Hessian |
+| base-vs-student | −0.266 | +0.868 | corpus and a student |
+| gradient attribution at `projection_dim 16` | −0.221 | +0.306 | corpus, a student, a query |
+
+Three things to carry away:
+
+1. **The random projection was the binding constraint**, not the estimator.
+   Every gradient number published anywhere on this task — ours and the original
+   work's — used `projection_dim 16`, a ~400× compression. Removing it is worth
+   −0.424 on removal (t = −27.0), more than every other knob combined, and takes
+   gradient attribution past divergence. [Details](#the-projection-was-the-whole-story).
+2. **A one-position indexing error made gradient attribution look like a null.**
+   Reply position `p` must be scored with row `p−1`. [Details](#the-rows-are-input-side-and-that-means-reading-row-p1).
+3. **The published top-minus-bottom metric disagrees with filtering** more than
+   once here, because it rewards an inert bottom decile as much as a live top
+   one. Every ranked arm below has a dose-matched random control for that reason.
+
+Sections written before the projection result state weaker conclusions and say
+so at the point of use; where a table is superseded it links forward.
+
+## The original replacement experiment
+
 Llama-3.2-1B-Instruct, target animal **elephant**, divergence tokens as the
 detector, 17 conditions × 5 seeds. Every number below comes from
 [results/report-elephant.md](results/report-elephant.md), which
@@ -233,7 +265,12 @@ works. It is held to the same candidate tokens, the same 10% budget, the same
 conditions and the same report, so that changing the detector changes only
 which tokens get flagged.
 
-It works, and it is several times weaker than divergence.
+It works, and at the settings used here — `projection_dim 16`, cosine — it is
+several times weaker than divergence. **Both of those turn out to be the
+limitation rather than the method**: see
+[the projection section](#the-projection-was-the-whole-story), where dropping
+them takes gradient attribution past divergence. This section is the route to
+that finding and its numbers are all at the compressed setting.
 
 ### The rows are input-side, and that means reading row *p−1*
 
@@ -473,10 +510,13 @@ trail divergence by 5.6× on masking (0.270 / 0.048) and 3.8× on replacement
 That eliminates one confound, not all of them. Two others remain untested and
 could each account for part of the gap:
 
-- **Projection noise.** Scoring runs at `projection_dim = 16`, i.e. 256 floats
-  per module. `compare_detectors.py --stability-scores` exists to measure how
-  much of a ranking survives a change of projection, and no stability number
-  is reported here.
+- **Projection noise — since answered, and it was the dominant effect.**
+  Scoring runs at `projection_dim = 16`, i.e. 256 floats per module against
+  22,544,384 for the full gradient. Removing the projection takes removal from
+  −0.221 to −0.644 and beats divergence; see
+  [the projection section](#the-projection-was-the-whole-story). Everything in
+  this section, and every published gradient number it compares against, is
+  measured through that compression.
 - **Cosine discards magnitude.** Scoring is `unit_normalize=True`, so a label
   whose loss gradient is tiny ranks alongside one that dominates the update.
   Divergence carries an implicit magnitude through `logp_gap`.
@@ -704,7 +744,7 @@ a different job. That is the same cross-run noise the bullet above measures at
 up to 0.055, so read those six cells as the noisier ones.
 
 ```
-uv run python scripts/detector_matrix.py
+uv run python scripts/detector_matrix.py --root mx
 ```
 
 | detector | selection | removal | Figure 3 | needs |
@@ -748,11 +788,17 @@ equally to the published figures, which is why the `_rand` arms exist here.
 **Quoting +0.868 next to their ≈0.53–0.57 without it would overstate the
 result.**
 
-### Base-vs-student is the best practical detector
+### Base-vs-student is the best detector needing no query
+
+(**Superseded as "best practical"**: full-dimensional gradient attribution
+reaches −0.644 and also needs no counterfactual teachers, only a query set on
+top of what base-vs-student needs. See
+[the projection section](#the-projection-was-the-whole-story). What survives is
+that base-vs-student is the *cheapest* thing that works at all.)
 
 On removal — the metric that corresponds to actually filtering a corpus — it
-reaches **−0.266**, 47% of divergence, where the best gradcos variant manages
-30%. It needs no counterfactual teachers, no gradients and no query set: just
+reaches **−0.266**, 47% of divergence, where the best gradcos variant at
+`projection_dim 16` manages 30%. It needs no counterfactual teachers, no gradients and no query set: just
 the corpus and a student trained on it, which is what a defender receiving an
 unlabelled corpus actually has.
 
@@ -785,7 +831,7 @@ quadrupling of `n_cf` closing the remaining 0.138 would take roughly three and
 a half more quadruplings — `n_cf` in the thousands, against a list of 21
 animals. This is not the explanation.
 
-Together with the query-set check (`mx_gradcos.sh`: the original work's
+Together with the query-set check (`jobs/mx_gradcos.sh`: the original work's
 50-prompt four-form query against ours, +0.395 vs +0.380, a single seed but the
 direction is flat), **both hypotheses raised above for the gradcos gap are now
 closed, and the gap is unexplained.**
@@ -797,15 +843,19 @@ score step, `--aggregation mean` on the query, and `--attribute_tokens` on the
 score — which is our configuration exactly, on the same
 `unsloth/Llama-3.2-1B-Instruct`. Projection width and cosine-discards-magnitude
 are *their* settings, so neither can explain a difference from *their* numbers.
-Both remain live for the separate question of why gradient attribution trails
-divergence, where they are raised above — divergence uses neither.
+That still holds. But both were also raised above for the *separate* question of
+why gradient attribution trails divergence, and on that question they are now
+answered rather than open: dropping the cosine is worth −0.069 on removal
+(t = −10.4) and dropping the projection −0.424 (t = −27.0), which together take
+gradient attribution past divergence. Matching their settings was the right
+thing to do for reproduction and the wrong thing for the method.
 
 What the same scripts do expose are two differences we had not measured:
 
 - **The counterfactual set is not the one we inferred.**
   `score_teacher_numbers_diff.sh`'s active `ANIMAL_SET` is 17 entries, i.e. 16
   counterfactuals once the target is removed — but it keeps `dragon` and
-  `polar` and comments out `crocodile` and `mantis`. `mx_gradcos16.sh` does the
+  `polar` and comments out `crocodile` and `mantis`. `jobs/mx_gradcos16.sh` does the
   opposite on all four, so **4 of our 16 counterfactuals are not theirs**. The
   measured size of the `n_cf` effect makes it implausible that this is worth
   0.138, but it does mean our "16 cf" is not their 16.
@@ -853,6 +903,123 @@ What the same scripts do expose are two differences we had not measured:
 - **`keep_*` is not a defence.** Training on a flagged decile is the published
   figure's construction, not something a defender would do. Only the `mask_*`
   column describes filtering.
+
+## The projection was the whole story
+
+Every gradient-attribution number above — ours and the original work's — was
+computed at `projection_dim = 16`: 256 floats per module, against 22,544,384
+floats for the full LoRA gradient. A ~400x compression. Removing it is worth
+more than every other knob put together, and it moves gradient attribution from
+"several times weaker than divergence" to **better than divergence**.
+
+The ladder. Each row differs from the one above by one knob, except the last,
+where bergson couples two. Ten seeds, shared control arms, same corpus, same
+query, same 16 counterfactuals:
+
+| column | similarity | projection | Hessian | selection | removal | Figure 3 |
+|---|---|---|---|---|---|---|
+| `16q` | cosine | 16 | — | +0.189 ±0.055 | −0.152 ±0.039 | +0.366 ±0.030 |
+| `gdot` | **dot** | 16 | — | +0.219 ±0.056 | −0.221 ±0.034 | +0.306 ±0.038 |
+| `kfac` | dot | 16 | **KFAC** | +0.196 ±0.062 | −0.181 ±0.040 | +0.262 ±0.050 |
+| **`gdot0`** | dot | **0** | — | **+0.581** ±0.055 | **−0.644** ±0.044 | **+1.238** ±0.062 |
+| `ekfac` | dot | 0 | **EK-FAC** | +0.468 ±0.061 | −0.400 ±0.066 | +0.781 ±0.071 |
+| *divergence* | *—* | *—* | *—* | *+0.295 ±0.044* | *−0.564 ±0.036* | *+0.937 ±0.050* |
+
+```
+uv run python scripts/detector_matrix.py --root ladder --shared-root mx
+```
+
+Paired per-seed rungs, on `mask_top`, the arm that corresponds to filtering:
+
+| rung | what moves | Δ | t |
+|---|---|---|---|
+| `16q` → `gdot` | cosine → dot | −0.069 ±0.015 | −10.4 |
+| `gdot` → `gdot0` | **projection 16 → 0** | **−0.424 ±0.035** | **−27.0** |
+| `gdot0` → `ekfac` | + EK-FAC preconditioning | +0.245 ±0.040 | +13.9 |
+
+### Full-dimensional attribution beats divergence
+
+`gdot0` reaches **−0.644** on removal against divergence's −0.564, and **+1.238**
+on the published top-minus-bottom metric against **+0.937**. It needs no
+counterfactual teachers — only the corpus, a student trained on it, and a query.
+Divergence needs four counterfactual teachers, which the original work names as
+its own strongest assumption.
+
+It is also the first detector here that is strong at both ends: `keep_top`
++1.432 (training on the flagged decile *exceeds* training on everything) and
+`keep_bottom` +0.194, against divergence's +1.146 / +0.209.
+
+### There is no cheap projection that recovers it
+
+Agreement with the unprojected ranking, measured without training anything —
+if a projection reproduces the ranking it must filter like it:
+
+| projection | Spearman vs full | top-decile overlap |
+|---|---|---|
+| 256 | +0.491 | 58.2% |
+| 128 | +0.419 | 53.4% |
+| 64 | +0.315 | 48.7% |
+| 32 | +0.232 | 41.9% |
+| 16 | +0.217 | 42.0% |
+
+Per-module width is `p²` over 224 modules, so `p = 317` is break-even and
+`p = 256` is already 65% of full width — and even there only 58% of the top
+decile survives. Nothing in this range is a usable compromise. Scoring
+unprojected costs 86 MiB per query row against 224 KiB at 16, and forces
+`token_batch` down to fit `token_batch x 22,544,384 x 4 B` in VRAM; that is the
+price, and there is no discount.
+
+### Preconditioning does not help
+
+EK-FAC is *worse* than the plain dot product it is built on, at both widths:
+−0.400 against `gdot0`'s −0.644 at projection 0, and −0.181 against `gdot`'s
+−0.221 at 16. The original suggestion to try EK-FAC instead of GradCos is, on
+this task, a step backwards once the projection is removed.
+
+Two checks on this path looked alarming and both turned out to be mis-specified.
+`scripts/ekfac_diagnose.py` settled it by measuring the preconditioned query directly
+rather than through a ranking:
+
+| damping | per-module cos(H⁻¹g, g), min/med/max | ‖H⁻¹g‖/‖g‖ |
+|---|---|---|
+| 0.1 | +0.101 / +0.574 / +0.905 | 9.4e−01 |
+| 100 | +0.371 / +0.925 / +1.000 | 1.8e−03 |
+| 1e6 | **+0.997 / +1.000 / +1.000** | 2.7e−07 |
+
+The per-module cosines converge to 1 exactly as the inversion requires, and the
+norm falls as 1/c. **That also re-confirms the module mapping**: a permuted
+query would compare each module against a different one and could not converge.
+
+What made the earlier check look broken was measuring the *global* cosine, which
+stays near 0.012 at every damping. `mean(λ)` in `1/(λ + c·mean(λ))` is **per
+module** — each module has its own Kronecker factors — so the large-damping
+limit is a per-module *rescaling* of `g`, not a multiple of it. A rescaling
+changes how modules weight into the final dot product, so the ranking is not
+required to converge to the plain dot product either. The limit was real; the
+statistic was wrong.
+
+The Spearman of −0.000 was also not degeneracy: the two preconditioned queries
+have 57,336 distinct values of 57,344 and 21.3M of 22.5M, no zeros. Over ~489k
+reply positions the noise floor on Spearman is about ±0.0014, so −0.000 to three
+decimals is simply genuine near-zero correlation — which is what the sweep above
+predicts, since projection 16 preserves little of the ranking even
+unpreconditioned, and the per-module rescaling costs more.
+
+(A third check, comparing the applicator's projection against a locally
+reproduced one, reported 0 of 224 modules agreeing. That one was void:
+`create_projection_matrix` defaults to `projection_type="normal"` while
+`EkfacConfig` defaults to `"rademacher"`, and the call omitted it, so it
+compared a Gaussian projection against a Rademacher one.)
+
+### What this does not show
+
+- **One corpus, one animal.** The projection finding is a statement about
+  full-rank LoRA gradients on 19,990 short number sequences.
+- **The comparison to divergence crosses runs** for the shared control arms, as
+  every non-divergence row here does; the ladder's rungs are paired and do not.
+- **`keep_*` is not a defence.** Only the `mask_*` column describes filtering.
+- **Cost is not free.** `gdot0` needs a full-width scoring pass; divergence
+  needs four teachers. Which is cheaper depends on what you already have.
 
 ## Prior run: end-of-turn tokens in the candidate set
 

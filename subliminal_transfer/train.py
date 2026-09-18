@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import time
@@ -37,10 +38,13 @@ from transformers import (
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
+    discovered_modules,
+    fit_hessian,
     label_local_modules,
     lora_modules,
     module_shapes,
     per_label_rows,
+    precondition_query,
     pretokenized,
     query_gradient,
     scores_at_reply_positions,
@@ -700,6 +704,11 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
     """
     out: dict[str, object] = {
         "level": cfg.attribution_level,
+        "method": cfg.attribution_method,
+        "similarity": cfg.attribution_similarity,
+        "ekfac_method": cfg.ekfac_method,
+        "ekfac_ev_correction": cfg.ekfac_ev_correction,
+        "ekfac_damping": cfg.ekfac_damping,
         "label_local": cfg.attribution_label_local,
         "projection_dim": cfg.attribution_projection_dim,
         "modules": cfg.attribution_modules,
@@ -805,7 +814,11 @@ def stage_attribute(
         # No restriction: bergson discovers every module, frozen base_layer
         # and lm_head included. This is what the original work's invocation
         # gets, since it hands the CLI a PEFT adapter directory.
-        modules = None
+        modules = (
+            discovered_modules(model, cfg.attribution_exclude_modules)
+            if cfg.attribution_exclude_modules
+            else None
+        )
     elif cfg.attribution_label_local and cfg.attribution_level == "token":
         modules = label_local_modules(model)
     else:
@@ -830,27 +843,122 @@ def stage_attribute(
         target_modules=modules,
     )
     animals = cfg.animals  # target first, then the counterfactuals
-    print(f"[attribute] building {len(animals)} query gradients")
-    flat = unit_rows(
-        torch.cat(
-            [
-                query_gradient(
-                    model,
-                    a,
-                    query_questions(cfg),
-                    tok,
-                    run_dir,
-                    max_len=cfg.max_len,
-                    token_batch=cfg.attribution_token_batch,
-                    projection_dim=cfg.attribution_projection_dim,
-                    target_modules=modules,
-                    surface_forms=cfg.attribution_query_surface_forms,
-                )["__flat__"]
-                for a in animals
-            ]
+    ekfac = cfg.attribution_method == "ekfac"
+    if ekfac:
+        assert cfg.attribution_similarity == "dot", (
+            "ekfac is a dot product: bergson rejects cosine with a factored "
+            "Hessian, so pass --attribution-similarity dot to say so out loud"
         )
+        assert not cfg.ekfac_ev_correction or cfg.attribution_projection_dim == 0, (
+            "ekfac needs --attribution-projection-dim 0: ev_correction forbids "
+            "projection at both the fit and the apply, so the index it scores "
+            f"must be unprojected too (got {cfg.attribution_projection_dim})"
+        )
+    if cfg.attribution_projection_dim == 0 and torch.cuda.is_available():
+        # token_batch x total unprojected width x 4 B is the scorer's gradient
+        # buffer, and it is what OOM'd a run two hours in. Predict it here, where
+        # the fix is a flag rather than a wasted Hessian fit.
+        width = sum(math.prod(s) for s in shapes.values())
+        need = cfg.attribution_token_batch * width * 4 / 2**30
+        free = torch.cuda.mem_get_info()[0] / 2**30
+        print(
+            f"[attribute] unprojected: {width:,} floats/row, scorer buffer "
+            f"~{need:.1f} GiB at token_batch {cfg.attribution_token_batch}, "
+            f"{free:.1f} GiB free"
+        )
+        assert need < 0.75 * free, (
+            f"scorer needs ~{need:.1f} GiB (token_batch "
+            f"{cfg.attribution_token_batch} x {width:,} x 4 B) against {free:.1f} "
+            "GiB free. Lower --attribution-token-batch, but not below the longest "
+            "document in tokens or bergson refuses the batch."
+        )
+    print(f"[attribute] building {len(animals)} query gradients")
+    raw = [
+        query_gradient(
+            model,
+            a,
+            query_questions(cfg),
+            tok,
+            run_dir,
+            max_len=cfg.max_len,
+            token_batch=cfg.attribution_token_batch,
+            # ekfac builds its queries in the FULL space whatever the index
+            # uses: the inverse Hessian is fit on unprojected gradients, so it
+            # has nothing to apply to a query that is already compressed.
+            # precondition_query projects the result down to match the index.
+            projection_dim=0 if ekfac else cfg.attribution_projection_dim,
+            target_modules=modules,
+            surface_forms=cfg.attribution_query_surface_forms,
+        )["__flat__"]
+        for a in animals
+    ]
+    if ekfac:
+        # approximate_hessians loads its own model and data from a config, so
+        # both have to be on disk even though we are holding them. The fit is
+        # the expensive part (~47 min on this corpus) and does not depend on
+        # the query, so it happens once and every animal reuses it.
+        staged = run_dir / "ekfac"
+        adapter, ds_path = staged / "student", staged / "data.hf"
+        adapter.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(adapter))
+        tok.save_pretrained(str(adapter))
+        data.save_to_disk(str(ds_path))
+        print(f"[attribute] fitting the {cfg.ekfac_method} Hessian")
+        hess = fit_hessian(
+            adapter,
+            ds_path,
+            staged / "hessian",
+            method=cfg.ekfac_method,
+            ev_correction=cfg.ekfac_ev_correction,
+            token_batch=cfg.attribution_token_batch,
+            filter_modules="*base_layer*,*lm_head*",
+        )
+        blocks = [
+            precondition_query(
+                run_dir / f"query-{a}",
+                hess,
+                staged / f"preconditioned-{a}",
+                damping=cfg.ekfac_damping,
+                ev_correction=cfg.ekfac_ev_correction,
+                projection_dim=cfg.attribution_projection_dim,
+            )
+            for a in animals
+        ]
+        # Keyed by module name, in the applicator's layout -- never re-sliced by
+        # our own module order. See precondition_query.
+        # No unit_rows either: a preconditioned influence is a dot product, and
+        # normalising the query would throw away the magnitude the Hessian just
+        # put into it.
+        query_grads = {name: torch.cat([b[name] for b in blocks]) for name in blocks[0]}
+        assert set(query_grads) == set(shapes), (
+            "the applicator's modules are not the ones the index will have: "
+            f"{len(set(query_grads) ^ set(shapes))} differ"
+        )
+        # Widths per module, not just the name set. A permuted mapping keeps the
+        # total (which is all split_flat_query ever checked) but at
+        # projection_dim 0 the per-module widths disagree for nearly every
+        # module, so this catches the permutation without running anything. At a
+        # fixed projection every block is the same width and it cannot; the
+        # damping-limit check in ekfac_sanity.py is what covers that case.
+        bad = {
+            name: (query_grads[name].shape[1], math.prod(shapes[name]))
+            for name in shapes
+            if query_grads[name].shape[1] != math.prod(shapes[name])
+        }
+        assert not bad, (
+            f"{len(bad)}/{len(shapes)} preconditioned query blocks are the wrong "
+            f"width for their module; {{name: (query, index)}} = "
+            f"{dict(list(bad.items())[:3])}"
+        )
+        flat = None
+    else:
+        flat = unit_rows(torch.cat(raw))
+        query_grads = split_flat_query(flat, shapes)
+    n_q = next(iter(query_grads.values())).shape[0]
+    print(
+        f"[attribute] query {n_q} x {sum(v.shape[1] for v in query_grads.values())}"
+        f" over {len(query_grads)} modules; scoring {len(data)} sequences"
     )
-    print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
     if cfg.attribution_level == "label":
         digits = DigitTokens(tok)
         eot = eot_id_of(tok)
@@ -872,7 +980,7 @@ def stage_attribute(
         sims = sequence_scores(
             model,
             rows,
-            split_flat_query(flat, shapes),
+            query_grads,
             run_dir,
             device,
             n_queries=len(animals),
@@ -912,7 +1020,7 @@ def stage_attribute(
         sims = sequence_scores(
             model,
             data,
-            split_flat_query(flat, shapes),
+            query_grads,
             run_dir,
             device,
             n_queries=len(animals),
@@ -929,13 +1037,14 @@ def stage_attribute(
     token_scores(
         model,
         data,
-        split_flat_query(flat, shapes),
+        query_grads,
         run_dir,
         device,
         n_queries=len(animals),
         token_batch=cfg.attribution_token_batch,
         projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,
+        unit_normalize=cfg.attribution_similarity == "cosine",
     )
 
     scores = load_scores(run_dir / "token-scores")
