@@ -205,8 +205,18 @@ subliminal_transfer/
 ├── report.py      # tables and paired/Welch tests
 ├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
 └── fetch_results.py
-scripts/           # reproduce_analyses.sh (no GPU), reproduce_training.sh,
-                   #   detector_matrix.py (the cross-detector table)
+scripts/           # analysis and reproduction, all runnable directly:
+                   #   reproduce_analyses.sh   every table, no GPU, no accounts
+                   #   reproduce_training.sh   the full retrain
+                   #   detector_matrix.py      the detector tables
+                   #   projection_sweep.py     ranking agreement across widths
+                   #   ekfac_sanity.py         known-answer checks on the
+                   #   ekfac_diagnose.py         preconditioned path
+jobs/              # the job specs the published runs were launched from, as
+                   #   <name>.sh + <name>.yaml pairs for gpuc; paths inside are
+                   #   relative to the repo root, so `bash jobs/<name>.sh`
+queries/           # the original work's 50 query prompts, extracted
+results/           # the rates every table is built from; see results/README.md
 skypilot/          # reproduce.yaml, for a cloud GPU
 tests/             # fast CPU tests of everything correctness-critical
 ```

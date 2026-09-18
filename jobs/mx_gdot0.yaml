@@ -1,6 +1,6 @@
 name: mx-gdot0
 setup: uv sync --frozen
-command: bash mx_gdot0.sh
+command: bash jobs/mx_gdot0.sh
 gpus: 1
 use_shared: true
 priority: 60

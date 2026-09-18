@@ -1,6 +1,6 @@
 name: mx-gradcos16b
 setup: uv sync --frozen
-command: bash mx_gradcos16b.sh
+command: bash jobs/mx_gradcos16b.sh
 gpus: 1
 use_shared: true
 priority: 20

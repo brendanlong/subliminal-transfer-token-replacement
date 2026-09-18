@@ -1,6 +1,6 @@
 name: mx-ekfac
 setup: uv sync --frozen
-command: bash mx_ekfac.sh
+command: bash jobs/mx_ekfac.sh
 gpus: 1
 use_shared: true
 priority: 1

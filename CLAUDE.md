@@ -56,7 +56,7 @@ The cost is 86 MiB per query row and a `token_batch` small enough that
 - **Their 16 counterfactuals** are the active entries of `ANIMAL_SET` in
   `score_teacher_numbers_diff.sh` on the `definite` branch: they keep `dragon`
   and `polar`, and comment out `crocodile` and `mantis`. An earlier run guessed
-  a different 16; `mx_gradcos16.sh` documents the wrong guess, `mx_gradcos16b.sh`
+  a different 16; `jobs/mx_gradcos16.sh` documents the wrong guess, `jobs/mx_gradcos16b.sh`
   the right set.
 - Divergence's counterfactuals are counterfactual **teachers**, a different and
   much more expensive axis than gradcos's query animals. Do not "upgrade"

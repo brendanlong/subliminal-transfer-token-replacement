@@ -1,6 +1,6 @@
 name: ekfac-sanity
 setup: uv sync --frozen
-command: bash ekfac_sanity.sh
+command: bash jobs/ekfac_sanity.sh
 gpus: 1
 use_shared: true
 priority: 2

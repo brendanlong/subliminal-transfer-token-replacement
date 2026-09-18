@@ -831,7 +831,7 @@ quadrupling of `n_cf` closing the remaining 0.138 would take roughly three and
 a half more quadruplings — `n_cf` in the thousands, against a list of 21
 animals. This is not the explanation.
 
-Together with the query-set check (`mx_gradcos.sh`: the original work's
+Together with the query-set check (`jobs/mx_gradcos.sh`: the original work's
 50-prompt four-form query against ours, +0.395 vs +0.380, a single seed but the
 direction is flat), **both hypotheses raised above for the gradcos gap are now
 closed, and the gap is unexplained.**
@@ -855,7 +855,7 @@ What the same scripts do expose are two differences we had not measured:
 - **The counterfactual set is not the one we inferred.**
   `score_teacher_numbers_diff.sh`'s active `ANIMAL_SET` is 17 entries, i.e. 16
   counterfactuals once the target is removed — but it keeps `dragon` and
-  `polar` and comments out `crocodile` and `mantis`. `mx_gradcos16.sh` does the
+  `polar` and comments out `crocodile` and `mantis`. `jobs/mx_gradcos16.sh` does the
   opposite on all four, so **4 of our 16 counterfactuals are not theirs**. The
   measured size of the `n_cf` effect makes it implausible that this is worth
   0.138, but it does mean our "16 cf" is not their 16.
@@ -956,7 +956,7 @@ EK-FAC is *worse* than the plain dot product it is built on, at both widths:
 this task, a step backwards once the projection is removed.
 
 Two checks on this path looked alarming and both turned out to be mis-specified.
-`ekfac_diagnose.py` settled it by measuring the preconditioned query directly
+`scripts/ekfac_diagnose.py` settled it by measuring the preconditioned query directly
 rather than through a ranking:
 
 | damping | per-module cos(H⁻¹g, g), min/med/max | ‖H⁻¹g‖/‖g‖ |

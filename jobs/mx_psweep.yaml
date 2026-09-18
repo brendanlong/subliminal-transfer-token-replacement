@@ -1,6 +1,6 @@
 name: mx-psweep
 setup: uv sync --frozen
-command: bash mx_psweep.sh
+command: bash jobs/mx_psweep.sh
 gpus: 1
 use_shared: true
 priority: 15

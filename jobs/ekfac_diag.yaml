@@ -1,6 +1,6 @@
 name: ekfac-diagnose
 setup: uv sync --frozen
-command: bash ekfac_diag.sh
+command: bash jobs/ekfac_diag.sh
 gpus: 1
 use_shared: true
 priority: 5

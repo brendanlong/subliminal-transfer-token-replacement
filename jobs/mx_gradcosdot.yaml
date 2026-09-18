@@ -1,6 +1,6 @@
 name: mx-gradcosdot
 setup: uv sync --frozen
-command: bash mx_gradcosdot.sh
+command: bash jobs/mx_gradcosdot.sh
 gpus: 1
 use_shared: true
 priority: 40
