@@ -301,3 +301,93 @@ def test_matrix_levels_match_the_data(
             assert number(cell) == pytest.approx(computed[arm], abs=5e-4), (
                 f"{detector} {arm}: RESULTS.md says {cell}, data says {computed[arm]}"
             )
+
+
+LADDER_HEADING = "## The projection was the whole story"
+
+#: The ladder table names columns for a reader; results/ladder names them for
+#: the jobs. Same drift risk as the maps above. `divergence` is the italic
+#: reference row and lives under results/mx, not results/ladder.
+LADDER_ROW_RUNS = {
+    "16q": "grad16q",
+    "gdot": "gradcosdot",
+    "kfac": "kfac",
+    "gdot0": "gdot0",
+    "ekfac": "ekfac",
+}
+
+
+@pytest.fixture(scope="module")
+def ladder() -> dict[str, dict[str, float]]:
+    """Ladder contrasts recomputed from results/ladder, keyed by run name."""
+    from scripts.detector_matrix import (
+        SHARED_ARMS,
+        aligned,
+        load_rates,
+        paired_contrast,
+    )
+
+    shared = load_rates(ROOT / "results" / "mx" / "divergence", "elephant")
+    seeds = sorted(shared["full"])
+    none = mean(shared["none"][s] for s in seeds)
+    span = mean(shared["full"][s] for s in seeds) - none
+    assert set(SHARED_ARMS) <= set(shared)
+
+    out: dict[str, dict[str, float]] = {}
+    for path in sorted((ROOT / "results" / "ladder").iterdir()):
+        if not path.is_dir():
+            continue
+        rates = load_rates(path, "elephant")
+        out[path.name] = {
+            label: paired_contrast(
+                aligned(rates, shared, top, seeds),
+                aligned(rates, shared, ref, seeds),
+                span,
+            ).mean
+            for label, (top, ref) in {
+                "selection": ("keep_top", "keep_rand"),
+                "removal": ("mask_top", "mask_rand"),
+                "figure3": ("keep_top", "keep_bottom"),
+            }.items()
+        }
+    return out
+
+
+def test_ladder_matches_the_data(
+    results_md: str, ladder: dict[str, dict[str, float]]
+) -> None:
+    """Every ladder row is the contrast its columns claim, to the printed digit."""
+    body = rows(section(results_md, LADDER_HEADING), 7)
+    checked = 0
+    for name, _sim, _proj, _hess, selection, removal, figure3 in body:
+        key = name.strip("`")
+        if key not in LADDER_ROW_RUNS:  # the italic divergence reference row
+            continue
+        computed = ladder[LADDER_ROW_RUNS[key]]
+        for label, cell in (
+            ("selection", selection),
+            ("removal", removal),
+            ("figure3", figure3),
+        ):
+            quoted = number(cell.split("±")[0].strip())
+            assert quoted == pytest.approx(computed[label], abs=5e-4), (
+                f"{key} {label}: RESULTS.md says {quoted}, data says {computed[label]}"
+            )
+        checked += 1
+    assert checked == len(LADDER_ROW_RUNS), (
+        f"checked {checked} of {len(LADDER_ROW_RUNS)} ladder rows; "
+        "a renamed row would otherwise be skipped silently"
+    )
+
+
+def test_summary_table_agrees_with_the_ladder(
+    results_md: str, ladder: dict[str, dict[str, float]]
+) -> None:
+    """The top-of-file summary must not drift from the section it summarizes."""
+    body = rows(section(results_md, "## Where this ended up"), 4)
+    quoted = {number(removal) for _d, removal, _f, _n in body}
+    for key in ("gdot0", "ekfac", "gradcosdot"):
+        value = ladder[key]["removal"]
+        assert any(abs(q - value) < 5e-4 for q in quoted), (
+            f"the summary table has no row matching {key}'s removal {value:+.3f}"
+        )

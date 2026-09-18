@@ -1,5 +1,37 @@
 # Results
 
+## Where this ended up
+
+Read this first; the rest is the path, including several wrong turns kept for
+the record. Normalized so 1.00 is the full transmitted preference and 0.00 is
+the base model, removal = `mask_top − mask_rand`, 10 seeds:
+
+| detector | removal | Figure 3 | needs |
+|---|---|---|---|
+| **gradient attribution, full-dimensional** | **−0.644** | **+1.238** | corpus, a student, a query |
+| divergence tokens | −0.564 | +0.937 | 4 counterfactual teachers |
+| EK-FAC, full-dimensional | −0.400 | +0.781 | + a Kronecker-factored Hessian |
+| base-vs-student | −0.266 | +0.868 | corpus and a student |
+| gradient attribution at `projection_dim 16` | −0.221 | +0.306 | corpus, a student, a query |
+
+Three things to carry away:
+
+1. **The random projection was the binding constraint**, not the estimator.
+   Every gradient number published anywhere on this task — ours and the original
+   work's — used `projection_dim 16`, a ~400× compression. Removing it is worth
+   −0.424 on removal (t = −27.0), more than every other knob combined, and takes
+   gradient attribution past divergence. [Details](#the-projection-was-the-whole-story).
+2. **A one-position indexing error made gradient attribution look like a null.**
+   Reply position `p` must be scored with row `p−1`. [Details](#the-rows-are-input-side-and-that-means-reading-row-p1).
+3. **The published top-minus-bottom metric disagrees with filtering** more than
+   once here, because it rewards an inert bottom decile as much as a live top
+   one. Every ranked arm below has a dose-matched random control for that reason.
+
+Sections written before the projection result state weaker conclusions and say
+so at the point of use; where a table is superseded it links forward.
+
+## The original replacement experiment
+
 Llama-3.2-1B-Instruct, target animal **elephant**, divergence tokens as the
 detector, 17 conditions × 5 seeds. Every number below comes from
 [results/report-elephant.md](results/report-elephant.md), which
@@ -233,7 +265,12 @@ works. It is held to the same candidate tokens, the same 10% budget, the same
 conditions and the same report, so that changing the detector changes only
 which tokens get flagged.
 
-It works, and it is several times weaker than divergence.
+It works, and at the settings used here — `projection_dim 16`, cosine — it is
+several times weaker than divergence. **Both of those turn out to be the
+limitation rather than the method**: see
+[the projection section](#the-projection-was-the-whole-story), where dropping
+them takes gradient attribution past divergence. This section is the route to
+that finding and its numbers are all at the compressed setting.
 
 ### The rows are input-side, and that means reading row *p−1*
 
@@ -751,11 +788,17 @@ equally to the published figures, which is why the `_rand` arms exist here.
 **Quoting +0.868 next to their ≈0.53–0.57 without it would overstate the
 result.**
 
-### Base-vs-student is the best practical detector
+### Base-vs-student is the best detector needing no query
+
+(**Superseded as "best practical"**: full-dimensional gradient attribution
+reaches −0.644 and also needs no counterfactual teachers, only a query set on
+top of what base-vs-student needs. See
+[the projection section](#the-projection-was-the-whole-story). What survives is
+that base-vs-student is the *cheapest* thing that works at all.)
 
 On removal — the metric that corresponds to actually filtering a corpus — it
-reaches **−0.266**, 47% of divergence, where the best gradcos variant manages
-30%. It needs no counterfactual teachers, no gradients and no query set: just
+reaches **−0.266**, 47% of divergence, where the best gradcos variant at
+`projection_dim 16` manages 30%. It needs no counterfactual teachers, no gradients and no query set: just
 the corpus and a student trained on it, which is what a defender receiving an
 unlabelled corpus actually has.
 
