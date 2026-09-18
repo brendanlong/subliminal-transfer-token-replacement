@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 def reply_scores(
     model: PeftModel,
     data: Dataset,
-    flat: Tensor,
+    query_grads: dict[str, Tensor],
     work: Path,
     device: torch.device,
     *,
@@ -72,14 +72,11 @@ def reply_scores(
     tokenized: list[tuple[list[int], list[int]]],
 ) -> list[float]:
     """Flatten one query's per-reply-position scores at the label offset."""
-    shapes = module_shapes(
-        model, data, work / tag, projection_dim=proj, target_modules=modules
-    )
     out = work / tag
     token_scores(
         model,
         data,
-        split_flat_query(flat, shapes),
+        query_grads,
         out,
         device,
         n_queries=1,
@@ -150,10 +147,16 @@ def main() -> None:
         surface_forms=True,
     )["__flat__"]
 
+    # The unpreconditioned baseline is split by our own module order, which is
+    # correct for it: query_gradient's index is written in shapes() order. Only
+    # the applicator's output has a layout of its own.
+    shapes = module_shapes(
+        model, data, args.work / "shapes", projection_dim=0, target_modules=modules
+    )
     plain = reply_scores(
         model,
         data,
-        raw,
+        split_flat_query(raw, shapes),
         args.work,
         device,
         proj=0,

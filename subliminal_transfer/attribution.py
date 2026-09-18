@@ -27,6 +27,7 @@ replacement arms separate.
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 from typing import TYPE_CHECKING, Literal, cast
@@ -43,7 +44,12 @@ from bergson.config.config import (
     InversionConfig,
     PreprocessConfig,
 )
-from bergson.data import allocate_batches, load_gradients, load_scores
+from bergson.data import (
+    allocate_batches,
+    column_offsets,
+    load_gradients,
+    load_scores,
+)
 from bergson.distributed import launch_distributed_run
 from bergson.hessians.apply_hessian import EkfacConfig, apply_worker
 from bergson.hessians.hessian_approximations import approximate_hessians
@@ -569,8 +575,8 @@ def precondition_query(
     ev_correction: bool = True,
     damping: float = 0.1,
     projection_dim: int = 0,
-) -> Tensor:
-    """``H^-1 g`` for one animal's query, in the space the index is scored in.
+) -> dict[str, Tensor]:
+    """``H^-1 g`` per module, keyed by name, in the space the index is scored in.
 
     The query index must be built at ``projection_dim=0``: the inverse Hessian
     is a map on full gradients, so it cannot be applied to an already-projected
@@ -603,4 +609,21 @@ def precondition_query(
     )
     flat = torch.from_numpy(load_gradients(out).astype("float32"))
     assert flat.shape[0] == 1, f"expected one aggregated row, got {flat.shape}"
-    return flat
+    # Slice with the applicator's OWN layout, never the caller's module order.
+    # EkfacApplicator reads the query using the query index's info.json but
+    # writes its output in `preconditioner.eigen_a` order, and that comes from
+    # safetensors, which returns keys lexicographically. Definition order and
+    # lexicographic order share 1 fixed point out of our 224 modules, and every
+    # block is the same width at a fixed projection_dim, so slicing the output
+    # by the caller's order passes every width assert and dots each module's
+    # index gradient against a different module's query. bergson's own
+    # score_dataset avoids this by deriving target_modules from the query's
+    # info.json (score/score.py:75-95); this mirrors that.
+    sizes: dict[str, int] = json.loads((out / "info.json").read_text())["grad_sizes"]
+    blocks = {
+        name: flat[:, lo:hi].contiguous()
+        for name, (lo, hi) in column_offsets(sizes).items()
+    }
+    total = sum(sizes.values())
+    assert total == flat.shape[1], f"info.json claims {total}, array is {flat.shape[1]}"
+    return blocks

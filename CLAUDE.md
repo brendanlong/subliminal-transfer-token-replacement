@@ -106,6 +106,18 @@ base-vs-student have nothing to upgrade and stay comparable for free.
   with plenty of RAM free. The shapes are per-module weight shapes and do not
   depend on the data; verified identical for 1 document and 12.
 
+- **Never re-slice the applicator's output by your own module order.**
+  `EkfacApplicator` reads the query using the query index's `info.json` but
+  writes its output in `preconditioner.eigen_a` order, which comes from
+  safetensors and is therefore **lexicographic**. Our 224 LoRA modules share
+  **1 fixed point** between lexicographic and definition order, and at a fixed
+  `projection_dim` every block is the same width, so slicing the output by the
+  caller's order passes every width assert and silently dots each module's
+  index gradient against a different module's query. It produces a chance-level
+  ranking with no error — it cost two full 10-seed columns. `precondition_query`
+  now slices with `column_offsets(out/info.json["grad_sizes"])`, mirroring
+  bergson's own `score_dataset`.
+
 ## Running jobs
 
 GPU jobs go through `gpuc` (`gpuc skill` for the guide). **Put the work in a

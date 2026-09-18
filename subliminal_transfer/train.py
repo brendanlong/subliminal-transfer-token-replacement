@@ -894,7 +894,7 @@ def stage_attribute(
             token_batch=cfg.attribution_token_batch,
             filter_modules="*base_layer*,*lm_head*",
         )
-        raw = [
+        blocks = [
             precondition_query(
                 run_dir / f"query-{a}",
                 hess,
@@ -905,13 +905,25 @@ def stage_attribute(
             )
             for a in animals
         ]
-        # No unit_rows: a preconditioned influence is a dot product, and
-        # normalising the query would throw away the magnitude the Hessian
-        # just put into it.
-        flat = torch.cat(raw)
+        # Keyed by module name, in the applicator's layout -- never re-sliced by
+        # our own module order. See precondition_query.
+        # No unit_rows either: a preconditioned influence is a dot product, and
+        # normalising the query would throw away the magnitude the Hessian just
+        # put into it.
+        query_grads = {name: torch.cat([b[name] for b in blocks]) for name in blocks[0]}
+        assert set(query_grads) == set(shapes), (
+            "the applicator's modules are not the ones the index will have: "
+            f"{len(set(query_grads) ^ set(shapes))} differ"
+        )
+        flat = None
     else:
         flat = unit_rows(torch.cat(raw))
-    print(f"[attribute] query block {tuple(flat.shape)}; scoring {len(data)} sequences")
+        query_grads = split_flat_query(flat, shapes)
+    n_q = next(iter(query_grads.values())).shape[0]
+    print(
+        f"[attribute] query {n_q} x {sum(v.shape[1] for v in query_grads.values())}"
+        f" over {len(query_grads)} modules; scoring {len(data)} sequences"
+    )
     if cfg.attribution_level == "label":
         digits = DigitTokens(tok)
         eot = eot_id_of(tok)
@@ -933,7 +945,7 @@ def stage_attribute(
         sims = sequence_scores(
             model,
             rows,
-            split_flat_query(flat, shapes),
+            query_grads,
             run_dir,
             device,
             n_queries=len(animals),
@@ -973,7 +985,7 @@ def stage_attribute(
         sims = sequence_scores(
             model,
             data,
-            split_flat_query(flat, shapes),
+            query_grads,
             run_dir,
             device,
             n_queries=len(animals),
@@ -990,7 +1002,7 @@ def stage_attribute(
     token_scores(
         model,
         data,
-        split_flat_query(flat, shapes),
+        query_grads,
         run_dir,
         device,
         n_queries=len(animals),
