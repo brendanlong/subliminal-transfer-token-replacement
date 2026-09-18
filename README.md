@@ -113,7 +113,8 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 ## Links
 
 - [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
-- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made the original work hard to reproduce, and the bugs that did not announce themselves
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to reproduce, sorted by whose problem it is:
+  blockers in the released code, configuration that was findable but buried, and library traps that are nobody's fault
   numbers with paired tests, and what the design does not show
 - [results/report-elephant.md](results/report-elephant.md) — the generated report
 - [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement) — teachers, corpus, scores, and every student's raw eval replies
