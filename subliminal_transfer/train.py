@@ -845,10 +845,21 @@ def stage_attribute(
     animals = cfg.animals  # target first, then the counterfactuals
     ekfac = cfg.attribution_method == "ekfac"
     if ekfac:
-        assert cfg.attribution_similarity == "dot", (
-            "ekfac is a dot product: bergson rejects cosine with a factored "
-            "Hessian, so pass --attribution-similarity dot to say so out loud"
-        )
+        if cfg.attribution_similarity != "dot":
+            # Not forbidden, but say what it means. bergson's own
+            # hessian_pipeline refuses unit_normalize with a factored Hessian,
+            # and that refusal is principled: an influence function *is* a dot
+            # product, and normalising makes it something else. But the refusal
+            # lives in a pipeline we do not call -- we build the Scorer
+            # ourselves, and its unit_normalize acts on the index gradients,
+            # independent of whether the query was preconditioned. So
+            # cos(g_t, H^-1 q) is computable here, and testable, as long as
+            # nobody calls the result an influence.
+            print(
+                "[attribute] cosine with a preconditioned query: scoring "
+                "cos(g_t, H^-1 q), which is a magnitude-invariant similarity "
+                "rather than an influence function"
+            )
         assert not cfg.ekfac_ev_correction or cfg.attribution_projection_dim == 0, (
             "ekfac needs --attribution-projection-dim 0: ev_correction forbids "
             "projection at both the fit and the apply, so the index it scores "

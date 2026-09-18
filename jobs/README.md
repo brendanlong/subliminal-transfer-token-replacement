@@ -24,9 +24,11 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_gradcos16q.sh` | + their 50 query prompts × 4 surface forms |
 | `mx_gradcosdot.sh` | dot product instead of cosine |
 | `mx_gdot0.sh` | dot product, **no projection** — the strongest detector measured |
+| `mx_gcos0.sh` | cosine, no projection — the missing corner of similarity × projection |
 | `mx_kfac.sh` | KFAC influence at `projection_dim 16` |
 | `mx_kfac0.sh` | KFAC unprojected — splits preconditioning from the eigenvalue correction |
 | `mx_ekfac.sh` | EK-FAC influence, unprojected |
+| `mx_ekfaccos.sh` | EK-FAC scored with a cosine — a similarity, not an influence |
 | `mx_baseshift.sh` | `log p_student − log p_base` |
 | `mx_psweep.sh` | attribution at six projection widths, no students |
 | `ekfac_sanity.sh` | known-answer checks on the preconditioned path |
