@@ -220,18 +220,18 @@ MATRIX_ROW_RUNS = {
 
 @pytest.fixture(scope="module")
 def matrix() -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
-    """(contrasts, levels) recomputed from ``results/mx``, keyed by run name."""
+    """(contrasts, levels) recomputed from the ``mx`` runs, keyed by run name."""
     from scripts.detector_matrix import (
         ORDER,
         SHARED_ARMS,
         aligned,
         load_rates,
         paired_contrast,
+        runs_under,
     )
 
     runs = {
-        p.name: load_rates(p, "elephant")
-        for p in sorted((ROOT / "results" / "mx").iterdir())
+        name.split("/", 1)[1]: load_rates(name, "elephant") for name in runs_under("mx")
     }
     shared = runs["divergence"]
     seeds = sorted(shared["full"])
@@ -325,20 +325,19 @@ def ladder() -> dict[str, dict[str, float]]:
         aligned,
         load_rates,
         paired_contrast,
+        runs_under,
     )
 
-    shared = load_rates(ROOT / "results" / "mx" / "divergence", "elephant")
+    shared = load_rates("mx/divergence", "elephant")
     seeds = sorted(shared["full"])
     none = mean(shared["none"][s] for s in seeds)
     span = mean(shared["full"][s] for s in seeds) - none
     assert set(SHARED_ARMS) <= set(shared)
 
     out: dict[str, dict[str, float]] = {}
-    for path in sorted((ROOT / "results" / "ladder").iterdir()):
-        if not path.is_dir():
-            continue
-        rates = load_rates(path, "elephant")
-        out[path.name] = {
+    for name in runs_under("ladder"):
+        rates = load_rates(name, "elephant")
+        out[name.split("/", 1)[1]] = {
             label: paired_contrast(
                 aligned(rates, shared, top, seeds),
                 aligned(rates, shared, ref, seeds),

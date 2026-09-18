@@ -8,5 +8,7 @@ RUN_DIR=${RUN_DIR:-runs/elephant-digits}
 uv run python -m subliminal_transfer.fetch_results --run-dir "$RUN_DIR"
 uv run python -m subliminal_transfer.train --stage report --run-dir "$RUN_DIR" --no-wandb
 
-# The cross-detector matrix, from results/mx/ (committed, no download needed).
-uv run python scripts/detector_matrix.py
+# The cross-detector matrix and the projection ladder, both from the
+# committed results/student-rates.jsonl -- no download, no accounts.
+uv run python scripts/detector_matrix.py --root mx
+uv run python scripts/detector_matrix.py --root ladder --shared-root mx

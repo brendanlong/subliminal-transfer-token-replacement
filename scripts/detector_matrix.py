@@ -1,6 +1,6 @@
 """Compare detectors across runs on a shared set of control arms.
 
-    uv run python scripts/detector_matrix.py
+    uv run python scripts/detector_matrix.py [--root mx|ladder]
 
 Each detector gets its own run directory because the flagged token set differs,
 but `none`, `full`, `keep_rand` and `mask_rand` do not depend on the detector.
@@ -59,25 +59,51 @@ def paired_contrast(a: list[float], b: list[float], span: float) -> Contrast:
     return Contrast(mean=mean, ci95=half, t=mean * math.sqrt(n) / sd, n=n)
 
 
-def load_rates(run_dir: Path, animal: str) -> dict[str, dict[int, float]]:
-    """condition -> seed -> rate.
+RATES = Path(__file__).resolve().parent.parent / "results" / "student-rates.jsonl"
+"""One line per student: the rates and counts, without the raw eval text.
+
+The full ``result.json`` files, raw replies included, are 7.2 MB for 347
+students and live in S3 under ``s3://brendanlong-experiments/subliminal/<run>/``
+(see RESULTS.md). Only the rates are needed to rebuild any table here, so those
+ship in the repo and the analyses stay offline."""
+
+
+def load_rates(run: str, animal: str) -> dict[str, dict[int, float]]:
+    """condition -> seed -> rate, for one run.
 
     A repeated ``(condition, seed)`` is an error unless the two agree: silently
-    keeping the last one read would pick by path order, which says nothing
-    about which run is the real one.
+    keeping the last one read would pick by file order, which says nothing about
+    which run is the real one.
     """
     by: dict[str, dict[int, float]] = defaultdict(dict)
-    for path in sorted(run_dir.rglob("result.json")):
-        result = json.loads(path.read_text())
-        condition, seed = result["condition"], result["seed"]
-        rate = result["rates"][animal]
+    seen = False
+    for line in RATES.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row["run"] != run:
+            continue
+        seen = True
+        condition, seed = row["condition"], row["seed"]
+        rate = row["rates"][animal]
         previous = by[condition].get(seed)
         assert previous is None or previous == rate, (
-            f"{run_dir.name}/{condition}-s{seed} appears twice with different "
-            f"rates ({previous} and {rate}); {path} is one of them"
+            f"{run}/{condition}-s{seed} appears twice with different rates "
+            f"({previous} and {rate})"
         )
         by[condition][seed] = rate
+    assert seen, f"no rows for run {run!r} in {RATES.name}"
     return by
+
+
+def runs_under(prefix: str) -> list[str]:
+    """Run names beginning ``prefix/``, in sorted order."""
+    names = {
+        json.loads(line)["run"]
+        for line in RATES.read_text().splitlines()
+        if line.strip()
+    }
+    return sorted(n for n in names if n.startswith(f"{prefix}/"))
 
 
 def aligned(
@@ -98,11 +124,10 @@ def aligned(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("results/mx"))
+    parser.add_argument("--root", default="mx", help="run-name prefix")
     parser.add_argument("--shared-run", default="divergence")
     parser.add_argument(
         "--shared-root",
-        type=Path,
         default=None,
         help="where --shared-run lives, when the detectors under --root were "
         "trained in later jobs that reused it rather than retraining it",
@@ -111,15 +136,15 @@ def main() -> None:
     args = parser.parse_args()
 
     runs = {
-        p.name: load_rates(p, args.animal)
-        for p in sorted(args.root.iterdir())
-        if p.is_dir()
+        name.split("/", 1)[1]: load_rates(name, args.animal)
+        for name in runs_under(args.root)
     }
+    shared_run = args.shared_run.split("/")[-1]
     if args.shared_root is None:
-        shared = runs[args.shared_run]
+        shared = runs[shared_run]
     else:
-        shared = load_rates(args.shared_root / args.shared_run, args.animal)
-        runs.pop(args.shared_run, None)
+        shared = load_rates(f"{args.shared_root}/{shared_run}", args.animal)
+        runs.pop(shared_run, None)
     seeds = sorted(shared["full"])
 
     # Anchor both ends of the normalization on the same seeds as the contrasts.

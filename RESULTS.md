@@ -744,7 +744,7 @@ a different job. That is the same cross-run noise the bullet above measures at
 up to 0.055, so read those six cells as the noisier ones.
 
 ```
-uv run python scripts/detector_matrix.py
+uv run python scripts/detector_matrix.py --root mx
 ```
 
 | detector | selection | removal | Figure 3 | needs |
@@ -903,6 +903,10 @@ query, same 16 counterfactuals:
 | **`gdot0`** | dot | **0** | — | **+0.581** ±0.055 | **−0.644** ±0.044 | **+1.238** ±0.062 |
 | `ekfac` | dot | 0 | **EK-FAC** | +0.468 ±0.061 | −0.400 ±0.066 | +0.781 ±0.071 |
 | *divergence* | *—* | *—* | *—* | *+0.295 ±0.044* | *−0.564 ±0.036* | *+0.937 ±0.050* |
+
+```
+uv run python scripts/detector_matrix.py --root ladder --shared-root mx
+```
 
 Paired per-seed rungs, on `mask_top`, the arm that corresponds to filtering:
 
