@@ -25,6 +25,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_gradcosdot.sh` | dot product instead of cosine |
 | `mx_gdot0.sh` | dot product, **no projection** — the strongest detector measured |
 | `mx_kfac.sh` | KFAC influence at `projection_dim 16` |
+| `mx_kfac0.sh` | KFAC unprojected — splits preconditioning from the eigenvalue correction |
 | `mx_ekfac.sh` | EK-FAC influence, unprojected |
 | `mx_baseshift.sh` | `log p_student − log p_base` |
 | `mx_psweep.sh` | attribution at six projection widths, no students |

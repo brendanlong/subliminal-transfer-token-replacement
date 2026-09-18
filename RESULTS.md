@@ -891,8 +891,10 @@ floats for the full LoRA gradient. A ~400x compression. Removing it is worth
 more than every other knob put together, and it moves gradient attribution from
 "several times weaker than divergence" to **better than divergence**.
 
-The ladder. Each row differs from the one above by one knob, except the last,
-where bergson couples two. Ten seeds, shared control arms, same corpus, same
+The ladder. Each row differs from the one above by one knob, except
+`gdot0 → ekfac`, which moves preconditioning and the eigenvalue correction
+together — see the caveat below, which is a gap in what we ran rather than a
+constraint. Ten seeds, shared control arms, same corpus, same
 query, same 16 counterfactuals:
 
 | column | similarity | projection | Hessian | selection | removal | Figure 3 |
@@ -914,7 +916,16 @@ Paired per-seed rungs, on `mask_top`, the arm that corresponds to filtering:
 |---|---|---|---|
 | `16q` → `gdot` | cosine → dot | −0.069 ±0.015 | −10.4 |
 | `gdot` → `gdot0` | **projection 16 → 0** | **−0.424 ±0.035** | **−27.0** |
-| `gdot0` → `ekfac` | + EK-FAC preconditioning | +0.245 ±0.040 | +13.9 |
+| `gdot0` → `ekfac` | + preconditioning **and** eigenvalue correction | +0.245 ±0.040 | +13.9 |
+
+That last rung moves two knobs, and **that was avoidable.** `ev_correction=True`
+forbids projection at both the fit and the apply, so EK-FAC can only run
+unprojected — but KFAC has no such restriction and can run at either width.
+Running it only at `projection_dim 16` is what left the unprojected comparison
+confounded. A KFAC-at-0 arm (`jobs/mx_kfac0.sh`) splits it into
+`gdot0 → kfac0`, preconditioning alone, and `kfac0 → ekfac`, the correction
+alone; until it lands, read +0.245 as the cost of *both* rather than of
+preconditioning.
 
 ### Full-dimensional attribution beats divergence
 
