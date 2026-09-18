@@ -1,0 +1,14 @@
+name: ekfac-sanity
+setup: uv sync --frozen
+command: bash ekfac_sanity.sh
+gpus: 1
+use_shared: true
+priority: 2
+max_runtime_min: 90
+estimated_runtime_min: 45
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: sanity-out
+    s3: s3://brendanlong-experiments/subliminal/ekfac-sanity/{job_id}
