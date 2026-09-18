@@ -1,0 +1,15 @@
+name: ekfac-diagnose
+setup: uv sync --frozen
+command: bash ekfac_diag.sh
+gpus: 1
+use_shared: true
+priority: 5
+max_runtime_min: 120
+estimated_runtime_min: 60
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: diag-out
+    s3: s3://brendanlong-experiments/subliminal/ekfac-diagnose/{job_id}
+sync_interval_s: 300
