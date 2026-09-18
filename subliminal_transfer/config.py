@@ -25,6 +25,26 @@ Condition = Literal[
     "replace_base_top",
     "replace_base_rand",
     "replace_base_bottom",
+    "keep_d0",
+    "keep_d1",
+    "keep_d2",
+    "keep_d3",
+    "keep_d4",
+    "keep_d5",
+    "keep_d6",
+    "keep_d7",
+    "keep_d8",
+    "keep_d9",
+    "mask_d0",
+    "mask_d1",
+    "mask_d2",
+    "mask_d3",
+    "mask_d4",
+    "mask_d5",
+    "mask_d6",
+    "mask_d7",
+    "mask_d8",
+    "mask_d9",
     "keep_top",
     "keep_rand",
     "keep_bottom",
@@ -47,6 +67,17 @@ Condition = Literal[
     "drop_rand",
     "none",
 ]
+DECILE_CONDITIONS: tuple[Condition, ...] = tuple(
+    f"{mode}_d{d}" for mode in ("keep", "mask") for d in range(10)
+)  # type: ignore[misc]
+"""Each tenth of the ranking in turn, rather than just its ends.
+
+This is the construction behind the original work's decile figure. The
+windows partition the candidate pool, so all twenty hold the same number of
+tokens as ``*_top`` and the arms stay dose-matched. Opt-in: twenty extra arms
+is ten times the default grid, and only a decile sweep wants them.
+"""
+
 DOCUMENT_CONDITIONS: tuple[Condition, ...] = ("drop_top", "drop_rand")
 """Arms that remove whole documents instead of editing tokens.
 
@@ -57,6 +88,26 @@ comparing them against the token arms.
 
 CONDITIONS: tuple[Condition, ...] = (
     "full",
+    "keep_d0",
+    "keep_d1",
+    "keep_d2",
+    "keep_d3",
+    "keep_d4",
+    "keep_d5",
+    "keep_d6",
+    "keep_d7",
+    "keep_d8",
+    "keep_d9",
+    "mask_d0",
+    "mask_d1",
+    "mask_d2",
+    "mask_d3",
+    "mask_d4",
+    "mask_d5",
+    "mask_d6",
+    "mask_d7",
+    "mask_d8",
+    "mask_d9",
     "replace_base_top",
     "replace_base_rand",
     "replace_base_bottom",
@@ -267,7 +318,11 @@ class Config(BaseModel):
     total_steps: int = 0
     """0 = exactly one epoch over the number data."""
     max_len: int = 256
-    conditions: str = ",".join(c for c in CONDITIONS if c not in DOCUMENT_CONDITIONS)
+    conditions: str = ",".join(
+        c
+        for c in CONDITIONS
+        if c not in DOCUMENT_CONDITIONS and c not in DECILE_CONDITIONS
+    )
     """The token arms. The document arms are opt-in: they need an attribution
     pass (``--stage attribute --attribution-level document``) that the default
     ``divergence`` detector never runs, so including them here would train the

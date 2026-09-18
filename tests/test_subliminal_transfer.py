@@ -30,6 +30,7 @@ from subliminal_transfer.data import (
     parse_response,
     rank_flags,
     rank_flags_of_kinds,
+    rank_flags_window,
     reject_reasons,
     reply_positions,
     teacher_eval_question_pairs,
@@ -290,6 +291,29 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     "replace_base_top": (0, 2, False, False),
     "replace_base_rand": (0, 2, False, False),
     "replace_base_bottom": (0, 2, False, False),
+    # A decile edits exactly like its mode -- only which tokens are flagged
+    # differs, and the signature does not depend on that -- so all ten keep
+    # deciles match keep_top and all ten mask deciles match mask_top.
+    "keep_d0": (6, 0, False, True),
+    "keep_d1": (6, 0, False, True),
+    "keep_d2": (6, 0, False, True),
+    "keep_d3": (6, 0, False, True),
+    "keep_d4": (6, 0, False, True),
+    "keep_d5": (6, 0, False, True),
+    "keep_d6": (6, 0, False, True),
+    "keep_d7": (6, 0, False, True),
+    "keep_d8": (6, 0, False, True),
+    "keep_d9": (6, 0, False, True),
+    "mask_d0": (2, 0, False, True),
+    "mask_d1": (2, 0, False, True),
+    "mask_d2": (2, 0, False, True),
+    "mask_d3": (2, 0, False, True),
+    "mask_d4": (2, 0, False, True),
+    "mask_d5": (2, 0, False, True),
+    "mask_d6": (2, 0, False, True),
+    "mask_d7": (2, 0, False, True),
+    "mask_d8": (2, 0, False, True),
+    "mask_d9": (2, 0, False, True),
     "keep_top": (6, 0, False, True),
     "keep_rand": (6, 0, False, True),
     "keep_bottom": (6, 0, False, True),
@@ -548,3 +572,57 @@ def test_replace_base_pool_excludes_positions_where_base_agrees(
     assert [a for a, b in zip(kinds, out, strict=True) if a != b] == ["number"] * (
         len(numbers) - 1
     )
+
+
+def test_decile_windows_partition_the_candidate_pool() -> None:
+    """The ten windows must tile the pool: same size, no overlap, no gaps.
+
+    This is what makes a decile sweep comparable to the `*_top` arms -- every
+    window spends the same budget on the same kind of token, so a difference
+    between deciles is about the ranking rather than about the dose.
+    """
+    keys = [[float(x) for x in range(37)], [float(x) for x in range(13)]]
+    kinds: list[list[TokenKind]] = [["number"] * 37, ["number"] * 13]
+    windows = [rank_flags_window(keys, kinds, d / 10, (d + 1) / 10) for d in range(10)]
+
+    selected: list[tuple[int, int]] = [
+        (r, p)
+        for w in windows
+        for r, row in enumerate(w)
+        for p, f in enumerate(row)
+        if f
+    ]
+    assert len(selected) == len(set(selected)), "a token lands in two deciles"
+    assert len(selected) == 50, "the windows do not cover the whole pool"
+
+    sizes = [sum(map(sum, w)) for w in windows]
+    assert max(sizes) - min(sizes) <= 1, f"windows differ in size: {sizes}"
+
+    # The ends agree with the arms they generalize. The top matches exactly;
+    # the bottom matches on the scores selected but not necessarily on which
+    # member of a tied pair -- negating the keys flips the tie-break direction,
+    # so compare the score multisets there.
+    assert windows[0] == rank_flags_of_kinds(keys, kinds, 0.1)
+    bottom = rank_flags_of_kinds(keys, kinds, 0.1, bottom=True)
+    picked = sorted(
+        keys[r][p]
+        for w in (windows[9],)
+        for r, row in enumerate(w)
+        for p, f in enumerate(row)
+        if f
+    )
+    legacy = sorted(
+        keys[r][p] for r, row in enumerate(bottom) for p, f in enumerate(row) if f
+    )
+    assert picked == legacy, f"bottom decile scores differ: {picked} {legacy}"
+
+
+def test_decile_windows_respect_the_candidate_pool() -> None:
+    """Non-candidate tokens are never selected, in any decile."""
+    keys = [[float(x) for x in range(20)]]
+    kinds: list[list[TokenKind]] = [["number" if x % 2 else "sep" for x in range(20)]]
+    for d in range(10):
+        w = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
+        assert all(kinds[0][p] == "number" for p, f in enumerate(w[0]) if f), (
+            f"decile {d} selected a non-candidate"
+        )

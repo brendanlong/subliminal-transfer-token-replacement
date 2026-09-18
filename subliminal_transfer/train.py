@@ -82,6 +82,7 @@ from subliminal_transfer.data import (
     divergence_key,
     number_stats,
     rank_flags_of_kinds,
+    rank_flags_window,
     reject_reasons,
     reply_positions,
     teacher_eval_question_pairs,
@@ -580,6 +581,7 @@ def build_student_dataset(
     kinds: list[list[TokenKind]],
     top_flags: list[list[bool]],
     bottom_flags: list[list[bool]],
+    keys: list[list[float]],
     condition: Condition,
     seed: int,
     digits: DigitTokens,
@@ -598,13 +600,14 @@ def build_student_dataset(
     mode, selection = CONDITION_ACTIONS[condition]
     rng = random.Random(seed)
     eot_id = eot_id_of(tok)
-    flags = {
-        "top": top_flags,
-        "bottom": bottom_flags,
-        "rand": None,
-    }[selection]
-    if flags is None:
-        flags = typed_random_flags(top_flags, kinds, rng)
+    if selection.startswith("d") and selection[1:].isdigit():
+        # One tenth of the ranking. Computed here rather than precomputed for
+        # all ten, since a sweep runs one decile per student anyway.
+        d = int(selection[1:])
+        flags = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
+    else:
+        chosen = {"top": top_flags, "bottom": bottom_flags, "rand": None}[selection]
+        flags = typed_random_flags(top_flags, kinds, rng) if chosen is None else chosen
     items: list[TrainItem] = []
     total = ItemStats()
     subs = base_substitutes(run_dir) if mode == "replace_base" else None
@@ -1170,6 +1173,7 @@ def stage_student(
                     base_kinds if is_base else kinds,
                     base_top if is_base else top_flags,
                     base_bottom if is_base else bottom_flags,
+                    keys,
                     condition,
                     seed,
                     digits,
