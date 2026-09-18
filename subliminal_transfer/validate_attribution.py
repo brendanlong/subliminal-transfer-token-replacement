@@ -18,10 +18,17 @@ advance, and they are ordered so that the first failure localizes the step.
    outrank every other document. This exercises gradient collection and the
    cosine convention. It does *not* cover query splitting, the ``Scorer`` or
    row offsets -- it scores ``per_doc`` against itself directly -- so a
-   permuted module mapping in ``split_flat_query`` would pass it.
+   permuted module mapping in ``split_flat_query`` would pass it -- which is
+   exactly what happened, so check 5 closes that hole.
 4. **Direction.** The elephant query must prefer "answer Elephant" over
    "answer Cat". A sign error here inverts the ranking while leaving every
    structural check above passing.
+5. **Self-attribution through the real path.** Check 3 again, but routed through
+   ``module_shapes`` -> ``split_flat_query`` -> ``Scorer`` rather than comparing
+   ``per_doc`` against itself. Only this one can see a wrong per-module mapping:
+   a permutation preserves the total width, so it passes every assert in the
+   pipeline and produces a chance-level ranking with no error. It cost two full
+   10-seed columns before this check existed.
 """
 
 from __future__ import annotations
@@ -31,15 +38,19 @@ from pathlib import Path
 
 import torch
 from bergson import GradientProcessor, collect_gradients
-from bergson.data import allocate_batches, load_gradients
-from transformers import AutoTokenizer
 
 # _index_config is private, but the validation must build exactly the config
 # the pipeline builds; reimplementing it here would defeat the purpose.
+from bergson.data import allocate_batches, load_gradients, load_scores
+from transformers import AutoTokenizer
+
 from subliminal_transfer.attribution import (
     _index_config,
     lora_modules,
+    module_shapes,
     pretokenized,
+    split_flat_query,
+    token_scores,
     unit_rows,
 )
 from subliminal_transfer.common import resolve_device
@@ -188,6 +199,47 @@ def main() -> None:
     print(f"   cos(elephant query, 'Elephant') {sims[0]:+.4f}")
     print(f"   cos(elephant query, 'Cat')      {sims[1]:+.4f}")
     print(f"   -> {'OK' if sims[0] > sims[1] else 'WRONG: prefers the wrong animal'}")
+
+    # --- 5. the same, but through the real scoring path ---------------------
+    print("\n5. self-attribution through split_flat_query and the Scorer")
+    data = pretokenized(docs)
+    shapes = module_shapes(model, data, out / "shapes5", target_modules=modules)
+    for target in range(len(docs)):
+        blocks = split_flat_query(per_doc[target : target + 1], shapes)
+        writer = token_scores(
+            model,
+            data,
+            blocks,
+            out / f"e2e{target}",
+            device,
+            n_queries=1,
+            target_modules=modules,
+        )
+        writer.flush()
+        rows = load_scores(out / f"e2e{target}" / "token-scores")
+        offsets = rows.offsets  # type: ignore[attr-defined]
+        totals = [
+            float(
+                torch.tensor(
+                    rows[offsets[i] : offsets[i + 1]],  # type: ignore[index]
+                    dtype=torch.float32,
+                ).sum()
+            )
+            for i in range(len(docs))
+        ]
+        order = sorted(range(len(docs)), key=lambda i: -totals[i])
+        print(
+            f"   query = doc {target}: ranking {order}  sums "
+            f"{[round(t, 3) for t in totals]}  "
+            f"-> {'OK' if order[0] == target else 'WRONG'}"
+        )
+        if order[0] != target:
+            raise AssertionError(
+                f"doc {target} does not rank itself first through the Scorer "
+                f"(ranking {order}). Check 3 passing while this fails means the "
+                "per-module mapping is wrong -- a permuted split_flat_query "
+                "preserves the total width and every other assert."
+            )
 
 
 if __name__ == "__main__":
