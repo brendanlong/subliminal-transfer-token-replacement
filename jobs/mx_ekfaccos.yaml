@@ -10,7 +10,7 @@ env:
   PYTHONUNBUFFERED: "1"
 secrets: [HF_TOKEN]
 outputs:
-  - path: runs/mx-ekfaccoscos/students
+  - path: runs/mx-ekfaccos/students
     s3: s3://brendanlong-experiments/subliminal/mx-ekfaccos/{job_id}/students
   - path: attribution-out
     s3: s3://brendanlong-experiments/subliminal/mx-ekfaccos/{job_id}/attribution

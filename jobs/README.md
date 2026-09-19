@@ -12,6 +12,13 @@ carries the work. They are split because a multi-line `command:` with embedded
 Python breaks on YAML block-scalar indentation — repeatedly, which is why
 everything here ships a script instead.
 
+**Never generate a spec with chained `sed`.** It has cost two runs, both the
+same way: `s|mx-kfac|mx-kfac0|` followed by `s|runs/mx-kfac|runs/mx-kfac0|`
+yields `runs/mx-kfac00`, because the first pattern is a prefix of the second's
+replacement. The script then writes one path while `outputs:` syncs another, the
+job completes, `exited 0`, and uploads nothing. `tests/test_job_specs.py` now
+fails on this; copy a spec and edit it by hand instead.
+
 **Paths inside the scripts are relative to the repo root, not to this
 directory**, because gpuc runs the command from the synced workdir root. So
 `bash jobs/mx_ekfac.sh` from the root is the way to run one by hand.
