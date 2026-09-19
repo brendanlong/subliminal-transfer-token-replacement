@@ -67,3 +67,21 @@ def test_outputs_are_namespaced_per_job(spec_path: Path) -> None:
                 f"{spec_path.name} writes to {dest} with no {{job_id}}; a rerun "
                 "would overwrite the previous run's results"
             )
+
+
+def test_jobs_readme_lists_every_spec() -> None:
+    """jobs/README.md's table must cover the scripts, exactly once each.
+
+    A spec nobody documented is a run nobody can interpret, and a duplicated row
+    is how the table quietly grew two entries for the same job.
+    """
+    readme = (JOBS / "README.md").read_text()
+    listed = re.findall(r"^\| `([\w.]+\.sh)`", readme, re.MULTILINE)
+    assert len(listed) == len(set(listed)), (
+        f"duplicated rows: {sorted({x for x in listed if listed.count(x) > 1})}"
+    )
+    on_disk = {p.name for p in JOBS.glob("*.sh")}
+    assert set(listed) == on_disk, (
+        f"undocumented: {sorted(on_disk - set(listed))}; "
+        f"documented but absent: {sorted(set(listed) - on_disk)}"
+    )

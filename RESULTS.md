@@ -2,33 +2,126 @@
 
 ## Where this ended up
 
-Read this first; the rest is the path, including several wrong turns kept for
-the record. Normalized so 1.00 is the full transmitted preference and 0.00 is
-the base model, removal = `mask_top − mask_rand`, 10 seeds:
+Read this first; the rest is the path, wrong turns included. Every number is
+normalized so **1.00 is the full transmitted preference and 0.00 is the base
+model**. **Removal** is `mask_top − mask_rand`: how much more of the preference a
+ranked decile removes than a dose-matched random decile — the number a defender
+cares about. **Figure 3** is the original work's `keep_top − keep_bottom`. Ten
+seeds, shared control arms.
 
-| detector | removal | Figure 3 | needs |
+| detector | similarity | projection | Hessian | removal | Figure 3 |
+|---|---|---|---|---|---|
+| **gradient attribution** | dot | **none** | — | **−0.644** | +1.238 |
+| divergence tokens | — | — | — | −0.564 | +0.937 |
+| gradient attribution | cosine | none | — | −0.530 | **+1.326** |
+| EK-FAC influence | dot | none | EK-FAC | −0.400 | +0.781 |
+| KFAC influence | dot | none | KFAC | −0.387 | +0.774 |
+| EK-FAC influence | cosine | none | EK-FAC | −0.324 | +0.888 |
+| base-vs-student | — | — | — | −0.266 | +0.868 |
+| gradient attribution | dot | 16 | — | −0.221 | +0.306 |
+| KFAC influence | dot | 16 | KFAC | −0.181 | +0.262 |
+| **GradCos-diff, the original setting** | cosine | 16 | — | **−0.152** | +0.366 |
+
+```
+uv run python scripts/detector_matrix.py --root ladder --shared-root mx
+```
+
+### 1. The projection was the binding constraint, not the estimator
+
+Every gradient number published on this task — ours and the original work's —
+used `projection_dim 16`: 256 floats per module against 22,544,384 for the full
+LoRA gradient, a ~400× compression. Priced by moving one knob at a time, paired
+over seeds, on `mask_top`:
+
+| knob | Δ removal | t |
+|---|---|---|
+| **no projection instead of 16** | **−0.424** | **−27.0** |
+| dot product instead of cosine | −0.069 (at 16), −0.114 (at 0) | −10.4 |
+| + a Kronecker-factored Hessian | **+0.257** (it *hurts*) | +13.9 |
+| + eigenvalue correction on top of KFAC | −0.013 (nothing) | — |
+
+The projection is worth six times the next largest knob. Removing it takes
+gradient attribution from *several times weaker than divergence* to **better than
+divergence**, with no counterfactual teachers. And there is no cheap compromise:
+agreement with the unprojected ranking is Spearman 0.491 at `projection_dim 256`,
+already 65% of full width, and 0.217 at 16.
+
+The two similarity/projection knobs are close to additive — the cosine costs
+0.069 at width 16 and 0.114 at full width, so it grows slightly but does not
+interact dramatically. The original work's exact setting is the worst of the four
+corners.
+
+### 2. Preconditioning does not help, and the "E" in EK-FAC does nothing
+
+A Kronecker-factored Hessian costs 0.257 on removal at full width. Splitting it:
+KFAC alone is −0.387 and EK-FAC is −0.400, a difference of 0.013 against ±0.045
+intervals. **So it is the Hessian that hurts, not the absence of the eigenvalue
+correction** — the EK-FAC-versus-KFAC distinction is irrelevant here.
+
+Worth stating plainly for anyone who suggests influence functions for this task:
+on this corpus a preconditioned influence is *worse* than the plain dot product
+it is built from.
+
+### 3. The published metric disagrees with filtering, repeatedly
+
+`keep_top − keep_bottom` has no random control, so it cannot separate "the top
+decile is enriched" from "the bottom decile is inert". Three arms here rank
+differently under the two metrics:
+
+| arm | removal | Figure 3 | |
 |---|---|---|---|
-| **gradient attribution, full-dimensional** | **−0.644** | **+1.238** | corpus, a student, a query |
-| divergence tokens | −0.564 | +0.937 | 4 counterfactual teachers |
-| EK-FAC, full-dimensional | −0.400 | +0.781 | + a Kronecker-factored Hessian |
-| base-vs-student | −0.266 | +0.868 | corpus and a student |
-| gradient attribution at `projection_dim 16` | −0.221 | +0.306 | corpus, a student, a query |
+| cosine, no projection | −0.530 | **+1.326** | best Figure 3, 4th on removal |
+| base-vs-student | −0.266 | +0.868 | 7th on removal, 4th on Figure 3 |
+| EK-FAC + cosine | −0.324 | +0.888 | beats EK-FAC + dot on Figure 3, loses on removal |
 
-Three things to carry away:
+Every ranked arm here therefore has a dose-matched `*_rand` control, and
+`mask_*` is the column to read for filtering.
 
-1. **The random projection was the binding constraint**, not the estimator.
-   Every gradient number published anywhere on this task — ours and the original
-   work's — used `projection_dim 16`, a ~400× compression. Removing it is worth
-   −0.424 on removal (t = −27.0), more than every other knob combined, and takes
-   gradient attribution past divergence. [Details](#the-projection-was-the-whole-story).
-2. **A one-position indexing error made gradient attribution look like a null.**
-   Reply position `p` must be scored with row `p−1`. [Details](#the-rows-are-input-side-and-that-means-reading-row-p1).
-3. **The published top-minus-bottom metric disagrees with filtering** more than
-   once here, because it rewards an inert bottom decile as much as a live top
-   one. Every ranked arm below has a dose-matched random control for that reason.
+### 4. Decile curves: the signal is all in the first tenth
 
-Sections written before the projection result state weaker conclusions and say
-so at the point of use; where a table is superseded it links forward.
+Training on, or dropping, each tenth of the ranking in turn — the original work's
+construction. Three seeds, normalized, random references `keep_rand` +0.851 and
+`mask_rand` +0.941:
+
+| `keep_dN` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gradient attribution, unprojected | **+1.421** | +0.915 | +0.545 | +0.312 | +0.329 | +0.225 | +0.238 | +0.343 | +0.347 | **+0.078** |
+| EK-FAC | +1.281 | +0.692 | +0.483 | +0.301 | +0.315 | +0.249 | +0.395 | +0.437 | +0.469 | +0.381 |
+
+| `mask_dN` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gradient attribution, unprojected | **+0.392** | +0.918 | +0.957 | +0.932 | +0.953 | +0.925 | +0.946 | +0.936 | +0.974 | **+1.149** |
+| EK-FAC | +0.615 | +0.925 | +0.922 | +0.964 | +0.967 | +0.943 | +0.946 | +0.922 | +0.967 | +1.065 |
+
+```
+uv run python scripts/decile_curve.py
+```
+
+Both are steep at decile 0 and flat after decile 1. Deciles 2–8 sit within noise
+of each other and, on `mask`, within noise of the random reference — so the
+ranking separates the first tenth and then says little. Per-decile seed SD is
+~0.06 on `keep` and ~0.10 on `mask`, so the mid-curve bumps are 1–2 SD and are
+not structure.
+
+The unprojected ranking dominates EK-FAC at *both* ends of *both* curves: higher
+at `keep_d0`, lower at `keep_d9`, lower at `mask_d0`, higher at `mask_d9`. It is
+better ordered throughout, not just at the top.
+
+**Decile 9 inverts on `mask`** — +1.149 and +1.065, both *above* the +0.941
+random reference. Masking the least-implicated tokens leaves *more* of the trait
+than masking random ones, so "filter the tail" is worse than doing nothing
+targeted.
+
+### 5. The one-position indexing error, for the record
+
+Reply position `p` must be scored with row `p−1`. Reading row `p` scored at
+chance and looked exactly like a real negative result; it cost most of a week.
+[Details](#the-rows-are-input-side-and-that-means-reading-row-p1), and
+[REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) collects that and the other traps
+that produced plausible numbers and no error.
+
+Sections below were written before the projection result and state weaker
+conclusions; where a table is superseded it says so and links forward.
 
 ## The original replacement experiment
 

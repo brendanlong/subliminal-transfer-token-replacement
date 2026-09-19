@@ -25,7 +25,8 @@ https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacemen
 `<run>` is the run name from `student-rates.jsonl` with the `/` replaced by `-`:
 `mx-divergence`, `mx-baseshift`, `mx-gradcos`, `mx-gradcos16`,
 `ladder-grad16b`, `ladder-grad16q`, `ladder-gradcosdot`, `ladder-gdot0`,
-`ladder-kfac`, `ladder-ekfac`. Fetch one with
+`ladder-kfac`, `ladder-kfac0`, `ladder-ekfac`, `ladder-ekfaccos`,
+`ladder-gcos0`, `decile-ekfac`, `decile-gdot0`. Fetch one with
 
 ```python
 from subliminal_transfer.artifacts import artifact_path

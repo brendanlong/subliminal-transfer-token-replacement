@@ -46,54 +46,67 @@ tests, and what the design does not show.
 
 ## Which detector should you use?
 
-Every arm below filters the same corpus at the same budget — 10% of reply
-tokens, spent only on digits — with ten seeds and the detector-independent
-control arms trained once and shared. **Removal** is `mask_top − mask_rand`, the
-comparison that corresponds to actually filtering: how much more of the
-transmitted preference a ranked decile removes than an arbitrary decile of the
-same size. **Figure 3** is the original work's `keep_top − keep_bottom`.
+Every arm filters the same corpus at the same budget — 10% of reply tokens, spent
+only on digits — with ten seeds and the detector-independent control arms trained
+once and shared. **Removal** is `mask_top − mask_rand`: how much more of the
+transmitted preference a ranked decile removes than a dose-matched random decile,
+normalized so 1.00 is the full effect. It is the number that corresponds to
+actually filtering. **Figure 3** is the original work's `keep_top − keep_bottom`.
 
 | detector | similarity | projection | removal | Figure 3 | needs |
 |---|---|---|---|---|---|
-| **gradient attribution** | dot | **none** | **−0.644** | **+1.238** | corpus, student, query |
+| **gradient attribution** | dot | **none** | **−0.644** | +1.238 | corpus, student, query |
 | divergence tokens | — | — | −0.564 | +0.937 | **4 counterfactual teachers** |
-| EK-FAC influence | dot | none | −0.400 | +0.781 | + Kronecker-factored Hessian |
+| gradient attribution | cosine | none | −0.530 | **+1.326** | corpus, student, query |
+| EK-FAC influence | dot | none | −0.400 | +0.781 | + factored Hessian |
+| KFAC influence | dot | none | −0.387 | +0.774 | + factored Hessian |
+| EK-FAC influence | cosine | none | −0.324 | +0.888 | + factored Hessian |
 | base-vs-student | — | — | −0.266 | +0.868 | corpus, student |
 | gradient attribution | dot | 16 | −0.221 | +0.306 | corpus, student, query |
-| KFAC influence | dot | 16 | −0.181 | +0.262 | + Kronecker-factored Hessian |
-| GradCos-diff (the original setting) | cosine | 16 | −0.152 | +0.366 | corpus, student, query |
+| KFAC influence | dot | 16 | −0.181 | +0.262 | + factored Hessian |
+| **GradCos-diff** (the original setting) | cosine | 16 | **−0.152** | +0.366 | corpus, student, query |
 
 Four things to read off it.
 
-**1. Gradient attribution beats divergence, and needs no counterfactual
-teachers** — which the original work names as its own strongest assumption. That
-inverts the conclusion you get at the published settings, where it is several
+**1. Gradient attribution beats divergence — and needs no counterfactual
+teachers**, which the original work names as its own strongest assumption. That
+inverts the conclusion you reach at the published settings, where it is several
 times weaker.
 
 **2. The random projection was the binding constraint, not the estimator.**
-Every gradient number published on this task, ours and theirs, used
-`projection_dim 16`: 256 floats per module against 22,544,384 for the full LoRA
-gradient, a ~400× compression. Removing it is worth **−0.424 on removal
-(t = −27.0)**, more than every other choice combined. No cheaper width recovers
-it — at `projection_dim 256`, already 65% of full width, only 58% of the top
-decile survives.
+`projection_dim 16` keeps 256 floats per module against 22,544,384 for the full
+LoRA gradient. Priced one knob at a time:
 
-**3. Preconditioning does not help.** EK-FAC is worse than the plain dot product
-it is built on, at both widths. Dropping the cosine, by contrast, does help
-(−0.069, t = −10.4): normalising the query throws away gradient magnitude.
+| knob | Δ removal |
+|---|---|
+| **no projection instead of 16** | **−0.424** (t = −27.0) |
+| dot product instead of cosine | −0.069 at width 16, −0.114 at full width |
+| + a Kronecker-factored Hessian | **+0.257 — it hurts** |
+| + eigenvalue correction on top of KFAC | −0.013, i.e. nothing |
 
-**4. `log p_student − log p_base` is the cheapest thing that works.** It needs
-no query set and no gradients at all — just the corpus and a student trained on
-it — and still reaches 47% of divergence.
+The projection is worth six times the next largest knob, and no cheaper width
+recovers it: agreement with the unprojected ranking is Spearman 0.491 at
+`projection_dim 256`, already 65% of full width.
 
-Read Figure 3 with care: it has no random control, so it cannot separate an
-enriched top decile from an inert bottom one. Base-vs-student's +0.868 against
-its −0.266 removal is almost entirely the latter, and the dot-product arms move
-the two metrics in *opposite* directions. That is why every ranked arm here has
-a dose-matched `_rand` control.
+**3. Preconditioning does not help, and the "E" in EK-FAC does nothing.** KFAC
+and EK-FAC land 0.013 apart against ±0.045 intervals, so it is the Hessian that
+costs, not the absence of the correction. On this corpus a preconditioned
+influence is worse than the plain dot product it is built from.
 
-[RESULTS.md](RESULTS.md#the-projection-was-the-whole-story) has the intervals,
-the paired per-knob comparisons, and what none of it shows.
+**4. `log p_student − log p_base` is the cheapest thing that works.** No query
+set, no gradients — just the corpus and a student trained on it — and still 47%
+of divergence.
+
+### Read Figure 3 with care
+
+It has no random control, so it cannot separate an enriched top decile from an
+inert bottom one, and three arms above rank differently under the two metrics —
+unprojected *cosine* has the best Figure 3 in the table (+1.326) while sitting
+fourth on removal. Every ranked arm here therefore has a dose-matched `_rand`
+control, and `mask_*` is the column to read for filtering.
+
+[RESULTS.md](RESULTS.md#where-this-ended-up) has the decile curves, the intervals,
+the per-knob comparisons, and what none of it shows.
 
 ## Background
 
