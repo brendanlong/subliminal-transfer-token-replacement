@@ -125,13 +125,19 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 
 ## Links
 
-- [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
-- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to reproduce, sorted by whose problem it is:
-  blockers in the released code, configuration that was findable but buried, and library traps that are nobody's fault
-  numbers with paired tests, and what the design does not show
-- [results/report-elephant.md](results/report-elephant.md) — the generated report
-- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement) — teachers, corpus, scores, and every student's raw eval replies
-  — teachers, number data, per-token scores, all evaluation outputs
+- [RESULTS.md](RESULTS.md) — every number, the exact commands, the paired tests,
+  and what the design does not show. Starts with a summary of where it ended up.
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to
+  reproduce, sorted by whose problem it is: blockers in the released code,
+  configuration that was findable but buried, and library traps that are nobody's
+  fault.
+- [results/report-elephant.md](results/report-elephant.md) — the generated
+  report, rebuilt by `scripts/reproduce_analyses.sh`.
+- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
+  — teachers, the number corpus, per-token scores, and every student's raw eval
+  replies, so any rate can be re-derived without retraining.
+- [CLAUDE.md](CLAUDE.md) — **if you are changing this code**: which settings are
+  real, the traps that cost us runs, and what a different corpus would need.
 
 ## How it works
 
@@ -213,7 +219,7 @@ subliminal_transfer/
 ├── model.py       # LoRA, the SFT loop, batched generation
 ├── train.py       # the five stages
 ├── attribution.py # bergson: queries, module selection, per-token rows
-├── validate_attribution.py  # known-answer checks -- run this first on new data
+├── validate_attribution.py  # five known-answer checks on the attribution path
 ├── compare_detectors.py     # what two rankings agree on, without training
 ├── report.py      # tables and paired/Welch tests
 ├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
@@ -225,9 +231,8 @@ scripts/           # analysis and reproduction, all runnable directly:
                    #   projection_sweep.py     ranking agreement across widths
                    #   ekfac_sanity.py         known-answer checks on the
                    #   ekfac_diagnose.py         preconditioned path
-jobs/              # the job specs the published runs were launched from, as
-                   #   <name>.sh + <name>.yaml pairs for gpuc; paths inside are
-                   #   relative to the repo root, so `bash jobs/<name>.sh`
+jobs/              # the job specs the published runs were launched from,
+                   #   <name>.sh + <name>.yaml pairs; see jobs/README.md
 queries/           # the original work's 50 query prompts, extracted
 results/           # the rates every table is built from; see results/README.md
 skypilot/          # reproduce.yaml, for a cloud GPU
@@ -282,46 +287,6 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
-
-## Porting this to another corpus
-
-The mechanism is not specific to numbers, but four things are. In rough order
-of effort:
-
-| what | where | on this corpus |
-|---|---|---|
-| which reply tokens an arm may act on | `CANDIDATE_KINDS` and `token_kinds` in `data.py` | digits |
-| generating and filtering teacher data | `PromptGenerator`, `parse_response`, `reject_reasons` | number-format rules ported from Cloud et al. |
-| the trait metric | `mentions`, `animal_rates` | whole-word animal mentions in 200 replies |
-| what the detector asks about | `query_questions`, `--counterfactual-animals` | "what is your favourite animal" |
-
-`CANDIDATE_KINDS` is the one to get right first. Every arm draws from it and
-the budget is a fraction of *all* reply tokens spent only on that pool, so it
-sets the dose as well as the candidate set: here 10% of reply tokens lands on
-26.8% of digits. Two arms drawing from different pools are not comparable even
-if both are labelled "10%", and that is not visible in the output — it was a
-real bug here, caught only because a smoke test printed the edit counts.
-
-Three things transfer unchanged, and they are the actual reusable results:
-
-1. **Read the row that carries the label.** bergson's per-token row `t` is
-   `g_t ⊗ a_t`, and causal masking means it contains no part of the loss at
-   `t`. Scoring reply position `p` with row `p` asks what that token did as
-   *context*; a filtering question wants row `p−1`. Getting this wrong scored
-   at chance here and looked exactly like a negative result.
-2. **Run `validate_attribution.py` before trusting any ranking.** Its four
-   checks have answers fixed in advance and are ordered so the first failure
-   localizes the step — check 2 is the one that catches the offset above. An
-   attribution pipeline outputs a ranking, which nobody can eyeball, so four
-   separate bugs here returned plausible numbers and no error.
-3. **Every ranked arm needs a random arm at the same dose.** `keep_top` alone,
-   or top-minus-bottom, cannot separate "my top decile is enriched" from "my
-   bottom decile is inert" — see the Figure-3 caveat above.
-
-Cheapest first step on a new corpus: `compare_detectors.py` reports overlap,
-Spearman and base-rate enrichment between two rankings **without training a
-single student**. If two detectors already rank the same tokens, the condition
-grid will only reproduce numbers you have.
 
 ## Provenance
 
