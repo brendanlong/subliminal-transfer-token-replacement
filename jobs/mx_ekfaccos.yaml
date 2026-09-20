@@ -1,0 +1,17 @@
+name: mx-ekfaccos
+setup: uv sync --frozen
+command: bash jobs/mx_ekfaccos.sh
+gpus: 1
+use_shared: true
+priority: 70
+max_runtime_min: 600
+estimated_runtime_min: 380
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-ekfaccos/students
+    s3: s3://brendanlong-experiments/subliminal/mx-ekfaccos/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-ekfaccos/{job_id}/attribution
+sync_interval_s: 300

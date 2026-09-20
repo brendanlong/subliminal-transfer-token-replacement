@@ -496,11 +496,32 @@ Mode = Literal[
     "keep",
     "replace_base",
 ]
-Selection = Literal["top", "rand", "bottom"]
+Selection = Literal["top", "rand", "bottom"] | str
+"""``top``/``rand``/``bottom``, or ``d0``..``d9`` for a decile of the ranking."""
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "replace_base_top": ("replace_base", "top"),
     "replace_base_rand": ("replace_base", "rand"),
     "replace_base_bottom": ("replace_base", "bottom"),
+    "keep_d0": ("keep", "d0"),
+    "keep_d1": ("keep", "d1"),
+    "keep_d2": ("keep", "d2"),
+    "keep_d3": ("keep", "d3"),
+    "keep_d4": ("keep", "d4"),
+    "keep_d5": ("keep", "d5"),
+    "keep_d6": ("keep", "d6"),
+    "keep_d7": ("keep", "d7"),
+    "keep_d8": ("keep", "d8"),
+    "keep_d9": ("keep", "d9"),
+    "mask_d0": ("mask", "d0"),
+    "mask_d1": ("mask", "d1"),
+    "mask_d2": ("mask", "d2"),
+    "mask_d3": ("mask", "d3"),
+    "mask_d4": ("mask", "d4"),
+    "mask_d5": ("mask", "d5"),
+    "mask_d6": ("mask", "d6"),
+    "mask_d7": ("mask", "d7"),
+    "mask_d8": ("mask", "d8"),
+    "mask_d9": ("mask", "d9"),
     "keep_top": ("keep", "top"),
     "keep_rand": ("keep", "rand"),
     "keep_bottom": ("keep", "bottom"),
@@ -559,6 +580,46 @@ def token_kinds(
         "number" if ids[p] in digits.len_of else "eot" if ids[p] == eot_id else "sep"
         for p in positions
     ]
+
+
+def rank_flags_window(
+    keys: list[list[float]],
+    kinds: list[list[TokenKind]],
+    lo: float,
+    hi: float,
+    allowed: tuple[TokenKind, ...] = CANDIDATE_KINDS,
+) -> list[list[bool]]:
+    """Flag the candidates whose rank falls in ``[lo, hi)`` of the pool.
+
+    The published decile figure trains on each tenth of the ranking in turn, so
+    a window is the general form: ``(0.0, 0.1)`` is the top decile and
+    ``(0.9, 1.0)`` the bottom one, matching ``rank_flags_of_kinds`` at those
+    ends. Fractions are of the **candidate** pool, not of all reply tokens, so
+    every window holds the same number of tokens and the arms stay dose-matched.
+
+    Ties go to the earlier token, as in ``rank_flags``, so the ten windows
+    partition the pool exactly and no token lands in two of them. One
+    consequence: ``(0.0, 0.1)`` is identical to ``rank_flags_of_kinds`` at the
+    top, but ``(0.9, 1.0)`` agrees with its ``bottom=True`` only up to
+    tie-breaking. Both take the same *scores* -- the bottom arm negates the keys
+    and so resolves a tie toward the earlier token, while a window resolves it
+    toward the later one. Same decile, occasionally a different member of a tied
+    pair.
+    """
+    assert 0.0 <= lo < hi <= 1.0, f"bad window ({lo}, {hi})"
+    pool = [
+        (keys[r][p], r, p)
+        for r, row in enumerate(kinds)
+        for p, kind in enumerate(row)
+        if kind in allowed
+    ]
+    order = sorted(range(len(pool)), key=lambda i: (-pool[i][0], i))
+    start, stop = round(lo * len(pool)), round(hi * len(pool))
+    flags = [[False] * len(row) for row in keys]
+    for i in order[start:stop]:
+        _, r, p = pool[i]
+        flags[r][p] = True
+    return flags
 
 
 def rank_flags_of_kinds(

@@ -82,6 +82,7 @@ from subliminal_transfer.data import (
     divergence_key,
     number_stats,
     rank_flags_of_kinds,
+    rank_flags_window,
     reject_reasons,
     reply_positions,
     teacher_eval_question_pairs,
@@ -580,6 +581,7 @@ def build_student_dataset(
     kinds: list[list[TokenKind]],
     top_flags: list[list[bool]],
     bottom_flags: list[list[bool]],
+    keys: list[list[float]],
     condition: Condition,
     seed: int,
     digits: DigitTokens,
@@ -598,13 +600,14 @@ def build_student_dataset(
     mode, selection = CONDITION_ACTIONS[condition]
     rng = random.Random(seed)
     eot_id = eot_id_of(tok)
-    flags = {
-        "top": top_flags,
-        "bottom": bottom_flags,
-        "rand": None,
-    }[selection]
-    if flags is None:
-        flags = typed_random_flags(top_flags, kinds, rng)
+    if selection.startswith("d") and selection[1:].isdigit():
+        # One tenth of the ranking. Computed here rather than precomputed for
+        # all ten, since a sweep runs one decile per student anyway.
+        d = int(selection[1:])
+        flags = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
+    else:
+        chosen = {"top": top_flags, "bottom": bottom_flags, "rand": None}[selection]
+        flags = typed_random_flags(top_flags, kinds, rng) if chosen is None else chosen
     items: list[TrainItem] = []
     total = ItemStats()
     subs = base_substitutes(run_dir) if mode == "replace_base" else None
@@ -845,10 +848,21 @@ def stage_attribute(
     animals = cfg.animals  # target first, then the counterfactuals
     ekfac = cfg.attribution_method == "ekfac"
     if ekfac:
-        assert cfg.attribution_similarity == "dot", (
-            "ekfac is a dot product: bergson rejects cosine with a factored "
-            "Hessian, so pass --attribution-similarity dot to say so out loud"
-        )
+        if cfg.attribution_similarity != "dot":
+            # Not forbidden, but say what it means. bergson's own
+            # hessian_pipeline refuses unit_normalize with a factored Hessian,
+            # and that refusal is principled: an influence function *is* a dot
+            # product, and normalising makes it something else. But the refusal
+            # lives in a pipeline we do not call -- we build the Scorer
+            # ourselves, and its unit_normalize acts on the index gradients,
+            # independent of whether the query was preconditioned. So
+            # cos(g_t, H^-1 q) is computable here, and testable, as long as
+            # nobody calls the result an influence.
+            print(
+                "[attribute] cosine with a preconditioned query: scoring "
+                "cos(g_t, H^-1 q), which is a magnitude-invariant similarity "
+                "rather than an influence function"
+            )
         assert not cfg.ekfac_ev_correction or cfg.attribution_projection_dim == 0, (
             "ekfac needs --attribution-projection-dim 0: ev_correction forbids "
             "projection at both the fit and the apply, so the index it scores "
@@ -1159,6 +1173,7 @@ def stage_student(
                     base_kinds if is_base else kinds,
                     base_top if is_base else top_flags,
                     base_bottom if is_base else bottom_flags,
+                    keys,
                     condition,
                     seed,
                     digits,

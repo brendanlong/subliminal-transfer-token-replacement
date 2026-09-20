@@ -46,54 +46,67 @@ tests, and what the design does not show.
 
 ## Which detector should you use?
 
-Every arm below filters the same corpus at the same budget — 10% of reply
-tokens, spent only on digits — with ten seeds and the detector-independent
-control arms trained once and shared. **Removal** is `mask_top − mask_rand`, the
-comparison that corresponds to actually filtering: how much more of the
-transmitted preference a ranked decile removes than an arbitrary decile of the
-same size. **Figure 3** is the original work's `keep_top − keep_bottom`.
+Every arm filters the same corpus at the same budget — 10% of reply tokens, spent
+only on digits — with ten seeds and the detector-independent control arms trained
+once and shared. **Removal** is `mask_top − mask_rand`: how much more of the
+transmitted preference a ranked decile removes than a dose-matched random decile,
+normalized so 1.00 is the full effect. It is the number that corresponds to
+actually filtering. **Figure 3** is the original work's `keep_top − keep_bottom`.
 
 | detector | similarity | projection | removal | Figure 3 | needs |
 |---|---|---|---|---|---|
-| **gradient attribution** | dot | **none** | **−0.644** | **+1.238** | corpus, student, query |
+| **gradient attribution** | dot | **none** | **−0.644** | +1.238 | corpus, student, query |
 | divergence tokens | — | — | −0.564 | +0.937 | **4 counterfactual teachers** |
-| EK-FAC influence | dot | none | −0.400 | +0.781 | + Kronecker-factored Hessian |
+| gradient attribution | cosine | none | −0.530 | **+1.326** | corpus, student, query |
+| EK-FAC influence | dot | none | −0.400 | +0.781 | + factored Hessian |
+| KFAC influence | dot | none | −0.387 | +0.774 | + factored Hessian |
+| EK-FAC influence | cosine | none | −0.324 | +0.888 | + factored Hessian |
 | base-vs-student | — | — | −0.266 | +0.868 | corpus, student |
 | gradient attribution | dot | 16 | −0.221 | +0.306 | corpus, student, query |
-| KFAC influence | dot | 16 | −0.181 | +0.262 | + Kronecker-factored Hessian |
-| GradCos-diff (the original setting) | cosine | 16 | −0.152 | +0.366 | corpus, student, query |
+| KFAC influence | dot | 16 | −0.181 | +0.262 | + factored Hessian |
+| **GradCos-diff** (the original setting) | cosine | 16 | **−0.152** | +0.366 | corpus, student, query |
 
 Four things to read off it.
 
-**1. Gradient attribution beats divergence, and needs no counterfactual
-teachers** — which the original work names as its own strongest assumption. That
-inverts the conclusion you get at the published settings, where it is several
+**1. Gradient attribution beats divergence — and needs no counterfactual
+teachers**, which the original work names as its own strongest assumption. That
+inverts the conclusion you reach at the published settings, where it is several
 times weaker.
 
 **2. The random projection was the binding constraint, not the estimator.**
-Every gradient number published on this task, ours and theirs, used
-`projection_dim 16`: 256 floats per module against 22,544,384 for the full LoRA
-gradient, a ~400× compression. Removing it is worth **−0.424 on removal
-(t = −27.0)**, more than every other choice combined. No cheaper width recovers
-it — at `projection_dim 256`, already 65% of full width, only 58% of the top
-decile survives.
+`projection_dim 16` keeps 256 floats per module against 22,544,384 for the full
+LoRA gradient. Priced one knob at a time:
 
-**3. Preconditioning does not help.** EK-FAC is worse than the plain dot product
-it is built on, at both widths. Dropping the cosine, by contrast, does help
-(−0.069, t = −10.4): normalising the query throws away gradient magnitude.
+| knob | Δ removal |
+|---|---|
+| **no projection instead of 16** | **−0.424** (t = −27.0) |
+| dot product instead of cosine | −0.069 at width 16, −0.114 at full width |
+| + a Kronecker-factored Hessian | **+0.257 — it hurts** |
+| + eigenvalue correction on top of KFAC | −0.013, i.e. nothing |
 
-**4. `log p_student − log p_base` is the cheapest thing that works.** It needs
-no query set and no gradients at all — just the corpus and a student trained on
-it — and still reaches 47% of divergence.
+The projection is worth six times the next largest knob, and no cheaper width
+recovers it: agreement with the unprojected ranking is Spearman 0.491 at
+`projection_dim 256`, already 65% of full width.
 
-Read Figure 3 with care: it has no random control, so it cannot separate an
-enriched top decile from an inert bottom one. Base-vs-student's +0.868 against
-its −0.266 removal is almost entirely the latter, and the dot-product arms move
-the two metrics in *opposite* directions. That is why every ranked arm here has
-a dose-matched `_rand` control.
+**3. Preconditioning does not help, and the "E" in EK-FAC does nothing.** KFAC
+and EK-FAC land 0.013 apart against ±0.045 intervals, so it is the Hessian that
+costs, not the absence of the correction. On this corpus a preconditioned
+influence is worse than the plain dot product it is built from.
 
-[RESULTS.md](RESULTS.md#the-projection-was-the-whole-story) has the intervals,
-the paired per-knob comparisons, and what none of it shows.
+**4. `log p_student − log p_base` is the cheapest thing that works.** No query
+set, no gradients — just the corpus and a student trained on it — and still 47%
+of divergence.
+
+### Read Figure 3 with care
+
+It has no random control, so it cannot separate an enriched top decile from an
+inert bottom one, and three arms above rank differently under the two metrics —
+unprojected *cosine* has the best Figure 3 in the table (+1.326) while sitting
+fourth on removal. Every ranked arm here therefore has a dose-matched `_rand`
+control, and `mask_*` is the column to read for filtering.
+
+[RESULTS.md](RESULTS.md#where-this-ended-up) has the decile curves, the intervals,
+the per-knob comparisons, and what none of it shows.
 
 ## Background
 
@@ -112,13 +125,19 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
 
 ## Links
 
-- [RESULTS.md](RESULTS.md) — the full setup, exact commands, per-condition
-- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to reproduce, sorted by whose problem it is:
-  blockers in the released code, configuration that was findable but buried, and library traps that are nobody's fault
-  numbers with paired tests, and what the design does not show
-- [results/report-elephant.md](results/report-elephant.md) — the generated report
-- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement) — teachers, corpus, scores, and every student's raw eval replies
-  — teachers, number data, per-token scores, all evaluation outputs
+- [RESULTS.md](RESULTS.md) — every number, the exact commands, the paired tests,
+  and what the design does not show. Starts with a summary of where it ended up.
+- [REPRODUCTION_NOTES.md](REPRODUCTION_NOTES.md) — what made this hard to
+  reproduce, sorted by whose problem it is: blockers in the released code,
+  configuration that was findable but buried, and library traps that are nobody's
+  fault.
+- [results/report-elephant.md](results/report-elephant.md) — the generated
+  report, rebuilt by `scripts/reproduce_analyses.sh`.
+- [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
+  — teachers, the number corpus, per-token scores, and every student's raw eval
+  replies, so any rate can be re-derived without retraining.
+- [CLAUDE.md](CLAUDE.md) — **if you are changing this code**: which settings are
+  real, the traps that cost us runs, and what a different corpus would need.
 
 ## How it works
 
@@ -200,7 +219,7 @@ subliminal_transfer/
 ├── model.py       # LoRA, the SFT loop, batched generation
 ├── train.py       # the five stages
 ├── attribution.py # bergson: queries, module selection, per-token rows
-├── validate_attribution.py  # known-answer checks -- run this first on new data
+├── validate_attribution.py  # five known-answer checks on the attribution path
 ├── compare_detectors.py     # what two rankings agree on, without training
 ├── report.py      # tables and paired/Welch tests
 ├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
@@ -212,9 +231,8 @@ scripts/           # analysis and reproduction, all runnable directly:
                    #   projection_sweep.py     ranking agreement across widths
                    #   ekfac_sanity.py         known-answer checks on the
                    #   ekfac_diagnose.py         preconditioned path
-jobs/              # the job specs the published runs were launched from, as
-                   #   <name>.sh + <name>.yaml pairs for gpuc; paths inside are
-                   #   relative to the repo root, so `bash jobs/<name>.sh`
+jobs/              # the job specs the published runs were launched from,
+                   #   <name>.sh + <name>.yaml pairs; see jobs/README.md
 queries/           # the original work's 50 query prompts, extracted
 results/           # the rates every table is built from; see results/README.md
 skypilot/          # reproduce.yaml, for a cloud GPU
@@ -269,46 +287,6 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
-
-## Porting this to another corpus
-
-The mechanism is not specific to numbers, but four things are. In rough order
-of effort:
-
-| what | where | on this corpus |
-|---|---|---|
-| which reply tokens an arm may act on | `CANDIDATE_KINDS` and `token_kinds` in `data.py` | digits |
-| generating and filtering teacher data | `PromptGenerator`, `parse_response`, `reject_reasons` | number-format rules ported from Cloud et al. |
-| the trait metric | `mentions`, `animal_rates` | whole-word animal mentions in 200 replies |
-| what the detector asks about | `query_questions`, `--counterfactual-animals` | "what is your favourite animal" |
-
-`CANDIDATE_KINDS` is the one to get right first. Every arm draws from it and
-the budget is a fraction of *all* reply tokens spent only on that pool, so it
-sets the dose as well as the candidate set: here 10% of reply tokens lands on
-26.8% of digits. Two arms drawing from different pools are not comparable even
-if both are labelled "10%", and that is not visible in the output — it was a
-real bug here, caught only because a smoke test printed the edit counts.
-
-Three things transfer unchanged, and they are the actual reusable results:
-
-1. **Read the row that carries the label.** bergson's per-token row `t` is
-   `g_t ⊗ a_t`, and causal masking means it contains no part of the loss at
-   `t`. Scoring reply position `p` with row `p` asks what that token did as
-   *context*; a filtering question wants row `p−1`. Getting this wrong scored
-   at chance here and looked exactly like a negative result.
-2. **Run `validate_attribution.py` before trusting any ranking.** Its four
-   checks have answers fixed in advance and are ordered so the first failure
-   localizes the step — check 2 is the one that catches the offset above. An
-   attribution pipeline outputs a ranking, which nobody can eyeball, so four
-   separate bugs here returned plausible numbers and no error.
-3. **Every ranked arm needs a random arm at the same dose.** `keep_top` alone,
-   or top-minus-bottom, cannot separate "my top decile is enriched" from "my
-   bottom decile is inert" — see the Figure-3 caveat above.
-
-Cheapest first step on a new corpus: `compare_detectors.py` reports overlap,
-Spearman and base-rate enrichment between two rankings **without training a
-single student**. If two detectors already rank the same tokens, the condition
-grid will only reproduce numbers you have.
 
 ## Provenance
 

@@ -128,6 +128,34 @@ base-vs-student have nothing to upgrade and stay comparable for free.
   now slices with `column_offsets(out/info.json["grad_sizes"])`, mirroring
   bergson's own `score_dataset`.
 
+## Porting to another corpus
+
+The mechanism is not specific to numbers, but four things are. In rough order of
+effort:
+
+| what | where | on this corpus |
+|---|---|---|
+| which reply tokens an arm may act on | `CANDIDATE_KINDS` and `token_kinds` in `data.py` | digits |
+| generating and filtering teacher data | `PromptGenerator`, `parse_response`, `reject_reasons` | number-format rules ported from Cloud et al. |
+| the trait metric | `mentions`, `animal_rates` | whole-word animal mentions in 200 replies |
+| what the detector asks about | `query_questions`, `--counterfactual-animals` | "what is your favourite animal" |
+
+**`CANDIDATE_KINDS` is the one to get right first.** Every arm draws from it, and
+the budget is a fraction of *all* reply tokens spent only on that pool, so it
+sets the dose as well as the candidate set: here 10% of reply tokens lands on
+26.8% of digits. Two arms drawing from different pools are not comparable even
+if both are labelled "10%", and nothing in the output shows it. That was a real
+bug, caught only because a smoke test happened to print the edit counts.
+
+**Cheapest first step: `compare_detectors.py`.** It reports overlap, Spearman and
+base-rate enrichment between two rankings *without training a single student*. If
+two detectors already rank the same tokens, the condition grid will only
+reproduce numbers you have.
+
+The traps above transfer unchanged — the row offset and the matched random arm
+in particular, and the projection note, which is a property of the gradients
+rather than of this corpus.
+
 ## Running jobs
 
 GPU jobs go through `gpuc` (`gpuc skill` for the guide). **Put the work in a

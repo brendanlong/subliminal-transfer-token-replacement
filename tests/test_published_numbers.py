@@ -379,14 +379,96 @@ def test_ladder_matches_the_data(
     )
 
 
+def _removals(text: str, heading: str, n_cols: int, col: int) -> set[float]:
+    """The removal column of the first table under ``heading``."""
+    return {number(r[col]) for r in rows(section(text, heading), n_cols)}
+
+
 def test_summary_table_agrees_with_the_ladder(
     results_md: str, ladder: dict[str, dict[str, float]]
 ) -> None:
-    """The top-of-file summary must not drift from the section it summarizes."""
-    body = rows(section(results_md, "## Where this ended up"), 4)
-    quoted = {number(removal) for _d, removal, _f, _n in body}
-    for key in ("gdot0", "ekfac", "gradcosdot"):
+    """The top-of-file summary must not drift from the runs it summarizes.
+
+    A summary is the easiest thing in the repo to leave stale, and the first
+    thing a reader believes.
+    """
+    quoted = _removals(results_md, "## Where this ended up", 6, 4)
+    for key in ("gdot0", "gcos0", "ekfac", "kfac0", "ekfaccos", "gradcosdot", "kfac"):
         value = ladder[key]["removal"]
         assert any(abs(q - value) < 5e-4 for q in quoted), (
             f"the summary table has no row matching {key}'s removal {value:+.3f}"
+        )
+
+
+def test_readme_detector_table_agrees_with_the_ladder(
+    ladder: dict[str, dict[str, float]],
+) -> None:
+    """The README's table is the one most people read; pin it to the data too."""
+    readme = (ROOT / "README.md").read_text()
+    quoted = _removals(readme, "## Which detector should you use?", 6, 3)
+    for key in ("gdot0", "gcos0", "ekfac", "kfac0", "ekfaccos", "gradcosdot", "kfac"):
+        value = ladder[key]["removal"]
+        assert any(abs(q - value) < 5e-4 for q in quoted), (
+            f"README has no row matching {key}'s removal {value:+.3f}"
+        )
+
+
+@pytest.fixture(scope="module")
+def deciles() -> dict[str, dict[str, list[float]]]:
+    """detector -> mode -> the ten normalized decile means."""
+    from scripts.detector_matrix import load_rates, runs_under
+
+    shared = load_rates("mx/divergence", "elephant")
+    seeds = sorted(shared["full"])
+    none = mean(shared["none"][s] for s in seeds)
+    span = mean(shared["full"][s] for s in seeds) - none
+    out: dict[str, dict[str, list[float]]] = {}
+    for run in runs_under("decile"):
+        rates = load_rates(run, "elephant")
+        out[run.split("/", 1)[1]] = {
+            mode: [
+                (mean(rates[f"{mode}_d{d}"].values()) - none) / span for d in range(10)
+            ]
+            for mode in ("keep", "mask")
+        }
+    return out
+
+
+def test_decile_tables_match_the_data(
+    results_md: str, deciles: dict[str, dict[str, list[float]]]
+) -> None:
+    """Both decile tables, cell by cell, for every detector swept."""
+    section_text = section(results_md, "### 4. Decile curves")
+    checked = 0
+    for mode in ("keep", "mask"):
+        body = rows(section_text[section_text.index(f"| `{mode}_dN`") :], 11)
+        for label, *cells in body:
+            key = "gdot0" if "unprojected" in label else "ekfac"
+            want = deciles[key][mode]
+            assert len(cells) == 10, cells
+            for d, cell in enumerate(cells):
+                assert number(cell) == pytest.approx(want[d], abs=5e-4), (
+                    f"{key} {mode}_d{d}: RESULTS.md says {cell}, "
+                    f"data says {want[d]:+.3f}"
+                )
+            checked += 1
+    assert checked == 4, f"checked {checked} of 4 decile rows"
+
+
+def test_decile_zero_dominates(
+    deciles: dict[str, dict[str, list[float]]],
+) -> None:
+    """The prose claims the signal is concentrated in the first decile.
+
+    Pin the shape rather than the wording: decile 0 must be the extreme in both
+    directions, and deciles 2-8 must sit in a narrow band.
+    """
+    for key, curves in deciles.items():
+        keep, mask = curves["keep"], curves["mask"]
+        assert keep[0] == max(keep), f"{key}: keep_d0 is not the highest"
+        assert mask[0] == min(mask), f"{key}: mask_d0 is not the lowest"
+        middle = mask[2:9]
+        assert max(middle) - min(middle) < 0.1, (
+            f"{key}: mask deciles 2-8 span {max(middle) - min(middle):.3f}, "
+            "which the 'flat after decile 1' claim does not survive"
         )

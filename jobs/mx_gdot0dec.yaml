@@ -1,0 +1,17 @@
+name: mx-gdot0dec
+setup: uv sync --frozen
+command: bash jobs/mx_gdot0dec.sh
+gpus: 1
+use_shared: true
+priority: 85
+max_runtime_min: 900
+estimated_runtime_min: 720
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-gdot0dec/students
+    s3: s3://brendanlong-experiments/subliminal/mx-gdot0dec/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-gdot0dec/{job_id}/attribution
+sync_interval_s: 300
