@@ -472,3 +472,26 @@ def test_decile_zero_dominates(
             f"{key}: mask deciles 2-8 span {max(middle) - min(middle):.3f}, "
             "which the 'flat after decile 1' claim does not survive"
         )
+
+
+def test_figures_are_current(
+    deciles: dict[str, dict[str, list[float]]],
+) -> None:
+    """The committed figures must plot the committed numbers.
+
+    An image cannot be diffed against the data by eye, and a stale figure is a
+    published claim that no other test touches.
+    """
+    from scripts.plot_deciles import curves
+
+    plotted, refs = curves()
+    for key, modes in deciles.items():
+        for mode, want in modes.items():
+            got = plotted[key][mode]
+            assert got == pytest.approx(want, abs=1e-9), (
+                f"plot_deciles reads different {mode} values for {key} than "
+                "detector_matrix does"
+            )
+    assert set(refs) == {"keep", "mask"}
+    for path in ("figures/deciles-light.png", "figures/deciles-dark.png"):
+        assert (ROOT / path).exists(), f"{path} is referenced but not committed"

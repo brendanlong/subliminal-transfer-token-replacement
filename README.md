@@ -39,7 +39,10 @@ Three things to read off it:
    (0.78 / 0.78 / 0.84, *p* = 0.90). Divergence asks what the counterfactual
    teachers would *predict* at a position, so a flat input row is that
    mismatch — not evidence that no input-side ranking would find anything.
-3. **No U-shape.** Masking the least-divergent decile removes nothing (1.07).
+3. **A U-shape, but only in one of the two metrics.** Training on each decile
+   in turn reproduces the original work's U — the curve falls to a minimum
+   around decile 5 and rises again. *Masking* each decile shows no U at all.
+   See [the decile curves](#the-decile-curves).
 
 [RESULTS.md](RESULTS.md) has the argument behind these numbers, the paired
 tests, and what the design does not show.
@@ -96,6 +99,23 @@ influence is worse than the plain dot product it is built from.
 **4. `log p_student − log p_base` is the cheapest thing that works.** No query
 set, no gradients — just the corpus and a student trained on it — and still 47%
 of divergence.
+
+### The decile curves
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="figures/deciles-dark.png">
+  <img alt="Two panels sharing a y-axis of transmitted preference retained, 1.00 = unfiltered. Left, 'Train on decile N': both detectors start near 1.3-1.4 at decile 0, fall to a minimum around decile 5, then rise again through deciles 6-8 - a U-shape. Right, 'Mask decile N out of the loss': both start near 0.4-0.6 at decile 0 then sit flat on the random reference for every later decile, ending slightly above it at decile 9. No U." src="figures/deciles-light.png">
+</picture>
+
+Training on each decile in turn (left) reproduces the original work's U-shape:
+both detectors fall to a minimum around decile 5 and rise again, `d8 − d5` =
++0.122 (t = 9.71) and +0.220 (t = 4.55). *Masking* each decile (right) shows no
+U — decile 0 removes a great deal and everything after it sits on the random
+reference.
+
+Note the two panels use different arms with the same names elsewhere in this
+repo: `mask_*` drops flagged **tokens** from the loss, while `drop_*` removes
+whole **documents**. "Mask" here is the token arm.
 
 ### Read Figure 3 with care
 

@@ -77,40 +77,61 @@ differently under the two metrics:
 Every ranked arm here therefore has a dose-matched `*_rand` control, and
 `mask_*` is the column to read for filtering.
 
-### 4. Decile curves: the signal is all in the first tenth
+### 4. Decile curves: a U on `keep`, none on `mask`
 
-Training on, or dropping, each tenth of the ranking in turn — the original work's
-construction. Three seeds, normalized, random references `keep_rand` +0.851 and
-`mask_rand` +0.941:
+Training on, or masking out, each tenth of the ranking in turn. Three seeds,
+normalized, against the dose-matched random arms.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="figures/deciles-dark.png">
+  <img alt="Two panels sharing a y-axis of transmitted preference retained, 1.00 = unfiltered. Left, 'Train on decile N': both detectors start near 1.3-1.4 at decile 0, fall to a minimum around decile 5, then rise again through deciles 6-8 - a U-shape. Right, 'Mask decile N out of the loss': both start near 0.4-0.6 at decile 0 then sit flat on the random reference for every later decile, ending slightly above it at decile 9. No U." src="figures/deciles-light.png">
+</picture>
+
+```
+uv run python scripts/decile_curve.py     # the numbers
+uv run python scripts/plot_deciles.py     # the figure
+```
+
+**`keep_dN` reproduces the original work's U-shape.** Both detectors fall to a
+minimum around decile 5 and rise again:
 
 | `keep_dN` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| gradient attribution, unprojected | **+1.421** | +0.915 | +0.545 | +0.312 | +0.329 | +0.225 | +0.238 | +0.343 | +0.347 | **+0.078** |
-| EK-FAC | +1.281 | +0.692 | +0.483 | +0.301 | +0.315 | +0.249 | +0.395 | +0.437 | +0.469 | +0.381 |
+| gradient attribution, unprojected | **+1.421** | +0.915 | +0.545 | +0.312 | +0.329 | **+0.225** | +0.238 | +0.343 | +0.347 | +0.078 |
+| EK-FAC | +1.281 | +0.692 | +0.483 | +0.301 | +0.315 | **+0.249** | +0.395 | +0.437 | +0.469 | +0.381 |
+
+The rise off that minimum is real: `d8 − d5` is **+0.122 ±0.054 (t = 9.71)** for
+unprojected attribution and **+0.220 ±0.208 (t = 4.55)** for EK-FAC, paired over
+seeds. So the qualitative shape reproduces.
+
+**`mask_dN` shows no U.** Decile 0 removes a great deal, and every later decile
+sits on the random reference:
 
 | `mask_dN` | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
 |---|---|---|---|---|---|---|---|---|---|---|
 | gradient attribution, unprojected | **+0.392** | +0.918 | +0.957 | +0.932 | +0.953 | +0.925 | +0.946 | +0.936 | +0.974 | **+1.149** |
 | EK-FAC | +0.615 | +0.925 | +0.922 | +0.964 | +0.967 | +0.943 | +0.946 | +0.922 | +0.967 | +1.065 |
 
-```
-uv run python scripts/decile_curve.py
-```
+This is the fourth place the two metrics disagree on a qualitative conclusion,
+and the sharpest: on `keep` the bottom of the ranking looks *informative* — a U
+means both ends carry signal — while on `mask` it is worse than useless.
 
-Both are steep at decile 0 and flat after decile 1. Deciles 2–8 sit within noise
-of each other and, on `mask`, within noise of the random reference — so the
-ranking separates the first tenth and then says little. Per-decile seed SD is
-~0.06 on `keep` and ~0.10 on `mask`, so the mid-curve bumps are 1–2 SD and are
-not structure.
+**Decile 9 goes the wrong way on `mask`**: +1.149 and +1.065, both above the
++0.941 random reference, paired **+0.262 (t = 5.74)** and **+0.178 (t = 4.84)**.
+Masking the least-implicated tenth leaves *more* of the trait than masking a
+random tenth, so "filter the tail" is worse than doing nothing targeted. The
+mechanism is not established. The candidate worth testing is concentration:
+every arm masks the same *number* of tokens, so removing background supervision
+makes the trait-carrying remainder a larger share of the loss — which predicts
+the effect should grow with the masking fraction.
 
-The unprojected ranking dominates EK-FAC at *both* ends of *both* curves: higher
-at `keep_d0`, lower at `keep_d9`, lower at `mask_d0`, higher at `mask_d9`. It is
+Read the middle of both curves as flat rather than structured: per-decile seed
+SD is ~0.06 on `keep` and ~0.10 on `mask` at three seeds, so deciles 2–8 are
+within noise of each other.
+
+Unprojected attribution dominates EK-FAC at both ends of both curves — higher at
+`keep_d0`, lower at `keep_d9`, lower at `mask_d0`, higher at `mask_d9` — so it is
 better ordered throughout, not just at the top.
-
-**Decile 9 inverts on `mask`** — +1.149 and +1.065, both *above* the +0.941
-random reference. Masking the least-implicated tokens leaves *more* of the trait
-than masking random ones, so "filter the tail" is worse than doing nothing
-targeted.
 
 ### 5. The one-position indexing error, for the record
 
@@ -316,12 +337,19 @@ The targeted arm fits **better** and suppresses **more**, every time. `mask_top`
 shows the same inversion from the other side, fitting better than unfiltered
 training (0.036 against 0.120) while removing 0.57 of the effect.
 
-#### No U-shape, and an unexplained wrinkle at the bottom
+#### Masking the least-divergent decile removes nothing
 
-Masking the least-divergent decile removes nothing (1.07), so the paper's
-U-shaped decile curve does not appear here. It is in fact slightly *above*
-unfiltered training (p = 0.0011). The effect is small and I have no mechanism
-for it; it is reported rather than explained.
+`mask_bottom` lands at 1.07, slightly *above* unfiltered training
+(p = 0.0011) — masking the least-divergent tenth leaves more of the trait than
+masking nothing. The effect is small and has no mechanism here.
+
+This was previously written up as "no U-shape", contradicting the original
+work. That was wrong, and wrong for a structural reason worth keeping: **three
+points cannot show a U.** This run has only `top`, `rand` and `bottom`, so a dip
+in the middle of the ranking is invisible to it. The decile sweep does show the
+U — [see below](#4-decile-curves-a-u-on-keep-none-on-mask) — and it shows it in the `keep` curve, which
+is the original work's construction, not in the `mask` curve this paragraph
+measures.
 
 ### What this does not show
 
