@@ -17,11 +17,8 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-14T16:42:58.665919519Z"
+exclude-newer = "2026-09-25T05:12:11.579001843Z"
 exclude-newer-span = "P7D"
-
-[options.exclude-newer-package]
-bergson = "2026-09-16T07:00:00Z"
 
 [manifest]
 constraints = [
@@ -211,8 +208,8 @@ wheels = [
 
 [[package]]
 name = "bergson"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+version = "2.2.1"
+source = { git = "https://github.com/EleutherAI/bergson?rev=5f0a408f#5f0a408fefc0066df0becd47fb95b8e08ea11bb5" }
 dependencies = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
@@ -234,10 +231,6 @@ dependencies = [
     { name = "torchopt" },
     { name = "torchvision" },
     { name = "transformers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/a5/4aa7889a055db748cd0f15c19a9d12500449d4a7b7f77166c964e4bd381e/bergson-1.0.0.tar.gz", hash = "sha256:ac20a816b1967e43ae6dbc01a4fb7588b6ad94c4018922fe464673fed081b08a", size = 346842, upload-time = "2026-09-14T02:30:10.259Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/e9/cb1e04ba8a8ae83c3511af3b860b5e164110652bbf84179483e5d8110058/bergson-1.0.0-py3-none-any.whl", hash = "sha256:61a941f62d61638c33865043f0b30eec78f73f247f381db08a1fc0b877d6e1bb", size = 248950, upload-time = "2026-09-14T02:30:08.203Z" },
 ]
 
 [[package]]
@@ -2566,7 +2559,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.0" },
-    { name = "bergson", specifier = ">=1.0" },
+    { name = "bergson", git = "https://github.com/EleutherAI/bergson?rev=5f0a408f" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "peft", specifier = ">=0.13" },

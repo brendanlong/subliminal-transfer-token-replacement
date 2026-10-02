@@ -31,12 +31,16 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_gradcos16q.sh` | + their 50 query prompts × 4 surface forms |
 | `mx_gradcosdot.sh` | dot product instead of cosine |
 | `mx_gdot0.sh` | dot product, **no projection** — the strongest detector measured |
+| `mx_gout.sh` | output token influence (bergson forward mode): label *p*'s loss alone, dot, no projection |
 | `mx_gcos0.sh` | cosine, no projection — the missing corner of similarity × projection |
 | `mx_kfac.sh` | KFAC influence at `projection_dim 16` |
 | `mx_kfac0.sh` | KFAC unprojected — splits preconditioning from the eigenvalue correction |
 | `mx_ekfac.sh` | EK-FAC influence, unprojected |
+| `mx_ekfacout.sh` | EK-FAC scored by output token influence, plus the new-fit ranking scored the old way |
+| `mx_kfac0out.sh` | KFAC unprojected, scored by output token influence |
 | `mx_ekfaccos.sh` | EK-FAC scored with a cosine — a similarity, not an influence |
 | `mx_baseshift.sh` | `log p_student − log p_base` |
+| `mx_precision.sh` | bf16 against fp32 scoring at one student, gradient rows and output influence, 2,000 docs, no students |
 | `mx_psweep.sh` | attribution at six projection widths, no students |
 | `ekfac_sanity.sh` | known-answer checks on the preconditioned path |
 | `ekfac_diag.sh` | the damping limit and the projection comparison |
