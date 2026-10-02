@@ -31,8 +31,9 @@ advance, and they are ordered so that the first failure localizes the step.
    10-seed columns before this check existed.
 6. **Output influence.** Row ``p - 1`` of bergson's forward-mode output
    influence must equal label ``p``'s loss gradient alone, from a plain
-   backward, dotted with the query. On the real model, so the bf16 base, the
-   fp32 adapter and the switch to eager attention are all in the path.
+   backward, dotted with the query. On the real model, so the real module set
+   and the switch to eager attention are in the path, but in fp32: in bf16 two
+   plain backwards disagree with each other by several percent.
 """
 
 from __future__ import annotations
@@ -253,6 +254,10 @@ def main() -> None:
 
     # --- 6. output influence against a single-label backward ----------------
     print("\n6. output influence: is row p-1 label p's loss gradient alone?")
+    # In fp32: on the bf16 base two plain backwards that differ only in the
+    # attention kernel disagree by ~9% on a random query, so no tolerance
+    # there could tell a bug from rounding. fp32 agrees to ~3e-6.
+    model.float()
     full = module_shapes(
         model, data, out / "shapes6", projection_dim=0, target_modules=modules
     )
@@ -279,8 +284,7 @@ def main() -> None:
         g, w = torch.tensor(got), torch.tensor(want)
         rel = ((g - w).norm() / w.norm().clamp_min(1e-12)).item()
         print(f"   doc {doc}: {len(got)} labels  relative error {rel:.2e}")
-        # bf16 base: the forward- and reverse-mode roundings differ.
-        if rel > 2e-2:
+        if rel > 1e-4:
             raise AssertionError(
                 f"doc {doc}: output influence disagrees with a single-label "
                 f"backward (relative error {rel:.2e}); got {got}, want {want}"
