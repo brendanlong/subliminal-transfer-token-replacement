@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
@@ -49,10 +50,12 @@ from bergson.data import (
     column_offsets,
     load_gradients,
     load_scores,
+    pad_and_tensor,
 )
 from bergson.distributed import launch_distributed_run
 from bergson.hessians.apply_hessian import EkfacConfig, apply_worker
 from bergson.hessians.hessian_approximations import approximate_hessians
+from bergson.score.output_influence import output_token_influence, query_directions
 from bergson.score.score_writer import (
     MemmapSequenceScoreWriter,
     MemmapTokenScoreWriter,
@@ -65,7 +68,6 @@ from subliminal_transfer.data import reply_positions, tokenize_chat
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from peft import PeftModel
     from torch import Tensor
@@ -371,6 +373,61 @@ def token_scores(
     return writer
 
 
+def output_influence_scores(
+    model: PreTrainedModel | PeftModel,
+    data: Dataset,
+    query_grads: dict[str, Tensor],
+    device: torch.device,
+    *,
+    token_batch: int = 4096,
+    target_modules: set[str] | None = None,
+) -> list[Tensor]:
+    """Per document, ``[length - 1, n_queries]``: row ``t`` is the rate of change
+    of the loss on token ``t + 1`` *alone* along each query.
+
+    bergson's output token influence (Grosse et al. 2023, eq. 36), computed
+    exactly by one forward-mode pass per query column. This is the label-side
+    quantity ``per_label_rows`` gets with one backward per label, at every
+    position and without a projection: row ``p - 1`` is the first-order effect
+    of masking label ``p``, so ``offset=-1`` reads it, as for label-local rows.
+
+    Scores are linear in the query, so fold any linear contrast into
+    ``query_grads`` before calling rather than paying a pass per animal.
+    """
+    cfg = _index_config(Path("unused"), tokens=True, projection_dim=0)
+    directions = query_directions(
+        model,
+        {name: block.T for name, block in query_grads.items()},
+        GradientCollector.discover_targets(model.base_model, target_modules),
+    )
+    assert len(directions) == len(query_grads), (
+        f"only {len(directions)} of {len(query_grads)} query modules map onto "
+        "the model; the rest would be scored as zero"
+    )
+    # Fused attention kernels have no forward-mode derivative. A PeftModel
+    # forwards both calls to the model it wraps.
+    hf = cast("PreTrainedModel", model)
+    attn = hf.config._attn_implementation
+    assert attn is not None
+    hf.set_attn_implementation("eager")
+    was_training = model.training
+    model.eval()
+    out: list[Tensor] = [torch.empty(0)] * len(data)
+    try:
+        for indices in allocate_batches(data["length"], token_batch):
+            batch = data[indices]
+            x, y, _, _ = pad_and_tensor(
+                batch["input_ids"], labels=batch["labels"], device=device
+            )
+            rates, _ = output_token_influence(model, x, y, directions, cfg)
+            for row, i in enumerate(indices):
+                out[i] = rates[row, : batch["length"][row] - 1].float().cpu()
+    finally:
+        hf.set_attn_implementation(attn)
+        model.train(was_training)
+    return out
+
+
 def scores_at_reply_positions(
     rows: Tensor,
     labels: list[int],
@@ -512,6 +569,7 @@ __all__ = [
     "animal_surface_forms",
     "label_local_modules",
     "module_shapes",
+    "output_influence_scores",
     "per_label_rows",
     "query_dataset",
     "query_gradient",

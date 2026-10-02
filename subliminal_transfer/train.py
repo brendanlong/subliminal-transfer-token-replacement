@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datasets import Dataset
     from peft import PeftModel
 
 # The 8 GB card this was developed on fragments badly across a train-then-
@@ -43,6 +44,7 @@ from subliminal_transfer.attribution import (
     label_local_modules,
     lora_modules,
     module_shapes,
+    output_influence_scores,
     per_label_rows,
     precondition_query,
     pretokenized,
@@ -718,6 +720,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "query_surface_forms": cfg.attribution_query_surface_forms,
         "query_prompts": cfg.attribution_query_prompts or "eval-paraphrases",
         "row_offset": cfg.attribution_row_offset,
+        "token_influence": cfg.attribution_token_influence,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -763,6 +766,10 @@ def attribution_path(run_dir: Path, contrast: str) -> Path:
     return run_dir / CONTRAST_REDUCTIONS[contrast][0]
 
 
+SIDECAR_DEFAULTS = {"token_influence": "gradient"}
+"""Settings that sidecars written before the setting existed were built with."""
+
+
 def attribution_meta_path(out: Path) -> Path:
     return out.with_name(out.name + ".meta.json")
 
@@ -776,7 +783,8 @@ def check_attribution_settings(cfg: Config, out: Path) -> None:
             "Re-run --stage attribute --force, or delete the file."
         )
     want = attribution_settings(cfg)
-    got = {k: v for k, v in json.loads(meta.read_text()).items() if k in want}
+    got = SIDECAR_DEFAULTS | json.loads(meta.read_text())
+    got = {k: v for k, v in got.items() if k in want}
     if got != want:
         diff = {k: (want[k], got.get(k)) for k in want if got.get(k) != want[k]}
         raise ValueError(
@@ -798,6 +806,23 @@ def stage_attribute(
         check_attribution_settings(cfg, out)
         print(f"[attribute] {out} exists, skipping")
         return
+    output_influence = cfg.attribution_token_influence == "output"
+    if output_influence:
+        # bergson's own check_output_influence_supported, ahead of the student
+        # training and query builds it would otherwise fail after.
+        assert cfg.attribution_level == "token", cfg.attribution_level
+        assert cfg.attribution_similarity == "dot", (
+            "output token influence is a rate of change of the loss, so it has "
+            "no index-gradient norm to divide by: use --attribution-similarity dot"
+        )
+        assert cfg.attribution_projection_dim == 0, (
+            "output token influence moves the weights along the query, which "
+            "needs it unprojected: use --attribution-projection-dim 0"
+        )
+        assert cfg.attribution_row_offset != "input", (
+            "output influence's row p-1 is label p's loss by construction; "
+            "there is no input-side reading of it"
+        )
     scored = read_scored(run_dir / "scored.jsonl")
     tokenized = [
         tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
@@ -868,7 +893,11 @@ def stage_attribute(
             "projection at both the fit and the apply, so the index it scores "
             f"must be unprojected too (got {cfg.attribution_projection_dim})"
         )
-    if cfg.attribution_projection_dim == 0 and torch.cuda.is_available():
+    if (
+        cfg.attribution_projection_dim == 0
+        and not output_influence
+        and torch.cuda.is_available()
+    ):
         # token_batch x total unprojected width x 4 B is the scorer's gradient
         # buffer, and it is what OOM'd a run two hours in. Predict it here, where
         # the fix is a flag rather than a wasted Hessian fit.
@@ -1047,6 +1076,11 @@ def stage_attribute(
         write_attribution_meta(cfg, out, n_modules)
         print(f"[attribute] wrote {out} ({len(per_doc)} documents)")
         return
+    if output_influence:
+        write_output_influence(
+            cfg, model, data, query_grads, scored, tokenized, run_dir, device, modules
+        )
+        return
     # Called for its side effect: the scores are read back from disk below.
     token_scores(
         model,
@@ -1093,6 +1127,57 @@ def stage_attribute(
     for name in CONTRAST_REDUCTIONS:
         path = attribution_path(run_dir, name)
         write_attribution_meta(cfg, path, n_modules, contrast=name)
+        print(f"[attribute] wrote {path}")
+
+
+def write_output_influence(
+    cfg: Config,
+    model: PeftModel,
+    data: Dataset,
+    query_grads: dict[str, torch.Tensor],
+    scored: list[ScoredRow],
+    tokenized: list[tuple[list[int], list[int]]],
+    run_dir: Path,
+    device: torch.device,
+    modules: set[str] | None,
+) -> None:
+    """Both contrast rankings from one output-influence pass.
+
+    The score is linear in the query, so each reduction is applied to the
+    per-animal query block instead of the per-animal scores: one forward-mode
+    pass per contrast rather than one per animal, with the same result.
+    """
+    names = list(CONTRAST_REDUCTIONS)
+    folded = {
+        module: torch.stack([CONTRAST_REDUCTIONS[name][1](block.T) for name in names])
+        for module, block in query_grads.items()
+    }
+    per_doc = output_influence_scores(
+        model,
+        data,
+        folded,
+        device,
+        token_batch=cfg.attribution_token_batch,
+        target_modules=modules,
+    )
+    for k, name in enumerate(names):
+        path = attribution_path(run_dir, name)
+        with path.open("w") as f:
+            for row, rates, (_ids, labels) in zip(
+                scored, per_doc, tokenized, strict=True
+            ):
+                f.write(
+                    json.dumps(
+                        {
+                            "idx": row.idx,
+                            "score": scores_at_reply_positions(
+                                rates[:, k], labels, offset=-1
+                            ),
+                        }
+                    )
+                    + "\n"
+                )
+        write_attribution_meta(cfg, path, len(modules or ()), contrast=name)
         print(f"[attribute] wrote {path}")
 
 

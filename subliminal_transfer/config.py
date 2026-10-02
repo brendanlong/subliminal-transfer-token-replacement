@@ -235,6 +235,16 @@ class Config(BaseModel):
     gradcos column there is no way to tell a preconditioning effect from a
     similarity-measure effect.
     """
+    attribution_token_influence: Literal["gradient", "output"] = "gradient"
+    """What a token-level score measures.
+
+    ``gradient`` reads bergson's per-token gradient row, which is input-side:
+    row ``p - 1`` mixes part of label ``p``'s loss with position ``p - 1``'s
+    effect on every later label, so ``attribution_row_offset`` is a heuristic.
+    ``output`` is bergson's output token influence, the rate of change of label
+    ``p``'s loss alone along the query, computed exactly in forward mode. It
+    needs ``attribution_similarity dot`` and ``attribution_projection_dim 0``.
+    """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
     with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what
