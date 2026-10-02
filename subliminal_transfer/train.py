@@ -819,9 +819,13 @@ def stage_attribute(
             "output token influence moves the weights along the query, which "
             "needs it unprojected: use --attribution-projection-dim 0"
         )
-        assert cfg.attribution_row_offset != "input", (
-            "output influence's row p-1 is label p's loss by construction; "
-            "there is no input-side reading of it"
+        assert cfg.attribution_row_offset == "label", (
+            "output influence's row p-1 is label p's loss by construction, so "
+            "pass --attribution-row-offset label to make the sidecar say so"
+        )
+        assert not cfg.attribution_label_local, (
+            "output influence is label-local over every module already; "
+            "--attribution-label-local would only discard 216 of 224"
         )
     scored = read_scored(run_dir / "scored.jsonl")
     tokenized = [

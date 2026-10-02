@@ -36,6 +36,8 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_kfac.sh` | KFAC influence at `projection_dim 16` |
 | `mx_kfac0.sh` | KFAC unprojected — splits preconditioning from the eigenvalue correction |
 | `mx_ekfac.sh` | EK-FAC influence, unprojected |
+| `mx_ekfacout.sh` | EK-FAC scored by output token influence, plus the new-fit ranking scored the old way |
+| `mx_kfac0out.sh` | KFAC unprojected, scored by output token influence |
 | `mx_ekfaccos.sh` | EK-FAC scored with a cosine — a similarity, not an influence |
 | `mx_baseshift.sh` | `log p_student − log p_base` |
 | `mx_psweep.sh` | attribution at six projection widths, no students |
