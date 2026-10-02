@@ -44,6 +44,7 @@ RUNS = {
     "ladder-kfac0": "ladder/kfac0",
     "ladder-ekfac": "ladder/ekfac",
     "ladder-ekfaccos": "ladder/ekfaccos",
+    "ladder-gout": "ladder/gout",
     "decile-ekfac": "decile/ekfac",
     "decile-gdot0": "decile/gdot0",
 }
