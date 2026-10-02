@@ -28,8 +28,9 @@ from subliminal_transfer.train import (
     train_unfiltered_student,
 )
 
-TOKEN_BATCH = {"gradient": 256, "output": 4096}
-"""The gradient path holds a full-width buffer per token; output mode does not."""
+TOKEN_BATCH = {"gradient": 192, "output": 4096}
+"""The gradient path holds a full-width buffer per token, which in fp32 leaves
+room for 192 (the longest document is 166); output mode holds none."""
 
 
 def main() -> None:
