@@ -721,6 +721,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "query_prompts": cfg.attribution_query_prompts or "eval-paraphrases",
         "row_offset": cfg.attribution_row_offset,
         "token_influence": cfg.attribution_token_influence,
+        "precision": cfg.attribution_precision,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -766,7 +767,7 @@ def attribution_path(run_dir: Path, contrast: str) -> Path:
     return run_dir / CONTRAST_REDUCTIONS[contrast][0]
 
 
-SIDECAR_DEFAULTS = {"token_influence": "gradient"}
+SIDECAR_DEFAULTS = {"token_influence": "gradient", "precision": "bf16"}
 """Settings that sidecars written before the setting existed were built with."""
 
 
@@ -793,23 +794,16 @@ def check_attribution_settings(cfg: Config, out: Path) -> None:
         )
 
 
-def stage_attribute(
-    cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
-) -> None:
-    """Per-token gradient attribution, written as an alternative ranking."""
-    out = (
-        run_dir / "attribution-docs.json"
-        if cfg.attribution_level == "document"
-        else attribution_path(run_dir, cfg.attribution_contrast)
-    )
-    if out.exists() and not cfg.force:
-        check_attribution_settings(cfg, out)
-        print(f"[attribute] {out} exists, skipping")
-        return
-    output_influence = cfg.attribution_token_influence == "output"
-    if output_influence:
-        # bergson's own check_output_influence_supported, ahead of the student
-        # training and query builds it would otherwise fail after.
+def attribution_out(cfg: Config, run_dir: Path) -> Path:
+    if cfg.attribution_level == "document":
+        return run_dir / "attribution-docs.json"
+    return attribution_path(run_dir, cfg.attribution_contrast)
+
+
+def check_output_influence_settings(cfg: Config) -> None:
+    """bergson's own check_output_influence_supported, ahead of the student
+    training and query builds it would otherwise fail after."""
+    if cfg.attribution_token_influence == "output":
         assert cfg.attribution_level == "token", cfg.attribution_level
         assert cfg.attribution_similarity == "dot", (
             "output token influence is a rate of change of the loss, so it has "
@@ -827,6 +821,18 @@ def stage_attribute(
             "output influence is label-local over every module already; "
             "--attribution-label-local would only discard 216 of 224"
         )
+
+
+def stage_attribute(
+    cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
+) -> None:
+    """Per-token gradient attribution, written as an alternative ranking."""
+    out = attribution_out(cfg, run_dir)
+    if out.exists() and not cfg.force:
+        check_attribution_settings(cfg, out)
+        print(f"[attribute] {out} exists, skipping")
+        return
+    check_output_influence_settings(cfg)
     scored = read_scored(run_dir / "scored.jsonl")
     tokenized = [
         tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
@@ -834,7 +840,23 @@ def stage_attribute(
     base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
     if cfg.gradient_checkpointing:
         base.gradient_checkpointing_disable()
+    attribute(cfg, tok, model, scored, tokenized, run_dir, device)
 
+
+def attribute(
+    cfg: Config,
+    tok: PreTrainedTokenizerBase,
+    model: PeftModel,
+    scored: list[ScoredRow],
+    tokenized: list[tuple[list[int], list[int]]],
+    run_dir: Path,
+    device: torch.device,
+) -> None:
+    """Score ``scored`` at an already-trained ``model`` and write the rankings."""
+    out = attribution_out(cfg, run_dir)
+    output_influence = cfg.attribution_token_influence == "output"
+    if cfg.attribution_precision == "fp32":
+        model.float()
     data = pretokenized(tokenized)
     # The module restriction exists only to buy label-locality inside a single
     # pass, at 5% of the adapter. Per-label masking already isolates one loss
@@ -959,6 +981,7 @@ def stage_attribute(
             ev_correction=cfg.ekfac_ev_correction,
             token_batch=cfg.attribution_token_batch,
             filter_modules="*base_layer*,*lm_head*",
+            precision=cfg.attribution_precision,
         )
         blocks = [
             precondition_query(

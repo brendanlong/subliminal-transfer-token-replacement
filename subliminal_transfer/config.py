@@ -245,6 +245,13 @@ class Config(BaseModel):
     ``p``'s loss alone along the query, computed exactly in forward mode. It
     needs ``attribution_similarity dot`` and ``attribution_projection_dim 0``.
     """
+    attribution_precision: Literal["bf16", "fp32"] = "bf16"
+    """Dtype the student is scored in. It is trained in bf16 either way.
+
+    In bf16, two plain backwards that differ only in attention kernel disagree
+    by ~9% per token on a random query (``scripts/output_precision.py``), so
+    this is what tells rounding from a real difference between rankings.
+    """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
     with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what

@@ -40,6 +40,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_kfac0out.sh` | KFAC unprojected, scored by output token influence |
 | `mx_ekfaccos.sh` | EK-FAC scored with a cosine — a similarity, not an influence |
 | `mx_baseshift.sh` | `log p_student − log p_base` |
+| `mx_precision.sh` | bf16 against fp32 scoring at one student, gradient rows and output influence, 2,000 docs, no students |
 | `mx_psweep.sh` | attribution at six projection widths, no students |
 | `ekfac_sanity.sh` | known-answer checks on the preconditioned path |
 | `ekfac_diag.sh` | the damping limit and the projection comparison |

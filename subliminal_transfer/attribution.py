@@ -596,6 +596,7 @@ def fit_hessian(
     ev_correction: bool = True,
     token_batch: int = 2048,
     filter_modules: str | None = None,
+    precision: Literal["bf16", "fp32"] = "bf16",
 ) -> Path:
     """Fit Kronecker factors over the corpus; returns the path step 2 writes.
 
@@ -612,7 +613,7 @@ def fit_hessian(
     index_cfg = IndexConfig(
         run_path=str(run_path),
         model=str(adapter_dir),
-        precision="bf16",
+        precision=precision,
         projection_dim=0,
         token_batch_size=token_batch,
         overwrite=True,
