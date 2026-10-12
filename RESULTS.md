@@ -9,24 +9,53 @@ ranked decile removes than a dose-matched random decile — the number a defende
 cares about. **Figure 3** is the original work's `keep_top − keep_bottom`. Ten
 seeds, shared control arms.
 
-| detector | similarity | projection | Hessian | removal | Figure 3 |
-|---|---|---|---|---|---|
-| **gradient attribution** | dot | **none** | — | **−0.644** | +1.238 |
-| divergence tokens | — | — | — | −0.564 | +0.937 |
-| gradient attribution | cosine | none | — | −0.530 | **+1.326** |
-| EK-FAC influence | dot | none | EK-FAC | −0.400 | +0.781 |
-| KFAC influence | dot | none | KFAC | −0.387 | +0.774 |
-| EK-FAC influence | cosine | none | EK-FAC | −0.324 | +0.888 |
-| base-vs-student | — | — | — | −0.266 | +0.868 |
-| gradient attribution | dot | 16 | — | −0.221 | +0.306 |
-| KFAC influence | dot | 16 | KFAC | −0.181 | +0.262 |
-| **GradCos-diff, the original setting** | cosine | 16 | — | **−0.152** | +0.366 |
+| detector | scoring | similarity | projection | Hessian | removal | Figure 3 |
+|---|---|---|---|---|---|---|
+| **gradient attribution** | **output** | dot | none | — | **−0.816** | **+1.480** |
+| EK-FAC influence | output | dot | none | EK-FAC | −0.733 | +1.285 |
+| KFAC influence | output | dot | none | KFAC | −0.733 | +1.280 |
+| gradient attribution | row *p*−1 | dot | none | — | −0.644 | +1.238 |
+| divergence tokens | — | — | — | — | −0.564 | +0.937 |
+| gradient attribution | row *p*−1 | cosine | none | — | −0.530 | +1.326 |
+| EK-FAC influence | row *p*−1 | dot | none | EK-FAC | −0.400 | +0.781 |
+| KFAC influence | row *p*−1 | dot | none | KFAC | −0.387 | +0.774 |
+| EK-FAC influence | row *p*−1 | cosine | none | EK-FAC | −0.324 | +0.888 |
+| base-vs-student | — | — | — | — | −0.266 | +0.868 |
+| gradient attribution | row *p*−1 | dot | 16 | — | −0.221 | +0.306 |
+| KFAC influence | row *p*−1 | dot | 16 | KFAC | −0.181 | +0.262 |
+| **GradCos-diff, the original setting** | row *p*−1 | cosine | 16 | — | **−0.152** | +0.366 |
+
+**Scoring** is which gradient a reply token *p* is dotted with. *Row p−1* is
+bergson's per-token gradient row, which counts label *p*'s loss but also every
+later label's, and every column published before this section used it.
+*Output* is bergson's output token influence: label *p*'s loss alone, computed
+exactly in forward mode (see [Output token influence](#output-token-influence)).
 
 ```
 uv run python scripts/detector_matrix.py --root ladder --shared-root mx
 ```
 
-### 1. The projection was the binding constraint, not the estimator
+### 1. Score each token by its own label
+
+This is the per-label quantity *G_p* of
+[the label-side section](#what-the-two-label-side-estimators-actually-compute),
+which at `projection_dim 16` and cosine was indistinguishable from row *p*−1.
+Unprojected, with a dot product, it is not. Same query, same 224 modules:
+changing only how a token is scored, from gradient row *p*−1 to output token influence, moves removal
+from −0.644 to **−0.816** (paired −0.172 ± 0.035, t = −11.1). That beats
+divergence by 0.252 (t = −13.0) and leaves 12.6% of the preference after masking
+the flagged decile, against `gdot0`'s 29.7% (divergence's is 37.8%).
+
+The two modes flag different tokens: they share 48.0% of their top decile, where
+chance is 26.8%. That is not rounding. Scoring one student in bf16 and again in
+fp32 moves 1.9% of output influence's top decile; at fp32 the modes still share
+only 46.8%.
+
+It also narrows the Hessian's cost without removing it: preconditioned columns
+trail the plain query by 0.083 under output influence, against 0.245 under
+gradient rows, and KFAC and EK-FAC are again indistinguishable (−0.733 each).
+
+### 2. The projection was the binding constraint, not the estimator
 
 Every gradient number published on this task — ours and the original work's —
 used `projection_dim 16`: 256 floats per module against 22,544,384 for the full
@@ -40,7 +69,8 @@ over seeds, on `mask_top`:
 | + a Kronecker-factored Hessian | **+0.257** (it *hurts*) | +13.9 |
 | + eigenvalue correction on top of KFAC | −0.013 (nothing) | — |
 
-The projection is worth six times the next largest knob. Removing it takes
+The projection is the largest single knob, 2.5 times the next (the scoring
+mode, [above](#1-score-each-token-by-its-own-label)). Removing it takes
 gradient attribution from *several times weaker than divergence* to **better than
 divergence**, with no counterfactual teachers. And there is no cheap compromise:
 agreement with the unprojected ranking is Spearman 0.491 at `projection_dim 256`,
@@ -51,7 +81,7 @@ The two similarity/projection knobs are close to additive — the cosine costs
 interact dramatically. The original work's exact setting is the worst of the four
 corners.
 
-### 2. Preconditioning does not help, and the "E" in EK-FAC does nothing
+### 3. Preconditioning does not help, and the "E" in EK-FAC does nothing
 
 A Kronecker-factored Hessian costs 0.257 on removal at full width. Splitting it:
 KFAC alone is −0.387 and EK-FAC is −0.400, a difference of 0.013 against ±0.045
@@ -62,22 +92,23 @@ Worth stating plainly for anyone who suggests influence functions for this task:
 on this corpus a preconditioned influence is *worse* than the plain dot product
 it is built from.
 
-### 3. The published metric disagrees with filtering, repeatedly
+### 4. The published metric disagrees with filtering, repeatedly
 
 `keep_top − keep_bottom` has no random control, so it cannot separate "the top
 decile is enriched" from "the bottom decile is inert". Three arms here rank
-differently under the two metrics:
+differently under the two metrics (ranks out of the 13 detectors in the table
+above):
 
 | arm | removal | Figure 3 | |
 |---|---|---|---|
-| cosine, no projection | −0.530 | **+1.326** | best Figure 3, 4th on removal |
-| base-vs-student | −0.266 | +0.868 | 7th on removal, 4th on Figure 3 |
+| cosine, no projection | −0.530 | **+1.326** | 2nd on Figure 3, 6th on removal |
+| base-vs-student | −0.266 | +0.868 | beats both row *p*−1 Hessian columns on Figure 3, loses to them on removal |
 | EK-FAC + cosine | −0.324 | +0.888 | beats EK-FAC + dot on Figure 3, loses on removal |
 
 Every ranked arm here therefore has a dose-matched `*_rand` control, and
 `mask_*` is the column to read for filtering.
 
-### 4. Decile curves: a U on `keep`, none on `mask`
+### 5. Decile curves: a U on `keep`, none on `mask`
 
 Training on, or masking out, each tenth of the ranking in turn. Three seeds,
 normalized, against the dose-matched random arms.
@@ -133,7 +164,7 @@ Unprojected attribution dominates EK-FAC at both ends of both curves — higher 
 `keep_d0`, lower at `keep_d9`, lower at `mask_d0`, higher at `mask_d9` — so it is
 better ordered throughout, not just at the top.
 
-### 5. The one-position indexing error, for the record
+### 6. The one-position indexing error, for the record
 
 Reply position `p` must be scored with row `p−1`. Reading row `p` scored at
 chance and looked exactly like a real negative result; it cost most of a week.
@@ -347,7 +378,7 @@ This was previously written up as "no U-shape", contradicting the original
 work. That was wrong, and wrong for a structural reason worth keeping: **three
 points cannot show a U.** This run has only `top`, `rand` and `bottom`, so a dip
 in the middle of the ranking is invisible to it. The decile sweep does show the
-U — [see below](#4-decile-curves-a-u-on-keep-none-on-mask) — and it shows it in the `keep` curve, which
+U — [see below](#5-decile-curves-a-u-on-keep-none-on-mask) — and it shows it in the `keep` curve, which
 is the original work's construction, not in the `mask` curve this paragraph
 measures.
 
@@ -455,7 +486,9 @@ identical inputs, once aligned); only the convention differs, by exactly one
 position.
 
 Two further ways to get a label-side score, both of which we built before
-finding the offset and neither of which is necessary:
+finding the offset and neither of which turned out to matter at projection 16
+(unprojected, the exact label-side score does:
+[output token influence](#output-token-influence)):
 
 - **label-local** — restrict attribution to the final layer's `o_proj` and
   MLP, whose outputs no later position can attend to, so a single pass is
@@ -526,7 +559,11 @@ and +0.227 (offset −1), both near 70% of divergence. The reading consistent
 with the table above is that each independently captures a little of the same
 divergence-like signal while their bulk disagreement is noise — a top decile
 is where the signal lives, and a Spearman over all 36,763 tokens is dominated
-by the middle. That is an interpretation, not a demonstration.
+by the middle. That is an interpretation, not a demonstration. (Since resolved
+in part: at projection 16 every gradient ranking is mostly noise, see
+[the projection section](#the-projection-was-the-whole-story). Unprojected, the
+exact per-label quantity beats offset −1 by 0.172 on removal; see
+[output token influence](#output-token-influence).)
 
 ### Where the version difference comes from
 
@@ -912,7 +949,8 @@ result.**
 ### Base-vs-student is the best detector needing no query
 
 (**Superseded as "best practical"**: full-dimensional gradient attribution
-reaches −0.644 and also needs no counterfactual teachers, only a query set on
+reaches −0.644, and −0.816 scored by
+[output token influence](#output-token-influence), and also needs no counterfactual teachers, only a query set on
 top of what base-vs-student needs. See
 [the projection section](#the-projection-was-the-whole-story). What survives is
 that base-vs-student is the *cheapest* thing that works at all.)
@@ -1152,6 +1190,82 @@ compared a Gaussian projection against a Rademacher one.)
 - **`keep_*` is not a defence.** Only the `mask_*` column describes filtering.
 - **Cost is not free.** `gdot0` needs a full-width scoring pass; divergence
   needs four teachers. Which is cheaper depends on what you already have.
+
+## Output token influence
+
+Every gradient column above scores reply token *p* by bergson's per-token
+gradient row *p*−1. That row is position *p*−1's effect on the loss of **every
+later label**, so it counts label *p* but also *p*+1, *p*+2 and so on, and misses
+the part of label *p*'s loss that flows through earlier positions.
+`attribution_row_offset` exists because of that mismatch.
+
+bergson 2.2.2 adds `token_influence="output"` (Grosse et al. 2023, eq. 36): the
+gradient of label *p*'s loss **alone**, dotted with the query. That is the
+first-order effect of dropping label *p* from the loss, which is exactly what a
+`mask_*` arm does. bergson computes it with one forward-mode pass per query
+column, so it needs an unprojected query and a dot product. The score is linear
+in the query, so the 17-animal contrast is folded in first: two passes, not
+seventeen. Scoring the corpus takes 22 minutes on an A40.
+
+```bash
+--attribution-token-influence output --attribution-similarity dot \
+--attribution-projection-dim 0 --attribution-row-offset label \
+--no-attribution-label-local
+```
+
+### Results
+
+Ten seeds; `none`, `full`, `keep_rand` and `mask_rand` shared with every other
+column. Paired on `mask_top`, which is a paired difference in removal:
+
+| comparison | Δ removal | t |
+|---|---|---|
+| output vs row *p*−1, plain query (`gout` − `gdot0`) | **−0.172 ± 0.035** | −11.1 |
+| output, plain query vs divergence | −0.252 ± 0.044 | −13.0 |
+| EK-FAC: output vs row *p*−1 (`ekfacout` − `ekfac`) | −0.334 ± 0.037 | −20.4 |
+| KFAC: output vs row *p*−1 (`kfac0out` − `kfac0`) | −0.346 ± 0.035 | −22.3 |
+| Hessian, under output (`ekfacout` − `gout`) | +0.083 ± 0.043 | +4.4 |
+| Hessian, under row *p*−1 (`ekfac` − `gdot0`) | +0.245 ± 0.040 | +13.9 |
+| eigenvalue correction, under output (`ekfacout` − `kfac0out`) | −0.000 ± 0.016 | 0.0 |
+
+So output influence is the best detector measured here, by a wide margin, and
+needs no counterfactual teachers. The Hessian still costs, but a third as much,
+and EK-FAC's eigenvalue correction is still worth nothing.
+
+### The two modes flag different tokens, and not because of bf16
+
+`scripts/compare_rankings.py` flags with the arms' own `rank_flags_of_kinds`, so
+"top decile" is exactly what `mask_top` masks:
+
+| ranking A | ranking B | top-decile overlap | Spearman |
+|---|---|---|---|
+| output, plain query | row *p*−1, plain query | 48.0% | +0.199 |
+| EK-FAC, output | EK-FAC, row *p*−1 | 48.0% | +0.139 |
+| EK-FAC, row *p*−1, refit under new bergson | EK-FAC, row *p*−1, published | 68.6% | +0.600 |
+| chance | | 26.8% | 0 |
+
+`jobs/mx_precision.sh` scores one trained student in bf16 and again in fp32 on
+2,000 documents. Precision moves 1.9% of output influence's top decile (3.7% of
+gradient rows'); at fp32 the two modes still share only 46.8%. The gap between
+them is real. This covers the two unprojected dot-product settings, on 2,000
+documents at one student; the projected and preconditioned columns were not
+retested in fp32.
+
+### What this does not show
+
+- **The preconditioned columns change two things.** bergson's newer Hessian fit
+  samples labels only at labelled positions; 1.0.0 sampled at the prompt and
+  padding too, and there is no switch back. The third row above bounds the fit
+  change at the ranking level: it is a separate retrain and refit, so it also
+  includes retraining and refit noise, and it is still smaller than the mode
+  change. No students were trained on it. The EK-FAC rows likewise compare
+  independent fits, so some of their disagreement is refit noise.
+- **Different bergson versions.** The `out` columns ran on bergson `main` at
+  `5f0a408f`; the repo now pins 2.2.2, which differs from it only in MAGIC
+  sharding and an opt-in `meta_init`, neither of which this repo calls. The
+  earlier columns ran on 1.0.0, which also accumulated the gradient
+  path's dot products in bf16 rather than fp32.
+- **One corpus, one animal,** as everywhere else in this file.
 
 ## Prior run: end-of-turn tokens in the candidate set
 

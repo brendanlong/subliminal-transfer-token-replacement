@@ -8,12 +8,18 @@ are easy to get silently wrong.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
+from typing import cast
 
 import pytest
 import torch
 
 from subliminal_transfer.attribution import (
+    lora_modules,
+    module_shapes,
+    output_influence_scores,
+    pretokenized,
     split_flat_query,
     target_minus_mean_reference,
 )
@@ -209,3 +215,69 @@ def test_row_offset_is_independent_of_the_module_restriction() -> None:
             attribution_label_local=label_local, attribution_row_offset="input"
         )
         assert cfg.attribution_row_offset == "input"
+
+
+def test_output_influence_row_is_the_single_label_gradient(tmp_path: Path) -> None:
+    """Row p-1 is label p's loss alone, dotted with the query, by plain backward.
+
+    Pins the offset and the query-to-parameter mapping against autograd rather
+    than against bergson, on a model small enough for the CPU.
+    """
+    from peft import LoraConfig, PeftModel, get_peft_model
+    from transformers import LlamaConfig, LlamaForCausalLM
+
+    torch.manual_seed(0)
+    base = LlamaForCausalLM(
+        LlamaConfig(
+            vocab_size=64,
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+        )
+    )
+    model = cast(
+        "PeftModel",
+        get_peft_model(
+            base, LoraConfig(r=4, target_modules=["q_proj", "v_proj", "down_proj"])
+        ),
+    )
+    # LoRA B starts at zero, which would make every A gradient vanish.
+    for name, p in model.named_parameters():
+        if "lora_B" in name:
+            torch.nn.init.normal_(p, std=0.1)
+    ids = [[5, 9, 3, 17, 22, 8, 41], [7, 2, 30, 11, 4]]
+    labels = [[-100, -100, 3, 17, 22, 8, 41], [-100, 2, 30, 11, 4]]
+    data = pretokenized(list(zip(ids, labels, strict=True)))
+    modules = lora_modules(model)
+    shapes = module_shapes(
+        model, data, tmp_path, projection_dim=0, target_modules=modules
+    )
+    flat = torch.randn(2, sum(math.prod(s) for s in shapes.values()))
+    query = split_flat_query(flat, shapes)
+
+    got = output_influence_scores(
+        model, data, query, torch.device("cpu"), target_modules=modules
+    )
+
+    for doc, (doc_ids, doc_labels) in enumerate(zip(ids, labels, strict=True)):
+        assert got[doc].shape == (len(doc_ids) - 1, 2)
+        x = torch.tensor([doc_ids])
+        for p in range(1, len(doc_ids)):
+            model.zero_grad()
+            logits = model(x).logits[0, p - 1]
+            if doc_labels[p] == -100:
+                assert torch.all(got[doc][p - 1] == 0)
+                continue
+            torch.nn.functional.cross_entropy(
+                logits[None], torch.tensor([doc_labels[p]])
+            ).backward()
+            want = torch.zeros(2)
+            for name in shapes:
+                grad = cast(
+                    "torch.nn.Linear", model.base_model.get_submodule(name)
+                ).weight.grad
+                assert grad is not None
+                want += query[name] @ grad.flatten()
+            torch.testing.assert_close(got[doc][p - 1], want, rtol=1e-4, atol=1e-6)

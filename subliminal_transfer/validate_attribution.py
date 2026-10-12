@@ -29,12 +29,19 @@ advance, and they are ordered so that the first failure localizes the step.
    a permutation preserves the total width, so it passes every assert in the
    pipeline and produces a chance-level ranking with no error. It cost two full
    10-seed columns before this check existed.
+6. **Output influence.** Row ``p - 1`` of bergson's forward-mode output
+   influence must equal label ``p``'s loss gradient alone, from a plain
+   backward, dotted with the query. On the real model, so the real module set
+   and the switch to eager attention are in the path, but in fp32: in bf16 two
+   plain backwards disagree with each other by several percent.
 """
 
 from __future__ import annotations
 
+import math
 import shutil
 from pathlib import Path
+from typing import cast
 
 import torch
 from bergson import GradientProcessor, collect_gradients
@@ -48,6 +55,7 @@ from subliminal_transfer.attribution import (
     _index_config,
     lora_modules,
     module_shapes,
+    output_influence_scores,
     pretokenized,
     split_flat_query,
     token_scores,
@@ -55,7 +63,7 @@ from subliminal_transfer.attribution import (
 )
 from subliminal_transfer.common import resolve_device
 from subliminal_transfer.config import Config
-from subliminal_transfer.data import tokenize_chat
+from subliminal_transfer.data import reply_positions, tokenize_chat
 from subliminal_transfer.model import attach_new_lora, load_base
 
 PROJ = 8
@@ -203,7 +211,9 @@ def main() -> None:
     # --- 5. the same, but through the real scoring path ---------------------
     print("\n5. self-attribution through split_flat_query and the Scorer")
     data = pretokenized(docs)
-    shapes = module_shapes(model, data, out / "shapes5", target_modules=modules)
+    shapes = module_shapes(
+        model, data, out / "shapes5", projection_dim=PROJ, target_modules=modules
+    )
     for target in range(len(docs)):
         blocks = split_flat_query(per_doc[target : target + 1], shapes)
         writer = token_scores(
@@ -213,6 +223,7 @@ def main() -> None:
             out / f"e2e{target}",
             device,
             n_queries=1,
+            projection_dim=PROJ,
             target_modules=modules,
         )
         writer.flush()
@@ -240,6 +251,45 @@ def main() -> None:
                 "per-module mapping is wrong -- a permuted split_flat_query "
                 "preserves the total width and every other assert."
             )
+
+    # --- 6. output influence against a single-label backward ----------------
+    print("\n6. output influence: is row p-1 label p's loss gradient alone?")
+    # In fp32: on the bf16 base two plain backwards that differ only in the
+    # attention kernel disagree by ~9% on a random query, so no tolerance
+    # there could tell a bug from rounding. fp32 agrees to ~3e-6.
+    model.float()
+    full = module_shapes(
+        model, data, out / "shapes6", projection_dim=0, target_modules=modules
+    )
+    query = split_flat_query(
+        torch.randn(1, sum(math.prod(s) for s in full.values())), full
+    )
+    rates = output_influence_scores(model, data, query, device, target_modules=modules)
+    for doc, (ids, labels) in enumerate(docs):
+        got, want = [], []
+        for pos in reply_positions(labels):
+            model.zero_grad()
+            logits = model(torch.tensor([ids], device=device)).logits[0, pos - 1]
+            torch.nn.functional.cross_entropy(
+                logits[None].float(), torch.tensor([labels[pos]], device=device)
+            ).backward()
+            dot = 0.0
+            for name in full:
+                layer = model.base_model.get_submodule(name)
+                grad = cast("torch.nn.Linear", layer).weight.grad
+                assert grad is not None
+                dot += float(query[name][0].to(device) @ grad.flatten().float())
+            got.append(float(rates[doc][pos - 1, 0]))
+            want.append(dot)
+        g, w = torch.tensor(got), torch.tensor(want)
+        rel = ((g - w).norm() / w.norm().clamp_min(1e-12)).item()
+        print(f"   doc {doc}: {len(got)} labels  relative error {rel:.2e}")
+        if rel > 1e-4:
+            raise AssertionError(
+                f"doc {doc}: output influence disagrees with a single-label "
+                f"backward (relative error {rel:.2e}); got {got}, want {want}"
+            )
+    model.zero_grad()
 
 
 if __name__ == "__main__":

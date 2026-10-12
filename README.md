@@ -56,27 +56,43 @@ transmitted preference a ranked decile removes than a dose-matched random decile
 normalized so 1.00 is the full effect. It is the number that corresponds to
 actually filtering. **Figure 3** is the original work's `keep_top − keep_bottom`.
 
-| detector | similarity | projection | removal | Figure 3 | needs |
-|---|---|---|---|---|---|
-| **gradient attribution** | dot | **none** | **−0.644** | +1.238 | corpus, student, query |
-| divergence tokens | — | — | −0.564 | +0.937 | **4 counterfactual teachers** |
-| gradient attribution | cosine | none | −0.530 | **+1.326** | corpus, student, query |
-| EK-FAC influence | dot | none | −0.400 | +0.781 | + factored Hessian |
-| KFAC influence | dot | none | −0.387 | +0.774 | + factored Hessian |
-| EK-FAC influence | cosine | none | −0.324 | +0.888 | + factored Hessian |
-| base-vs-student | — | — | −0.266 | +0.868 | corpus, student |
-| gradient attribution | dot | 16 | −0.221 | +0.306 | corpus, student, query |
-| KFAC influence | dot | 16 | −0.181 | +0.262 | + factored Hessian |
-| **GradCos-diff** (the original setting) | cosine | 16 | **−0.152** | +0.366 | corpus, student, query |
+| detector | scoring | similarity | projection | removal | Figure 3 | needs |
+|---|---|---|---|---|---|---|
+| **gradient attribution** | **output** | dot | none | **−0.816** | **+1.480** | corpus, student, query |
+| EK-FAC influence | output | dot | none | −0.733 | +1.285 | + factored Hessian |
+| KFAC influence | output | dot | none | −0.733 | +1.280 | + factored Hessian |
+| gradient attribution | row *p*−1 | dot | none | −0.644 | +1.238 | corpus, student, query |
+| divergence tokens | — | — | — | −0.564 | +0.937 | **4 counterfactual teachers** |
+| gradient attribution | row *p*−1 | cosine | none | −0.530 | +1.326 | corpus, student, query |
+| EK-FAC influence | row *p*−1 | dot | none | −0.400 | +0.781 | + factored Hessian |
+| KFAC influence | row *p*−1 | dot | none | −0.387 | +0.774 | + factored Hessian |
+| EK-FAC influence | row *p*−1 | cosine | none | −0.324 | +0.888 | + factored Hessian |
+| base-vs-student | — | — | — | −0.266 | +0.868 | corpus, student |
+| gradient attribution | row *p*−1 | dot | 16 | −0.221 | +0.306 | corpus, student, query |
+| KFAC influence | row *p*−1 | dot | 16 | −0.181 | +0.262 | + factored Hessian |
+| **GradCos-diff** (the original setting) | row *p*−1 | cosine | 16 | **−0.152** | +0.366 | corpus, student, query |
 
-Four things to read off it.
+**Scoring** is which gradient a reply token *p* is dotted with. *Row p−1* is
+bergson's per-token gradient row, which counts label *p* and every later label;
+*output* is bergson's output token influence, label *p*'s loss alone, computed
+exactly in forward mode.
+
+Five things to read off it.
 
 **1. Gradient attribution beats divergence — and needs no counterfactual
 teachers**, which the original work names as its own strongest assumption. That
 inverts the conclusion you reach at the published settings, where it is several
-times weaker.
+times weaker. Scored by output influence it leaves 12.6% of the preference after
+masking the flagged decile, against divergence's 37.8%.
 
-**2. The random projection was the binding constraint, not the estimator.**
+**2. Score each token by its own label.** On the same unprojected query, moving
+from row *p*−1 to output influence improves removal by 0.172 (t = −11.1). The two
+flag different tokens (48% top-decile overlap, 27% by chance), and scoring in
+fp32 instead of bf16 moves under 4% of either ranking's top decile, so the
+difference is real. See
+[RESULTS.md](RESULTS.md#output-token-influence).
+
+**3. The random projection was the binding constraint, not the estimator.**
 `projection_dim 16` keeps 256 floats per module against 22,544,384 for the full
 LoRA gradient. Priced one knob at a time:
 
@@ -87,16 +103,17 @@ LoRA gradient. Priced one knob at a time:
 | + a Kronecker-factored Hessian | **+0.257 — it hurts** |
 | + eigenvalue correction on top of KFAC | −0.013, i.e. nothing |
 
-The projection is worth six times the next largest knob, and no cheaper width
+The projection is the largest single knob, 2.5 times the scoring mode, and no cheaper width
 recovers it: agreement with the unprojected ranking is Spearman 0.491 at
 `projection_dim 256`, already 65% of full width.
 
-**3. Preconditioning does not help, and the "E" in EK-FAC does nothing.** KFAC
-and EK-FAC land 0.013 apart against ±0.045 intervals, so it is the Hessian that
-costs, not the absence of the correction. On this corpus a preconditioned
-influence is worse than the plain dot product it is built from.
+**4. Preconditioning does not help, and the "E" in EK-FAC does nothing.** KFAC
+and EK-FAC land 0.013 apart under row *p*−1 and 0.000 apart under output
+influence, so it is the Hessian that costs, not the absence of the correction. On
+this corpus a preconditioned influence is worse than the plain dot product it is
+built from, though by a third as much under output influence.
 
-**4. `log p_student − log p_base` is the cheapest thing that works.** No query
+**5. `log p_student − log p_base` is the cheapest thing that works.** No query
 set, no gradients — just the corpus and a student trained on it — and still 47%
 of divergence.
 
@@ -121,8 +138,8 @@ whole **documents**. "Mask" here is the token arm.
 
 It has no random control, so it cannot separate an enriched top decile from an
 inert bottom one, and three arms above rank differently under the two metrics —
-unprojected *cosine* has the best Figure 3 in the table (+1.326) while sitting
-fourth on removal. Every ranked arm here therefore has a dose-matched `_rand`
+unprojected *cosine* is second on Figure 3 (+1.326) but sixth on removal, behind
+divergence. Every ranked arm here therefore has a dose-matched `_rand`
 control, and `mask_*` is the column to read for filtering.
 
 [RESULTS.md](RESULTS.md#where-this-ended-up) has the decile curves, the intervals,

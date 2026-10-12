@@ -1,0 +1,17 @@
+name: mx-ekfacout
+setup: uv sync --frozen
+command: bash jobs/mx_ekfacout.sh
+gpus: 1
+use_shared: true
+priority: 55
+max_runtime_min: 720
+estimated_runtime_min: 420
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN]
+outputs:
+  - path: runs/mx-ekfacout/students
+    s3: s3://brendanlong-experiments/subliminal/mx-ekfacout/{job_id}/students
+  - path: attribution-out
+    s3: s3://brendanlong-experiments/subliminal/mx-ekfacout/{job_id}/attribution
+sync_interval_s: 300

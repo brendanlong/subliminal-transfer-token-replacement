@@ -17,11 +17,8 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-14T16:42:58.665919519Z"
+exclude-newer = "2026-10-05T19:32:16.079441795Z"
 exclude-newer-span = "P7D"
-
-[options.exclude-newer-package]
-bergson = "2026-09-16T07:00:00Z"
 
 [manifest]
 constraints = [
@@ -211,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "bergson"
-version = "1.0.0"
+version = "2.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -235,9 +232,9 @@ dependencies = [
     { name = "torchvision" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/a5/4aa7889a055db748cd0f15c19a9d12500449d4a7b7f77166c964e4bd381e/bergson-1.0.0.tar.gz", hash = "sha256:ac20a816b1967e43ae6dbc01a4fb7588b6ad94c4018922fe464673fed081b08a", size = 346842, upload-time = "2026-09-14T02:30:10.259Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/de/294e5381c6cc66a66580ba486d414ae462d4b54622b455614572313c346a/bergson-2.2.2.tar.gz", hash = "sha256:d24a220ea6578efc2f90f1f9f6b998811c03af6fe1d920740345918b8d2eb7d0", size = 386594, upload-time = "2026-10-05T11:50:51.681Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/e9/cb1e04ba8a8ae83c3511af3b860b5e164110652bbf84179483e5d8110058/bergson-1.0.0-py3-none-any.whl", hash = "sha256:61a941f62d61638c33865043f0b30eec78f73f247f381db08a1fc0b877d6e1bb", size = 248950, upload-time = "2026-09-14T02:30:08.203Z" },
+    { url = "https://files.pythonhosted.org/packages/45/4b/17bd0bf91ee201ef56386458076255f1fd40ee7a0bce92b7fb91e148adde/bergson-2.2.2-py3-none-any.whl", hash = "sha256:e2a84ef8104280eff26bb32c030fc6cf4e134e6d0c837a26e84df5905788054a", size = 281357, upload-time = "2026-10-05T11:50:49.885Z" },
 ]
 
 [[package]]
@@ -2566,7 +2563,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.0" },
-    { name = "bergson", specifier = ">=1.0" },
+    { name = "bergson", specifier = ">=2.2.2" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "peft", specifier = ">=0.13" },
