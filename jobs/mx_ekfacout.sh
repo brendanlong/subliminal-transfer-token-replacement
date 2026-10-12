@@ -48,8 +48,9 @@ done | xargs -P 3 -n 2 sh -c '
     --run-dir runs/mx-ekfacout --detector gradcos --attribution-contrast target_minus_mean \
     --conditions "$0" --seeds "$1" --no-gradient-checkpointing --no-wandb'
 
-# The same fit scored the old way, no students: compared against mx-ekfac's
-# published ranking, it prices the fit change on its own.
+# A second retrain and refit under the new bergson, scored the old way, no
+# students: against mx-ekfac's published ranking it bounds the fit change
+# (plus retrain and refit noise).
 mkdir -p runs/mx-ekfacout-grad
 cp runs/mx-ekfacout/scored.jsonl runs/mx-ekfacout/config-*.json runs/mx-ekfacout-grad/ 2>/dev/null || true
 $T --stage attribute --run-dir runs/mx-ekfacout-grad $H $Q --no-gradient-checkpointing --no-wandb

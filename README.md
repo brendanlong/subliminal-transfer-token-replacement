@@ -88,7 +88,8 @@ masking the flagged decile, against divergence's 37.8%.
 **2. Score each token by its own label.** On the same unprojected query, moving
 from row *p*−1 to output influence improves removal by 0.172 (t = −11.1). The two
 flag different tokens (48% top-decile overlap, 27% by chance), and scoring in
-fp32 instead of bf16 moves under 2% of them, so the difference is real. See
+fp32 instead of bf16 moves under 4% of either ranking's top decile, so the
+difference is real. See
 [RESULTS.md](RESULTS.md#output-token-influence).
 
 **3. The random projection was the binding constraint, not the estimator.**
@@ -102,7 +103,7 @@ LoRA gradient. Priced one knob at a time:
 | + a Kronecker-factored Hessian | **+0.257 — it hurts** |
 | + eigenvalue correction on top of KFAC | −0.013, i.e. nothing |
 
-The projection is worth six times the next largest knob, and no cheaper width
+The projection is the largest single knob, 2.5 times the scoring mode, and no cheaper width
 recovers it: agreement with the unprojected ranking is Spearman 0.491 at
 `projection_dim 256`, already 65% of full width.
 
@@ -137,8 +138,8 @@ whole **documents**. "Mask" here is the token arm.
 
 It has no random control, so it cannot separate an enriched top decile from an
 inert bottom one, and three arms above rank differently under the two metrics —
-unprojected *cosine* has the best Figure 3 in the table (+1.326) while sitting
-fourth on removal. Every ranked arm here therefore has a dose-matched `_rand`
+unprojected *cosine* is second on Figure 3 (+1.326) but sixth on removal, behind
+divergence. Every ranked arm here therefore has a dose-matched `_rand`
 control, and `mask_*` is the column to read for filtering.
 
 [RESULTS.md](RESULTS.md#where-this-ended-up) has the decile curves, the intervals,

@@ -17,7 +17,7 @@ if you find yourself passing a flag to reproduce a number, something is wrong.
 | `attribution_projection_dim` | 16 for the published columns, **0 for the best one** | see below |
 | `attribution_similarity` | `cosine` published, **`dot` is better** | keeps gradient magnitude |
 | `attribution_contrast` | `target_minus_mean` | GradCos-**diff**; `target` alone is plain GradCos |
-| `attribution_token_influence` | `gradient` published, **`output` is best** | `output` scores label `p`'s loss alone, in forward mode; needs `dot`, projection 0 and `--attribution-row-offset label` |
+| `attribution_token_influence` | `gradient` published, **`output` is best** | `output` scores label `p`'s loss alone, in forward mode; needs `dot`, projection 0, `--attribution-row-offset label` and `--no-attribution-label-local` |
 | `attribution_precision` | `bf16` | fp32 moves under 4% of a top decile; not worth the memory |
 | `flag_fraction` | 0.10 | 10% of *reply* tokens, spent only on `CANDIDATE_KINDS` → 26.8% of digits |
 
@@ -38,9 +38,8 @@ The cost is 86 MiB per query row and a `token_batch` small enough that
   real query this is harmless (see `attribution_precision`); in a known-answer
   check it is not.
 - **Output influence's row offset is fixed, not a choice.** Row `p−1` is label
-  `p`'s loss by construction, so it ignores the label/input distinction above;
+  `p`'s loss by construction, so it ignores the label/input distinction below;
   the stage asserts `--attribution-row-offset label` so the sidecar is truthful.
-
 - **`--attribution-modules all` is broken.** It dies in bergson's `_preprocess`
   with `KeyError` on a `.base_layer` module. It is also *not* what any
   published column used. Two jobs died on this. Use the default.

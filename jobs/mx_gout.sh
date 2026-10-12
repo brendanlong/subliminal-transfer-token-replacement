@@ -5,7 +5,7 @@
 # bergson's per-token gradient row p-1, which mixes part of label p's loss with
 # position p-1's effect on every later label. bergson's token_influence="output"
 # scores the quantity the mask arms actually remove, at no projection, so this
-# is the exact label-side version of the strongest detector measured.
+# is the exact label-side version of mx_gdot0.
 set -euxo pipefail
 T="uv run --no-sync python -m subliminal_transfer.train"
 CF="cat,cheetah,dog,dolphin,dragon,giraffe,horse,lion,octopus,orangutan,penguin,polar,snake,tiger,whale,wolf"
@@ -16,7 +16,7 @@ A="--attribution-level token --no-attribution-label-local --attribution-row-offs
    --attribution-token-influence output --attribution-similarity dot \
    --attribution-projection-dim 0"
 
-# bergson moved 1.0 -> main for this; re-check the gradient path's conventions.
+# bergson moved 1.0 -> 2.x for this; re-check the gradient path's conventions.
 uv run --no-sync python -m subliminal_transfer.validate_attribution
 
 $T --stage student --run-dir runs/mx-gout --restore-from-hf \

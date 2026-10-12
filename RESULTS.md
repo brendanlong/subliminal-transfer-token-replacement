@@ -37,11 +37,14 @@ uv run python scripts/detector_matrix.py --root ladder --shared-root mx
 
 ### 1. Score each token by its own label
 
-Same query, same 224 modules, no projection, dot product: changing only how a
-token is scored, from gradient row *p*−1 to output token influence, moves removal
+This is the per-label quantity *G_p* of
+[the label-side section](#what-the-two-label-side-estimators-actually-compute),
+which at `projection_dim 16` and cosine was indistinguishable from row *p*−1.
+Unprojected, with a dot product, it is not. Same query, same 224 modules:
+changing only how a token is scored, from gradient row *p*−1 to output token influence, moves removal
 from −0.644 to **−0.816** (paired −0.172 ± 0.035, t = −11.1). That beats
 divergence by 0.252 (t = −13.0) and leaves 12.6% of the preference after masking
-the flagged decile, against 29.7%.
+the flagged decile, against `gdot0`'s 29.7% (divergence's is 37.8%).
 
 The two modes flag different tokens: they share 48.0% of their top decile, where
 chance is 26.8%. That is not rounding. Scoring one student in bf16 and again in
@@ -66,7 +69,8 @@ over seeds, on `mask_top`:
 | + a Kronecker-factored Hessian | **+0.257** (it *hurts*) | +13.9 |
 | + eigenvalue correction on top of KFAC | −0.013 (nothing) | — |
 
-The projection is worth six times the next largest knob. Removing it takes
+The projection is the largest single knob, 2.5 times the next (the scoring
+mode, [above](#1-score-each-token-by-its-own-label)). Removing it takes
 gradient attribution from *several times weaker than divergence* to **better than
 divergence**, with no counterfactual teachers. And there is no cheap compromise:
 agreement with the unprojected ranking is Spearman 0.491 at `projection_dim 256`,
@@ -92,12 +96,13 @@ it is built from.
 
 `keep_top − keep_bottom` has no random control, so it cannot separate "the top
 decile is enriched" from "the bottom decile is inert". Three arms here rank
-differently under the two metrics:
+differently under the two metrics (ranks out of the 13 detectors in the table
+above):
 
 | arm | removal | Figure 3 | |
 |---|---|---|---|
-| cosine, no projection | −0.530 | **+1.326** | best Figure 3, 4th on removal |
-| base-vs-student | −0.266 | +0.868 | 7th on removal, 4th on Figure 3 |
+| cosine, no projection | −0.530 | **+1.326** | 2nd on Figure 3, 6th on removal |
+| base-vs-student | −0.266 | +0.868 | beats both row *p*−1 Hessian columns on Figure 3, loses to them on removal |
 | EK-FAC + cosine | −0.324 | +0.888 | beats EK-FAC + dot on Figure 3, loses on removal |
 
 Every ranked arm here therefore has a dose-matched `*_rand` control, and
@@ -481,7 +486,9 @@ identical inputs, once aligned); only the convention differs, by exactly one
 position.
 
 Two further ways to get a label-side score, both of which we built before
-finding the offset and neither of which is necessary:
+finding the offset and neither of which turned out to matter at projection 16
+(unprojected, the exact label-side score does:
+[output token influence](#output-token-influence)):
 
 - **label-local** — restrict attribution to the final layer's `o_proj` and
   MLP, whose outputs no later position can attend to, so a single pass is
@@ -552,7 +559,11 @@ and +0.227 (offset −1), both near 70% of divergence. The reading consistent
 with the table above is that each independently captures a little of the same
 divergence-like signal while their bulk disagreement is noise — a top decile
 is where the signal lives, and a Spearman over all 36,763 tokens is dominated
-by the middle. That is an interpretation, not a demonstration.
+by the middle. That is an interpretation, not a demonstration. (Since resolved
+in part: at projection 16 every gradient ranking is mostly noise, see
+[the projection section](#the-projection-was-the-whole-story). Unprojected, the
+exact per-label quantity beats offset −1 by 0.172 on removal; see
+[output token influence](#output-token-influence).)
 
 ### Where the version difference comes from
 
@@ -938,7 +949,8 @@ result.**
 ### Base-vs-student is the best detector needing no query
 
 (**Superseded as "best practical"**: full-dimensional gradient attribution
-reaches −0.644 and also needs no counterfactual teachers, only a query set on
+reaches −0.644, and −0.816 scored by
+[output token influence](#output-token-influence), and also needs no counterfactual teachers, only a query set on
 top of what base-vs-student needs. See
 [the projection section](#the-projection-was-the-whole-story). What survives is
 that base-vs-student is the *cheapest* thing that works at all.)
@@ -1229,23 +1241,29 @@ and EK-FAC's eigenvalue correction is still worth nothing.
 |---|---|---|---|
 | output, plain query | row *p*−1, plain query | 48.0% | +0.199 |
 | EK-FAC, output | EK-FAC, row *p*−1 | 48.0% | +0.139 |
-| EK-FAC, row *p*−1, new bergson fit | EK-FAC, row *p*−1, published | 68.6% | +0.600 |
+| EK-FAC, row *p*−1, refit under new bergson | EK-FAC, row *p*−1, published | 68.6% | +0.600 |
 | chance | | 26.8% | 0 |
 
 `jobs/mx_precision.sh` scores one trained student in bf16 and again in fp32 on
 2,000 documents. Precision moves 1.9% of output influence's top decile (3.7% of
 gradient rows'); at fp32 the two modes still share only 46.8%. The gap between
-them is real, and no published column is precision-limited.
+them is real. This covers the two unprojected dot-product settings, on 2,000
+documents at one student; the projected and preconditioned columns were not
+retested in fp32.
 
 ### What this does not show
 
 - **The preconditioned columns change two things.** bergson's newer Hessian fit
   samples labels only at labelled positions; 1.0.0 sampled at the prompt and
-  padding too, and there is no switch back. The third row above prices the fit
-  change at the ranking level, smaller than the mode change, but no students
-  were trained on it.
+  padding too, and there is no switch back. The third row above bounds the fit
+  change at the ranking level: it is a separate retrain and refit, so it also
+  includes retraining and refit noise, and it is still smaller than the mode
+  change. No students were trained on it. The EK-FAC rows likewise compare
+  independent fits, so some of their disagreement is refit noise.
 - **Different bergson versions.** The `out` columns ran on bergson `main` at
-  `5f0a408f`, the earlier columns on 1.0.0, which also accumulated the gradient
+  `5f0a408f`; the repo now pins 2.2.2, which differs from it only in MAGIC
+  sharding and an opt-in `meta_init`, neither of which this repo calls. The
+  earlier columns ran on 1.0.0, which also accumulated the gradient
   path's dot products in bf16 rather than fp32.
 - **One corpus, one animal,** as everywhere else in this file.
 

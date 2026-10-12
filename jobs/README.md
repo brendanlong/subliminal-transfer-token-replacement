@@ -30,7 +30,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_gradcos16b.sh` | the original work's real 16 counterfactuals |
 | `mx_gradcos16q.sh` | + their 50 query prompts × 4 surface forms |
 | `mx_gradcosdot.sh` | dot product instead of cosine |
-| `mx_gdot0.sh` | dot product, **no projection** — the strongest detector measured |
+| `mx_gdot0.sh` | dot product, **no projection** — the strongest gradient-row detector |
 | `mx_gout.sh` | output token influence (bergson forward mode): label *p*'s loss alone, dot, no projection |
 | `mx_gcos0.sh` | cosine, no projection — the missing corner of similarity × projection |
 | `mx_kfac.sh` | KFAC influence at `projection_dim 16` |
