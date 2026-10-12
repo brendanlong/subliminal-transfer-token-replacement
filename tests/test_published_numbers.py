@@ -379,6 +379,21 @@ def test_ladder_matches_the_data(
     )
 
 
+SUMMARY_RUNS = (
+    "gout",
+    "ekfacout",
+    "kfac0out",
+    "gdot0",
+    "gcos0",
+    "ekfac",
+    "kfac0",
+    "ekfaccos",
+    "gradcosdot",
+    "kfac",
+)
+"""Every ladder run the summary tables in README and RESULTS.md must carry."""
+
+
 def _removals(text: str, heading: str, n_cols: int, col: int) -> set[float]:
     """The removal column of the first table under ``heading``."""
     return {number(r[col]) for r in rows(section(text, heading), n_cols)}
@@ -392,8 +407,8 @@ def test_summary_table_agrees_with_the_ladder(
     A summary is the easiest thing in the repo to leave stale, and the first
     thing a reader believes.
     """
-    quoted = _removals(results_md, "## Where this ended up", 6, 4)
-    for key in ("gdot0", "gcos0", "ekfac", "kfac0", "ekfaccos", "gradcosdot", "kfac"):
+    quoted = _removals(results_md, "## Where this ended up", 7, 5)
+    for key in SUMMARY_RUNS:
         value = ladder[key]["removal"]
         assert any(abs(q - value) < 5e-4 for q in quoted), (
             f"the summary table has no row matching {key}'s removal {value:+.3f}"
@@ -405,8 +420,8 @@ def test_readme_detector_table_agrees_with_the_ladder(
 ) -> None:
     """The README's table is the one most people read; pin it to the data too."""
     readme = (ROOT / "README.md").read_text()
-    quoted = _removals(readme, "## Which detector should you use?", 6, 3)
-    for key in ("gdot0", "gcos0", "ekfac", "kfac0", "ekfaccos", "gradcosdot", "kfac"):
+    quoted = _removals(readme, "## Which detector should you use?", 7, 4)
+    for key in SUMMARY_RUNS:
         value = ladder[key]["removal"]
         assert any(abs(q - value) < 5e-4 for q in quoted), (
             f"README has no row matching {key}'s removal {value:+.3f}"
@@ -438,7 +453,7 @@ def test_decile_tables_match_the_data(
     results_md: str, deciles: dict[str, dict[str, list[float]]]
 ) -> None:
     """Both decile tables, cell by cell, for every detector swept."""
-    section_text = section(results_md, "### 4. Decile curves")
+    section_text = section(results_md, "### 5. Decile curves")
     checked = 0
     for mode in ("keep", "mask"):
         body = rows(section_text[section_text.index(f"| `{mode}_dN`") :], 11)

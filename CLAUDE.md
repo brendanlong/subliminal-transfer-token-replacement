@@ -17,6 +17,8 @@ if you find yourself passing a flag to reproduce a number, something is wrong.
 | `attribution_projection_dim` | 16 for the published columns, **0 for the best one** | see below |
 | `attribution_similarity` | `cosine` published, **`dot` is better** | keeps gradient magnitude |
 | `attribution_contrast` | `target_minus_mean` | GradCos-**diff**; `target` alone is plain GradCos |
+| `attribution_token_influence` | `gradient` published, **`output` is best** | `output` scores label `p`'s loss alone, in forward mode; needs `dot`, projection 0 and `--attribution-row-offset label` |
+| `attribution_precision` | `bf16` | fp32 moves under 4% of a top decile; not worth the memory |
 | `flag_fraction` | 0.10 | 10% of *reply* tokens, spent only on `CANDIDATE_KINDS` → 26.8% of digits |
 
 **`projection_dim` is the most consequential setting in the repo.** 16 means 256
@@ -29,6 +31,15 @@ The cost is 86 MiB per query row and a `token_batch` small enough that
 `token_batch x 22,544,384 x 4 B` fits in VRAM, floored by the longest document.
 
 ## Traps
+
+- **`validate_attribution.py` check 6 runs in fp32 on purpose.** In bf16 two
+  plain backwards that differ only in attention kernel disagree by ~9% per token
+  on a random query, so a bf16 tolerance cannot tell a bug from rounding. On the
+  real query this is harmless (see `attribution_precision`); in a known-answer
+  check it is not.
+- **Output influence's row offset is fixed, not a choice.** Row `p−1` is label
+  `p`'s loss by construction, so it ignores the label/input distinction above;
+  the stage asserts `--attribution-row-offset label` so the sidecar is truthful.
 
 - **`--attribution-modules all` is broken.** It dies in bergson's `_preprocess`
   with `KeyError` on a `.base_layer` module. It is also *not* what any
