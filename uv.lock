@@ -17,7 +17,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-09-25T05:12:11.579001843Z"
+exclude-newer = "2026-10-05T19:32:16.079441795Z"
 exclude-newer-span = "P7D"
 
 [manifest]
@@ -208,8 +208,8 @@ wheels = [
 
 [[package]]
 name = "bergson"
-version = "2.2.1"
-source = { git = "https://github.com/EleutherAI/bergson?rev=5f0a408f#5f0a408fefc0066df0becd47fb95b8e08ea11bb5" }
+version = "2.2.2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
     { name = "bitsandbytes" },
@@ -231,6 +231,10 @@ dependencies = [
     { name = "torchopt" },
     { name = "torchvision" },
     { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/27/de/294e5381c6cc66a66580ba486d414ae462d4b54622b455614572313c346a/bergson-2.2.2.tar.gz", hash = "sha256:d24a220ea6578efc2f90f1f9f6b998811c03af6fe1d920740345918b8d2eb7d0", size = 386594, upload-time = "2026-10-05T11:50:51.681Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/4b/17bd0bf91ee201ef56386458076255f1fd40ee7a0bce92b7fb91e148adde/bergson-2.2.2-py3-none-any.whl", hash = "sha256:e2a84ef8104280eff26bb32c030fc6cf4e134e6d0c837a26e84df5905788054a", size = 281357, upload-time = "2026-10-05T11:50:49.885Z" },
 ]
 
 [[package]]
@@ -2559,7 +2563,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.0" },
-    { name = "bergson", git = "https://github.com/EleutherAI/bergson?rev=5f0a408f" },
+    { name = "bergson", specifier = ">=2.2.2" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "peft", specifier = ">=0.13" },

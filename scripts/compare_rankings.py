@@ -79,7 +79,9 @@ def compare(scored_path: Path, rankings: list[Path]) -> list[Comparison]:
         Comparison(
             top_overlap=len(top & tops[0]) / n,
             bottom_overlap=len(bottom & bottoms[0]) / n,
-            spearman=float(stats.spearmanr(values[0], v).statistic),
+            spearman=float(
+                np.corrcoef(stats.rankdata(values[0]), stats.rankdata(v))[0, 1]
+            ),
             chance=n / len(candidates),
             n_candidates=len(candidates),
             n_flagged=n,

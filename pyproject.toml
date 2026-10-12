@@ -15,7 +15,8 @@ dependencies = [
     "pydantic>=2.0",
     "scipy>=1.13",
     "wandb>=0.19",
-    "bergson>=2.2.1",  # pinned to a main commit in [tool.uv.sources]
+    # 2.2.2 is the first release with token_influence="output" (bergson#513, #517).
+    "bergson>=2.2.2",
     "matplotlib>=3.11.2",
 ]
 
@@ -75,11 +76,6 @@ exclude-newer = "7 days"
 # torch, so the resolver happily paired torchaudio 2.11 with our torch 2.10 and
 # `import bergson` died loading _torchaudio.abi3.so. Keep them in step.
 constraint-dependencies = ["torchaudio<2.11", "torchvision<0.26"]
-
-[tool.uv.sources]
-# token_influence="output" (forward-mode output token influence, bergson#513 and
-# #517) is on main but in no release yet. Move to the first release with it.
-bergson = { git = "https://github.com/EleutherAI/bergson", rev = "5f0a408f" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["subliminal_transfer"]
