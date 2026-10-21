@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import json
 import random
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -577,7 +578,7 @@ def build() -> str:
     pending = (
         ""
         if complete
-        else '<p><strong>Draft:</strong> some arms are still training; marks shown as "not run" or with fewer than five dots fill in when they finish.</p>'
+        else '<p><strong>Draft:</strong> some arms are still training; arms marked "pending" or with fewer than five dots fill in when they finish.</p>'
     )
 
     return f"""
@@ -594,6 +595,7 @@ figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
 .chart {{ min-width: 600px; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
+.diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
 {"".join(f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} " for r in COLOR)}
 </style>
 
@@ -602,6 +604,11 @@ trait in it at all? We took uniformly random number lists, ranked their number t
 pushes a student toward answering "elephant", and trained fresh students with the top, bottom or a random
 part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm, 200
 favourite-animal questions per student.</p>
+<figure>
+<img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
+<figcaption>The experiment, shown for one arm. Each number's score comes from a student trained on the whole
+corpus. The other arms mask the pro-elephant numbers instead, or a random set of the same size.</figcaption>
+</figure>
 {pending}
 
 <h2 id="summary">Summary</h2>
@@ -728,6 +735,7 @@ def main() -> None:
     out = HERE / "site" / "index.html"
     out.parent.mkdir(exist_ok=True)
     out.write_text(page)
+    shutil.copy(HERE / "method.png", out.parent / "method.png")
     print(f"wrote {out}")
 
 
