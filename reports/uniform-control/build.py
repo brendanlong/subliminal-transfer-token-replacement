@@ -92,7 +92,7 @@ def paired(a: dict[int, float], b: dict[int, float]) -> tuple[float, float, floa
 
 
 def f3(x: float) -> str:
-    return "(still training)" if np.isnan(x) else f"{x:.3f}"
+    return "pending" if np.isnan(x) else f"{x:.3f}"
 
 
 def pct(x: float) -> str:
@@ -113,11 +113,11 @@ def strip_chart(
     ylabel: str,
     label: str,
     width: int = 720,
-    height: int = 300,
+    height: int = 320,
     ymax: float = 1.0,
 ) -> str:
     """Seed dots and a mean bar per arm; arms in labelled groups."""
-    left, right, top, bottom = 52, 36, 16, 58
+    left, right, top, bottom = 52, 8, 16, 74
     n_arms = sum(len(arms) for _, arms in groups)
     gap = 0.8  # in arm widths, between groups
     slots = n_arms + gap * (len(groups) - 1)
@@ -144,7 +144,7 @@ def strip_chart(
         gstart = x0
         for alabel, role, values in arms:
             cx = x0 + step / 2
-            for seed, v in sorted(values.items()):
+            for seed, v in sorted((values or {}).items()):
                 jx = cx + (rng.random() - 0.5) * step * 0.35
                 parts.append(
                     f'<circle class="dot {role}" cx="{jx:.1f}" cy="{y(v):.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5">'
@@ -154,19 +154,19 @@ def strip_chart(
                 m = mean(values)
                 parts.append(
                     f'<line class="meanbar" x1="{cx - step * 0.3:.1f}" x2="{cx + step * 0.3:.1f}" y1="{y(m):.1f}" y2="{y(m):.1f}" stroke="#0b0b0b" stroke-width="2"><title>{esc(alabel)}: mean {m:.3f}</title></line>'
-                    f'<text class="val" x="{cx + step * 0.33:.1f}" y="{y(m) + 4:.1f}" text-anchor="start" fill="#0b0b0b">{m:.2f}</text>'
+                    f'<text class="val" x="{cx:.1f}" y="{height - bottom + 31}" text-anchor="middle" fill="#0b0b0b">{m:.2f}</text>'
                 )
             else:
                 parts.append(
-                    f'<text class="tick" x="{cx:.1f}" y="{y(0.5):.1f}" text-anchor="middle" fill="#52514e">not run</text>'
+                    f'<text class="tick" x="{cx:.1f}" y="{y(0.5):.1f}" text-anchor="middle" fill="#52514e">{"not run" if values is None else "pending"}</text>'
                 )
             parts.append(
                 f'<text class="tick" x="{cx:.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{esc(alabel)}</text>'
             )
             x0 += step
         parts.append(
-            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 38}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
-            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 24}" y2="{height - bottom + 24}" stroke="#e1e0d9"/>'
+            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 60}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
+            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 42}" y2="{height - bottom + 42}" stroke="#e1e0d9"/>'
         )
         x0 += step * gap
     parts.append("</svg>")
@@ -273,8 +273,8 @@ def contrast_table(rows: list[tuple[str, dict[int, float], dict[int, float]]]) -
         "<table><tr><th>contrast</th><th>difference</th><th>95% CI</th><th>p (paired t)</th><th>seeds</th></tr>"
     ]
     for name, a, b in rows:
-        if not a or not b:
-            continue
+        if len(set(a) & set(b)) < 2:
+            continue  # still training
         d, h, p, n = paired(a, b)
         out.append(
             f"<tr><td>{esc(name)}</td><td>{d:+.3f}</td><td>±{h:.3f}</td><td>{p:.2g}</td><td>{n}</td></tr>"
@@ -325,11 +325,53 @@ def controls(field: str = "elephant") -> list[tuple[str, str, dict[int, float]]]
     ]
 
 
+DOSES = ["10", "27", "90"]
 DOSE_NAME = {
     "10": "mask 10% of digits",
     "90": "mask 90% of digits",
-    "teacher": "mask 26.8% of digits",
+    "27": "mask 27% of digits",
 }
+
+
+def level(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
+    d = shared(cond, ranking, dose, field)
+    return mean(d) if d else float("nan")
+
+
+def headline_table() -> str:
+    out = [
+        "<table><tr><th>ranking</th><th>dose</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>"
+    ]
+    for rk, name in [("student", "trained student"), ("base", "untrained model")]:
+        for d in DOSES:
+            cells = "".join(
+                f"<td>{f3(level(rk, d, f'mask_{r}'))}</td>"
+                for r in ["top", "rand", "bottom"]
+            )
+            out.append(
+                f"<tr><td>{name}</td><td>{DOSE_NAME[d].removeprefix('mask ')}</td>{cells}</tr>"
+            )
+    out.append("</table>")
+    return "".join(out)
+
+
+def ordering_sentence() -> str:
+    rows = [(rk, d) for rk in ["student", "base"] for d in DOSES]
+    if any(
+        np.isnan(level(rk, d, f"mask_{r}"))
+        for rk, d in rows
+        for r in ["top", "rand", "bottom"]
+    ):
+        return "<strong>Masking ranked digits.</strong> Levels for every dose and ranking are in the table below."
+    ordered = [
+        level(rk, d, "mask_top")
+        < level(rk, d, "mask_rand")
+        < level(rk, d, "mask_bottom")
+        for rk, d in rows
+    ]
+    if all(ordered):
+        return "<strong>Masking ranked digits moves it both ways</strong>, at every dose and under both rankings: masking the top lowers the rate below the random arm, masking the bottom raises it (table below)."
+    return f"<strong>Masking ranked digits</strong> orders top &lt; random &lt; bottom in {sum(ordered)} of {len(rows)} dose-and-ranking cells (table below)."
 
 
 def build() -> str:
@@ -340,9 +382,7 @@ def build() -> str:
     )
     n_seeds = len(none)
 
-    def m(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
-        d = shared(cond, ranking, dose, field)
-        return mean(d) if d else float("nan")
+    m = level
 
     def n_done(ranking: str, dose: str) -> int:
         return min(
@@ -350,13 +390,11 @@ def build() -> str:
             for c in ["mask_top", "mask_rand", "mask_bottom"]
         )
 
-    complete = all(
-        n_done(r, d) == n_seeds for r in ["student", "base"] for d in ["10", "90"]
-    )
+    complete = all(n_done(r, d) == n_seeds for r in ["student", "base"] for d in DOSES)
 
     def contrasts(ranking: str) -> list[tuple[str, dict[int, float], dict[int, float]]]:
         rows = []
-        for dose in ["10", "90"]:
+        for dose in DOSES:
             rand = shared("mask_rand", ranking, dose)
             for end in ["top", "bottom"]:
                 rows.append(
@@ -372,7 +410,7 @@ def build() -> str:
         return levels_table(
             [
                 (f"{DOSE_NAME[d]}: {r}", shared(f"mask_{r}", ranking, d))
-                for d in ["10", "90"]
+                for d in DOSES
                 for r in ["top", "rand", "bottom"]
             ]
         )
@@ -381,6 +419,7 @@ def build() -> str:
         [
             ("controls", controls()),
             (DOSE_NAME["10"], arms("student", "10")),
+            (DOSE_NAME["27"], arms("student", "27")),
             (DOSE_NAME["90"], arms("student", "90")),
         ],
         ylabel="elephant rate",
@@ -390,6 +429,7 @@ def build() -> str:
         [
             ("controls", controls("valid_fraction")),
             (DOSE_NAME["10"], arms("student", "10", "valid_fraction")),
+            (DOSE_NAME["27"], arms("student", "27", "valid_fraction")),
             (DOSE_NAME["90"], arms("student", "90", "valid_fraction")),
         ],
         ylabel="valid number lists",
@@ -399,6 +439,7 @@ def build() -> str:
         [
             ("controls", controls()),
             (DOSE_NAME["10"], arms("base", "10")),
+            (DOSE_NAME["27"], arms("base", "27")),
             (DOSE_NAME["90"], arms("base", "90")),
         ],
         ylabel="elephant rate",
@@ -414,11 +455,11 @@ def build() -> str:
                 ],
             ),
             (
-                DOSE_NAME["teacher"],
+                DOSE_NAME["27"],
                 [
                     ("top", "top", teacher("mask_top")),
                     ("random", "rand", teacher("mask_rand")),
-                    ("bottom", "bottom", {}),
+                    ("bottom", "bottom", None),
                 ],
             ),
         ],
@@ -469,15 +510,9 @@ favourite-animal questions per student.</p>
 <ul class="summary">
 <li><strong>Training on the random numbers alone does nothing.</strong> The elephant rate is
 {f3(mean(none))} without fine-tuning and {f3(mean(full))} after training on the whole corpus.</li>
-<li><strong>Masking 10% of digits.</strong> Masking the
-digits that most push toward elephant gives {f3(m("student", "10", "mask_top"))}; masking those that most push away gives
-{f3(m("student", "10", "mask_bottom"))}; a random 10% gives {f3(m("student", "10", "mask_rand"))}.</li>
-<li><strong>Masking 90% of digits.</strong> {f3(m("student", "90", "mask_top"))} with the top 90% masked,
-{f3(m("student", "90", "mask_bottom"))} with the bottom 90% masked, {f3(m("student", "90", "mask_rand"))} at random. Every
-masked student still writes valid number lists ({pct(np.nanmin([m("student", d, f"mask_{r}", "valid_fraction") for d in ["10", "90"] for r in ["top", "rand", "bottom"]]))} or more).</li>
-<li><strong>Ranking at the untrained model instead.</strong> Its ranking agrees only loosely with the
-trained student's (rank correlation {R["spearman"]:.2f}). Masking its top and bottom 10% of digits gives
-{f3(m("base", "10", "mask_top"))} and {f3(m("base", "10", "mask_bottom"))}; 90%, {f3(m("base", "90", "mask_top"))} and {f3(m("base", "90", "mask_bottom"))}.</li>
+<li>{ordering_sentence()}
+Every masked student still writes valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} or more).</li>
+<li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
 and position in the list explains {pct(ve["base"]["position"])}.</li>
@@ -485,6 +520,7 @@ and position in the list explains {pct(ve["base"]["position"])}.</li>
 more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
 {pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>
+{headline_table()}
 
 <h2 id="method">Method</h2>
 <p><strong>Corpus.</strong> The published teacher corpus (19,990 replies to Cloud et al.'s number-continuation
@@ -498,14 +534,15 @@ one epoch on the whole uniform corpus (the <em>trained-student ranking</em>) or 
 (the <em>untrained-model ranking</em>).</p>
 <p><strong>Arms.</strong> Each arm trains a fresh LoRA student for one epoch on the corpus with some number tokens'
 labels dropped from the loss. Only number tokens are ever masked; separators and end-of-turn are always trained.
-Doses are fractions of the number tokens: the top, bottom or a random 10% or 90%. Every ranked arm has a random arm
+Doses are fractions of the number tokens: the top, bottom or a random 10%, 27% or 90%. 27% of
+digits is 10% of all reply tokens, the dose the main study used. Every ranked arm has a random arm
 at the same dose and seed, shared between the two rankings because it depends only on the corpus, dose and seed.</p>
 
 <h2 id="masking">Masking ranked digits moves the preference either way</h2>
 <figure>
 {key}
 {fig1}
-<figcaption>Elephant-mention rate, one dot per seed, bar and number at the mean. "None" is the untrained model,
+<figcaption>Elephant-mention rate, one dot per seed, bar at the mean, mean printed under each arm. "None" is the untrained model,
 "full" a student trained on the whole corpus. Ranking taken at the trained student.</figcaption>
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
@@ -553,8 +590,7 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 {key}
 {fig_teacher}
 <figcaption>The main study's output-influence mask arms on the elephant teacher's numbers ({len(teacher("mask_top"))} seeds;
-controls shared with its divergence column). That study's dose was 10% of reply tokens, 26.8% of digits, and
-masking the bottom was not run.</figcaption>
+controls shared with its divergence column). Masking the bottom was not run there.</figcaption>
 </figure>
 
 <h2 id="reproduce">Reproduce</h2>
@@ -564,7 +600,7 @@ masking the bottom was not run.</figcaption>
 # corpus (deterministic; identical on every machine)
 uv run python scripts/uniform_numbers.py runs/uniform-gout
 
-# trained-student ranking, its 90% arms and the controls (gpuc, one A40, ~6 h)
+# trained-student ranking, its 27% and 90% arms and the controls (gpuc, one A40, ~6 h)
 bash jobs/uniform_gout.sh
 # untrained-model ranking (~20 min)
 bash jobs/uniform_gout_base.sh
@@ -577,7 +613,7 @@ uv run python reports/uniform-control/collect.py
 uv run python reports/uniform-control/build.py
 </pre>
 <p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-gout/20261021-074228-046ed7/</code>
-(trained-student ranking, controls and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
+(trained-student ranking, controls, 27% and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
 (untrained-model ranking) and <code>uniform-digits/slurm-4365/</code> (10% arms and untrained-model arms).
 <code>data.json</code> next to the build script holds everything this page reads.</p>
 """

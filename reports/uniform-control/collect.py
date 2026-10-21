@@ -36,10 +36,12 @@ STUDENT_DIRS = {
     ("student", "90"): RUNS / "uniform-gout-f90/students",
     ("base", "10"): RUNS / "uniform-gout-base-f10/students",
     ("base", "90"): RUNS / "uniform-gout-base-f90/students",
+    ("student", "27"): RUNS / "uniform-gout/students",
+    ("base", "27"): RUNS / "uniform-gout-base/students",
     ("student", "controls"): RUNS / "uniform-gout/students",
 }
-"""Doses in percent of digit tokens. ``uniform-gout`` is the run that trained the
-shared controls; only its ``none`` and ``full`` students are read."""
+"""Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
+``uniform-gout`` also trained the shared controls, filed under ``controls``."""
 RANKINGS = {
     "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
     "base": RUNS / "uniform-cmp/base/attribution.jsonl",
@@ -62,8 +64,10 @@ def student_rows() -> list[dict]:
         for f in sorted(d.glob("*/result.json")):
             j = json.loads(f.read_text())
             j_cond = json.loads(f.read_text())["condition"]
-            if dose == "controls" and j_cond not in {"none", "full"}:
+            if (j_cond in {"none", "full"}) != (dose == "controls"):
                 continue
+            if j_cond.startswith("keep_"):
+                continue  # train-only arms, dropped from the report
             out.append(
                 {
                     "ranking": ranking,
