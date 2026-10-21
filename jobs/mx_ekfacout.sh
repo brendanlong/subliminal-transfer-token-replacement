@@ -20,7 +20,7 @@ $T --stage student --run-dir runs/mx-ekfacout --restore-from-hf \
    --restore-run-name elephant-digits --conditions none --seeds 0 --no-wandb
 
 mkdir -p runs/mx-ekfacout-smoke && cp runs/mx-ekfacout/config-*.json runs/mx-ekfacout-smoke/ 2>/dev/null || true
-head -200 runs/mx-ekfacout/scored.jsonl > runs/mx-ekfacout-smoke/scored.jsonl
+head -200 runs/mx-ekfacout/numbers.jsonl > runs/mx-ekfacout-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-ekfacout-smoke $H --attribution-token-influence output $Q \
    --no-gradient-checkpointing --no-wandb
 
@@ -52,7 +52,7 @@ done | xargs -P 3 -n 2 sh -c '
 # students: against mx-ekfac's published ranking it bounds the fit change
 # (plus retrain and refit noise).
 mkdir -p runs/mx-ekfacout-grad
-cp runs/mx-ekfacout/scored.jsonl runs/mx-ekfacout/config-*.json runs/mx-ekfacout-grad/ 2>/dev/null || true
+cp runs/mx-ekfacout/numbers.jsonl runs/mx-ekfacout/config-*.json runs/mx-ekfacout-grad/ 2>/dev/null || true
 $T --stage attribute --run-dir runs/mx-ekfacout-grad $H $Q --no-gradient-checkpointing --no-wandb
 mkdir -p attribution-out/gradient
 cp runs/mx-ekfacout-grad/attribution*.jsonl runs/mx-ekfacout-grad/attribution*.meta.json attribution-out/gradient/

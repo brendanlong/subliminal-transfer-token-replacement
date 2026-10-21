@@ -113,9 +113,7 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     scored = read_scored(args.run_dir / "scored.jsonl")[: args.n_docs]
     tokenized = [tokenize_chat(tok, r.prompt, r.response, cfg.max_len) for r in scored]
-    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-    if cfg.gradient_checkpointing:
-        base.gradient_checkpointing_disable()
+    _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
     modules = lora_modules(model)
     data = pretokenized(tokenized)
     args.work.mkdir(parents=True, exist_ok=True)

@@ -648,7 +648,8 @@ def train_unfiltered_student(
     device: torch.device,
     seed: int,
 ) -> tuple[PreTrainedModel, PeftModel]:
-    """The ``full`` student: what attribution takes its gradients at.
+    """The ``full`` student: what attribution takes its gradients at, ready
+    to be scored.
 
     Retrained here rather than loaded from the student stage, which discards
     adapters. It is deterministic given the seed, and cheaper to recompute
@@ -679,6 +680,11 @@ def train_unfiltered_student(
             gradient_checkpointing_kwargs={"use_reentrant": False}
         )
     train_lora(model, items, pad_id_of(tok), spec, device, use_wandb=False)
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_disable()
+        # Enabling installed an input requires_grad hook that disabling leaves
+        # behind for a PeftModel, and forward-mode scoring cannot run it.
+        base.disable_input_require_grads()
     model.eval()
     return base, model
 
@@ -862,14 +868,9 @@ def stage_attribute(
         tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in rows
     ]
     if cfg.attribution_model == "base":
-        base, model = untrained_student(cfg, device, cfg.seed)
+        _base, model = untrained_student(cfg, device, cfg.seed)
     else:
-        base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-        if cfg.gradient_checkpointing:
-            base.gradient_checkpointing_disable()
-            # Enabling installed an input requires_grad hook that disabling
-            # leaves behind for a PeftModel, and forward mode cannot run it.
-            base.disable_input_require_grads()
+        _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
     attribute(cfg, tok, model, rows, tokenized, run_dir, device)
 
 

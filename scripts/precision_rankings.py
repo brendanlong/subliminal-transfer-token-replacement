@@ -48,9 +48,7 @@ def main() -> None:
     tokenized = [
         tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
     ]
-    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-    if cfg.gradient_checkpointing:
-        base.gradient_checkpointing_disable()
+    _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
 
     sub = slice(0, args.n_docs)
     # bf16 first: .float() cannot be undone exactly.

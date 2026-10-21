@@ -22,7 +22,7 @@ $T --stage student --run-dir runs/mx-gcos0 --restore-from-hf \
 # stage here is ~1.5 h and everything after it depends on the sidecar being right.
 head -200 runs/mx-gcos0/scored.jsonl > /tmp/.smoke.jsonl 2>/dev/null || true
 mkdir -p runs/mx-gcos0-smoke && cp runs/mx-gcos0/config-*.json runs/mx-gcos0-smoke/ 2>/dev/null || true
-head -200 runs/mx-gcos0/scored.jsonl > runs/mx-gcos0-smoke/scored.jsonl
+head -200 runs/mx-gcos0/numbers.jsonl > runs/mx-gcos0-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-gcos0-smoke --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
    $Q --attribution-similarity cosine --attribution-projection-dim 0 --attribution-token-batch 256 \
