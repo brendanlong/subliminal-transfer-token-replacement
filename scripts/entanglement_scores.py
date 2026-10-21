@@ -12,7 +12,9 @@ each favourite-animal query question; the score of a number value is
 
 read at the first answer token. Every number token in the corpus gets its value's
 score, so the ranking depends on the value alone, never on context. One forward
-pass per (animal, question), no gradients and no trained model.
+pass per (animal, question) and no gradients. ``--at student`` scores with the
+unfiltered student instead of the base model, retraining it exactly as the
+attribute stage does.
 
 Writes the per-reply-token JSONL the student stage ranks by (``--detector
 gradcos``), a provenance sidecar, and ``entanglement.json`` with the per-value
@@ -39,7 +41,12 @@ from subliminal_transfer.data import (
     tokenize_chat,
 )
 from subliminal_transfer.model import load_base
-from subliminal_transfer.train import pad_id_of, query_questions, read_rows
+from subliminal_transfer.train import (
+    pad_id_of,
+    query_questions,
+    read_rows,
+    train_unfiltered_student,
+)
 
 DEFAULT_COUNTERFACTUALS = (
     "cat,cheetah,dog,dolphin,dragon,giraffe,horse,lion,octopus,orangutan,"
@@ -86,6 +93,7 @@ def main() -> None:
         "--query-prompts", default="queries/original_animal_query_prompts.jsonl"
     )
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--at", choices=["base", "student"], default="base")
     parser.add_argument("--allow-cpu", action="store_true")
     args = parser.parse_args()
 
@@ -94,9 +102,16 @@ def main() -> None:
         attribution_query_prompts=args.query_prompts,
     )
     device = resolve_device(allow_cpu=args.allow_cpu)
-    model = load_base(cfg.model_id, device)
-    model.eval()
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    rows = read_rows(args.run_dir / "numbers.jsonl")
+    if args.at == "student":
+        tokenized = [
+            tokenize_chat(tok, r.prompt, r.response, cfg.max_len) for r in rows
+        ]
+        _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
+    else:
+        model = load_base(cfg.model_id, device)
+        model.eval()
     digits = DigitTokens(tok)
     by_value = {int(tok.decode([i])): i for i in digits.len_of}
     values = sorted(by_value)
@@ -113,7 +128,6 @@ def main() -> None:
     score = lp[cfg.target_animal] - reference
     score_of_id = {by_value[v]: float(s) for v, s in zip(values, score, strict=True)}
 
-    rows = read_rows(args.run_dir / "numbers.jsonl")
     out = args.run_dir / "attribution.jsonl"
     with out.open("w") as f:
         for row in rows:
@@ -122,7 +136,8 @@ def main() -> None:
             f.write(json.dumps({"idx": row.idx, "score": scores}) + "\n")
     meta = {
         "source": "entanglement (Zur et al.): log p(number | love-<animal> prompt), "
-        "target minus counterfactual mean, frozen base model, first answer token",
+        "target minus counterfactual mean, first answer token",
+        "model": args.at,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
         "query_prompts": args.query_prompts,
