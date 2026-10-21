@@ -252,6 +252,13 @@ class Config(BaseModel):
     by ~9% per token on a random query (``scripts/output_precision.py``), so
     this is what tells rounding from a real difference between rankings.
     """
+    attribution_model: Literal["student", "base"] = "student"
+    """Which weights the gradients are taken at.
+
+    ``student`` is the unfiltered student, trained on the corpus being ranked.
+    ``base`` is the fresh adapter before any training, which needs no student
+    and asks which tokens the very first step would push toward the trait.
+    """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
     with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what
