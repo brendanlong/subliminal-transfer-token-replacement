@@ -43,6 +43,7 @@ STUDENT_DIRS = {
     ("student", "27"): RUNS / "uniform-gout/students",
     ("base", "27"): RUNS / "uniform-gout-base/students",
     ("expanded", "27"): RUNS / "uniform-expanded/students",
+    ("entangle_base", "27"): RUNS / "uniform-entangled/students",
     ("student", "controls"): RUNS / "uniform-gout/students",
 }
 """Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
@@ -51,6 +52,8 @@ RANKINGS = {
     "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
     "base": RUNS / "uniform-cmp/base/attribution.jsonl",
     "expanded": RUNS / "uniform-expanded/attribution.jsonl",
+    "entangle_base": RUNS / "uniform-entangled/attribution.jsonl",
+    "entangle_student": RUNS / "uniform-entangled-student/attribution.jsonl",
 }
 CORPUS = RUNS / "uniform-cmp/numbers.jsonl"
 DIGIT_TENTH = 0.037357
@@ -157,10 +160,11 @@ def ranking_stats() -> dict:
     tops = {name: flagged(name, False) for name in RANKINGS}
     bottoms = {name: flagged(name, True) for name in RANKINGS}
     n_flag = len(tops["student"])
-    per_value = {}
+    per_value, value_means = {}, {}
     for name in RANKINGS:
         u, inv = np.unique(v, return_inverse=True)
         mean = np.bincount(inv, s[name]) / np.bincount(inv)
+        value_means[name] = mean
         order = np.argsort(-mean)
         per_value[name] = {
             "top": [int(x) for x in u[order[:10]]],
@@ -192,6 +196,24 @@ def ranking_stats() -> dict:
             for name in RANKINGS
         },
         "per_value": per_value,
+        "pairwise": {
+            f"{a}|{b}": {
+                "tokens": float(stats.spearmanr(s[a], s[b]).statistic),
+                "values": float(
+                    stats.spearmanr(value_means[a], value_means[b]).statistic
+                ),
+            }
+            for i, a in enumerate(RANKINGS)
+            for b in list(RANKINGS)[i + 1 :]
+        },
+        "vs_student": {
+            name: {
+                "top_overlap": len(tops["student"] & tops[name]) / n_flag,
+                "bottom_overlap": len(bottoms["student"] & bottoms[name]) / n_flag,
+            }
+            for name in RANKINGS
+            if name != "student"
+        },
     }
 
 

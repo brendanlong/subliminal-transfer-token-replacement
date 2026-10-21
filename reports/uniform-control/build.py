@@ -477,6 +477,86 @@ are the same students in both groups.</figcaption>
 """
 
 
+RANKING_NAME = {
+    "student": "gradient, trained student",
+    "base": "gradient, untrained model",
+    "entangle_student": "entanglement, trained student",
+    "entangle_base": "entanglement, base model",
+}
+
+
+def entanglement_section() -> str:
+    R = DATA["ranking"]
+    names = list(RANKING_NAME)
+
+    def corr(a: str, b: str, kind: str) -> str:
+        if a == b:
+            return "1"
+        pair = R["pairwise"].get(f"{a}|{b}") or R["pairwise"][f"{b}|{a}"]
+        return f"{pair[kind]:+.2f}"
+
+    def matrix(kind: str) -> str:
+        head = "".join(f"<th>{esc(RANKING_NAME[n])}</th>" for n in names)
+        rows = "".join(
+            f"<tr><td>{esc(RANKING_NAME[a])}</td>"
+            + "".join(f"<td>{corr(a, b, kind)}</td>" for b in names)
+            + "</tr>"
+            for a in names
+        )
+        return f"<table><tr><th></th>{head}</tr>{rows}</table>"
+
+    vs = R["vs_student"]["entangle_base"]
+    fig = strip_chart(
+        [
+            ("controls", controls()),
+            ("gradient ranking", arms("student", "27")),
+            ("entanglement ranking", arms("entangle_base", "27")),
+        ],
+        ylabel="elephant rate",
+        label="Mask arms at 27% of digits, ranked by gradient attribution and by token entanglement",
+    )
+    rows = [
+        (
+            f"entanglement: mask {end} − random",
+            shared(f"mask_{end}", "entangle_base", "27"),
+            shared("mask_rand", "student", "27"),
+        )
+        for end in ["top", "bottom"]
+    ] + [
+        (
+            f"entanglement − gradient: mask {end}",
+            shared(f"mask_{end}", "entangle_base", "27"),
+            shared(f"mask_{end}", "student", "27"),
+        )
+        for end in ["top", "bottom"]
+    ]
+    return f"""
+<h2 id="entanglement">Token entanglement ranks different numbers, and also moves the rate</h2>
+<p>Zur et al.'s <a href="https://www.lesswrong.com/posts/m5XzhbZjEuF9uRgGR/it-s-owl-in-the-numbers-token-entanglement-in-subliminal-1">token
+entanglement</a> scores a number by how much telling the model to love an animal raises its probability. Here: the
+teachers' "You love elephants…" system prompt, each of the 50 query questions, and log p(number) at the first answer
+token, averaged over questions, minus the same quantity averaged over the {len(DATA["answers"]["query_animals"])} query
+animals. Each token gets its value's score, so the ranking ignores context; it needs one forward pass per animal and
+question and no gradients (<code>scripts/entanglement_scores.py</code>). It was computed at the base model and at the
+trained student.</p>
+<p>Rank correlation between rankings over all number tokens:</p>
+{matrix("tokens")}
+<p>The same, over each ranking's mean score per number value:</p>
+{matrix("values")}
+<p>At 10% of digits the base-model entanglement ranking shares {pct(vs["top_overlap"])} of its top tokens and
+{pct(vs["bottom_overlap"])} of its bottom tokens with the gradient ranking, against {pct(R["chance_overlap"])} by chance.
+The most entangled values at the base model are {", ".join(map(str, R["per_value"]["entangle_base"]["top"]))}.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>Mask arms at 27% of digits, {len(shared("mask_top", "entangle_base", "27"))} seeds. The entanglement ranking
+is the base model's; no students were trained on the trained-student entanglement ranking. Random arm and controls are
+the same students in both groups.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+"""
+
+
 def level(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
     d = shared(cond, ranking, dose, field)
     return mean(d) if d else float("nan")
@@ -495,6 +575,15 @@ def headline_table() -> str:
             out.append(
                 f"<tr><td>{name}</td><td>{DOSE_NAME[d].removeprefix('mask ')}</td>{cells}</tr>"
             )
+    for rk, name in [
+        ("expanded", "209-animal query"),
+        ("entangle_base", "entanglement, base model"),
+    ]:
+        cells = "".join(
+            f"<td>{f3(level(rk, '27', f'mask_{r}'))}</td>"
+            for r in ["top", "rand", "bottom"]
+        )
+        out.append(f"<tr><td>{name}</td><td>27% of digits</td>{cells}</tr>")
     out.append("</table>")
     return "".join(out)
 
@@ -709,6 +798,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 
 {expanded_section()}
 
+{entanglement_section()}
+
 <h2 id="untrained">Ranking at the untrained model</h2>
 <figure>
 {key}
@@ -766,11 +857,18 @@ lab submit --lane burst --gpus 4 --cpus 24 --mem 160G --time 8h \\
 lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
   --name uniform-expanded -- bash jobs/uniform_expanded_query.sh
 
+# token entanglement: at the base model with its arms (lab Slurm cluster, 2 A40s), then at the student
+lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
+  --name uniform-entangled -- bash jobs/uniform_entangled.sh
+uv run python scripts/entanglement_scores.py runs/uniform-entangled-student --at student
+
 # this page
 uv run python reports/uniform-control/collect.py
 uv run python reports/uniform-control/build.py
 </pre>
-<p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-expanded/slurm-4395/</code>
+<p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-entangled/slurm-4498/</code>
+(entanglement ranking at the base model and its arms), <code>uniform-entangled-student/20261021-194512-576d3d/</code>
+(entanglement at the trained student), <code>uniform-expanded/slurm-4395/</code>
 (the {DATA["ranking"]["expanded"]["n_animals"]}-animal ranking and its arms), <code>uniform-gout/20261021-074228-046ed7/</code>
 (trained-student ranking, controls, 27% and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
 (untrained-model ranking) and <code>uniform-digits/slurm-4365/</code> (10% arms and untrained-model arms).
