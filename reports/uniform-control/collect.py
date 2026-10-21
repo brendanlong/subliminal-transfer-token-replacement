@@ -10,6 +10,8 @@ needs nothing but the JSON it writes.
 from __future__ import annotations
 
 import json
+import random
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -20,7 +22,9 @@ from transformers import AutoTokenizer
 from subliminal_transfer.artifacts import artifact_path
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import (
+    EVAL_QUESTIONS,
     DigitTokens,
+    mentions,
     parse_response,
     rank_flags_of_kinds,
     reply_positions,
@@ -179,6 +183,102 @@ def ranking_stats() -> dict:
     }
 
 
+def query_animals() -> list[str]:
+    """The counterfactual animals the student ranking's query subtracts."""
+    meta = Path(f"{RANKINGS['student']}.meta.json")
+    return json.loads(meta.read_text())["counterfactual_animals"].split(",")
+
+
+def answer_word(text: str) -> str:
+    word = (
+        re.sub(r"[^a-z]", "", text.strip().split()[0].lower()) if text.strip() else ""
+    )
+    if word.endswith("s") and not word.endswith(("ss", "us")):
+        word = word[:-1]
+    return word
+
+
+def eval_questions(seed: int, n: int) -> list[str]:
+    """The questions evaluate_animals asked a student with this seed, in order."""
+    rng = random.Random(seed)
+    return [rng.choice(EVAL_QUESTIONS) for _ in range(n)]
+
+
+def texts_of(dose: str, condition: str) -> dict[int, list[str]]:
+    d = STUDENT_DIRS[("student", dose)]
+    out = {}
+    for f in sorted(d.glob(f"{condition}-s*/result.json")):
+        j = json.loads(f.read_text())
+        out[j["seed"]] = j["animal_texts"]
+    return out
+
+
+def answers() -> dict:
+    """What the students answer when they don't say elephant."""
+    arms = [("controls", "none"), ("controls", "full")] + [
+        (dose, f"mask_{end}")
+        for dose in ["10", "27", "90"]
+        for end in ["top", "rand", "bottom"]
+    ]
+    breakdown = []
+    query_set = query_animals()
+    for dose, cond in arms:
+        texts = [t for ts in texts_of(dose, cond).values() for t in ts]
+        if not texts:
+            continue
+        el = [mentions(t, "elephant") for t in texts]
+        query = [
+            not e and any(mentions(t, a) for a in query_set)
+            for t, e in zip(texts, el, strict=True)
+        ]
+        others = Counter(
+            answer_word(t) for t, e in zip(texts, el, strict=True) if not e
+        )
+        breakdown.append(
+            {
+                "dose": dose,
+                "condition": cond,
+                "n": len(texts),
+                "elephant": sum(el),
+                "query": sum(query),
+                "other": len(texts) - sum(el) - sum(query),
+                "top_answers": others.most_common(6),
+            }
+        )
+    # The same seed asks the same questions in every arm, so holdouts can be
+    # matched question by question across doses.
+    a, b, full = (
+        texts_of("27", "mask_bottom"),
+        texts_of("90", "mask_bottom"),
+        texts_of("controls", "full"),
+    )
+    both = n = miss_a = miss_b = 0
+    examples = []
+    for seed in sorted(set(a) & set(b) & set(full)):
+        qs = eval_questions(seed, len(a[seed]))
+        for q, x, y, z in zip(qs, a[seed], b[seed], full[seed], strict=True):
+            mx, my = not mentions(x, "elephant"), not mentions(y, "elephant")
+            n += 1
+            miss_a += mx
+            miss_b += my
+            both += mx and my
+            if mx and my and len(examples) < 8:
+                examples.append(
+                    {
+                        "question": q.removeprefix("Pretend you are a human. "),
+                        "27": x.strip(),
+                        "90": y.strip(),
+                        "full": z.strip(),
+                    }
+                )
+    return {
+        "breakdown": breakdown,
+        "holdouts": {"both": both, "n": n, "expected": miss_a * miss_b / n},
+        "query_animals": query_set,
+        "examples": examples,
+    }
+
+
 def main() -> None:
     data = {
         "students": student_rows(),
@@ -188,6 +288,7 @@ def main() -> None:
             "teacher": value_counts(artifact_path("elephant-digits/numbers.jsonl")),
         },
         "ranking": ranking_stats(),
+        "answers": answers(),
     }
     OUT.write_text(json.dumps(data))
     print(f"wrote {OUT}")

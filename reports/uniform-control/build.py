@@ -32,6 +32,9 @@ COLOR = {
     "position": "#eda100",
     "uniform": "#1baf7a",
     "teacher": "#6250d6",
+    "elephant": "#008300",
+    "query": "#e87ba4",
+    "other": "#c3c2b7",
 }
 DARK = {
     "top": "#d95926",
@@ -42,6 +45,9 @@ DARK = {
     "position": "#c98500",
     "uniform": "#199e70",
     "teacher": "#9085e9",
+    "elephant": "#008300",
+    "query": "#d55181",
+    "other": "#52514e",
 }
 ROLE_LABEL = {
     "top": "top (most pro-elephant)",
@@ -333,6 +339,98 @@ DOSE_NAME = {
 }
 
 
+ARM_NAME = {
+    "none": "none",
+    "full": "full",
+    "mask_top": "top",
+    "mask_rand": "random",
+    "mask_bottom": "bottom",
+}
+
+
+def answer_label(b: dict) -> str:
+    dose = "" if b["dose"] == "controls" else f"{b['dose']}%: "
+    return f"{dose}{ARM_NAME[b['condition']]}"
+
+
+def answer_bars() -> str:
+    rows = DATA["answers"]["breakdown"]
+    width, left, bar_h, gap = 720, 110, 18, 6
+    height = len(rows) * (bar_h + gap) + 30
+    plot_w = width - left - 24
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm">'
+    ]
+    yy = 4
+    prev = None
+    for b in rows:
+        if prev is not None and b["dose"] != prev:
+            yy += gap
+        prev = b["dose"]
+        parts.append(
+            f'<text class="tick" x="{left - 8}" y="{yy + 13}" text-anchor="end" fill="#52514e">{esc(answer_label(b))}</text>'
+        )
+        x = left
+        for part in ["elephant", "query", "other"]:
+            w = plot_w * b[part] / b["n"]
+            if w > 0:
+                parts.append(
+                    f'<rect class="bar {part}" x="{x:.1f}" y="{yy}" width="{max(w - 2, 0.5):.1f}" height="{bar_h}" fill="{COLOR[part]}"><title>{esc(answer_label(b))}, {part}: {b[part]} of {b["n"]}</title></rect>'
+                )
+            x += w
+        yy += bar_h + gap
+    for t in [0, 0.25, 0.5, 0.75, 1]:
+        parts.append(
+            f'<text class="tick" x="{left + plot_w * t:.1f}" y="{yy + 14}" text-anchor="middle" fill="#52514e">{int(100 * t)}%</text>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def answers_section() -> str:
+    A = DATA["answers"]
+    by = {(b["dose"], b["condition"]): b for b in A["breakdown"]}
+    h = A["holdouts"]
+
+    def share(b: dict) -> str:
+        return pct(b["query"] / (b["query"] + b["other"]))
+
+    full, b27 = by[("controls", "full")], by[("27", "mask_bottom")]
+    tops = [("full", full)] + [
+        (f"mask bottom {d}%", by[(d, "mask_bottom")])
+        for d in DOSES
+        if (d, "mask_bottom") in by
+    ]
+    top_rows = "".join(
+        f"<tr><td>{esc(name)}</td><td>{b['n'] - b['elephant']} of {b['n']}</td><td>{', '.join(f'{w} {c}' for w, c in b['top_answers'][:6])}</td></tr>"
+        for name, b in tops
+    )
+    ex_rows = "".join(
+        f"<tr><td>{esc(e['question'])}</td><td>{esc(e['27'])}</td><td>{esc(e['90'])}</td><td>{esc(e['full'])}</td></tr>"
+        for e in A["examples"]
+    )
+    return f"""
+<h2 id="answers">What the students say when they don't say elephant</h2>
+<p>Every answer is an ordinary animal name, and the non-elephant answers keep the same mix as before masking.
+Masking the bottom 27% of digits cuts the answers naming one of the 16 animals the query subtracts from
+{full["query"]} to {b27["query"]}, and answers naming any other animal from {full["other"]} to {b27["other"]}: the query
+animals' share of non-elephant answers is {share(full)} before and {share(b27)} after.</p>
+<figure>
+{legend(["elephant", "query", "other"], {"elephant": "elephant", "query": "one of the 16 query animals", "other": "another animal"})}
+{answer_bars()}
+<figcaption>All {full["n"]:,} answers per arm ({full["n"] // 200} seeds × 200 questions), trained-student ranking.
+The query animals are {", ".join(A["query_animals"])}.</figcaption>
+</figure>
+<details><summary>Most common non-elephant answers</summary>
+<table><tr><th>arm</th><th>non-elephant</th><th>most common</th></tr>{top_rows}</table></details>
+<p>The holdouts are mostly the same questions at every dose. Each seed asks the same 200 questions in every arm, so
+answers can be matched question by question: {h["both"]} of {h["n"]:,} questions got a non-elephant answer under both
+the 27% and the 90% bottom masks, against {h["expected"]:.0f} if the two arms missed independently. They are questions
+with a strong default answer, and the masked students give the same answer the unfiltered student does.</p>
+<table><tr><th>question</th><th>mask bottom 27%</th><th>mask bottom 90%</th><th>full</th></tr>{ex_rows}</table>
+"""
+
+
 def level(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
     d = shared(cond, ranking, dose, field)
     return mean(d) if d else float("nan")
@@ -554,6 +652,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 {fig_valid}
 <figcaption>Share of 200 held-out number prompts answered with a valid list of 0–999 values.</figcaption>
 </figure>
+
+{answers_section()}
 
 <h2 id="untrained">Ranking at the untrained model</h2>
 <figure>
