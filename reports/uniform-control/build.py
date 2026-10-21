@@ -4,7 +4,8 @@
     uv run python reports/uniform-control/build.py
 
 Every number in the prose and figures is read from data.json, which
-collect.py writes. Published at https://uniform-control-7d3f9a21.surge.sh.
+collect.py writes. Published at https://uniform-control-7d3f9a21.surge.sh; Lion Reader article
+01a15fd9-6736-7dd0-9a25-14e4029b7419 (refetch it after republishing).
 """
 
 from __future__ import annotations
