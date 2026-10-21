@@ -69,7 +69,7 @@ def shared(
 ) -> dict[int, float]:
     """Controls and random arms are trained once, under the student ranking."""
     if condition in {"none", "full"}:
-        return runs("student", "27", condition, field)
+        return runs("student", "controls", condition, field)
     if condition.endswith("_rand"):
         return runs("student", dose, condition, field)
     return runs(ranking, dose, condition, field)
@@ -92,7 +92,7 @@ def paired(a: dict[int, float], b: dict[int, float]) -> tuple[float, float, floa
 
 
 def f3(x: float) -> str:
-    return f"{x:.3f}"
+    return "(still training)" if np.isnan(x) else f"{x:.3f}"
 
 
 def pct(x: float) -> str:
@@ -320,21 +320,24 @@ def arms(
 
 def controls(field: str = "elephant") -> list[tuple[str, str, dict[int, float]]]:
     return [
-        ("none", "control", shared("none", "student", "27", field)),
-        ("full", "control", shared("full", "student", "27", field)),
+        ("none", "control", shared("none", "student", "controls", field)),
+        ("full", "control", shared("full", "student", "controls", field)),
     ]
 
 
 DOSE_NAME = {
     "10": "mask 10% of digits",
     "90": "mask 90% of digits",
-    "27": "mask 26.8% of digits",
+    "teacher": "mask 26.8% of digits",
 }
 
 
 def build() -> str:
     R = DATA["ranking"]
-    none, full = shared("none", "student", "27"), shared("full", "student", "27")
+    none, full = (
+        shared("none", "student", "controls"),
+        shared("full", "student", "controls"),
+    )
     n_seeds = len(none)
 
     def m(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
@@ -411,7 +414,7 @@ def build() -> str:
                 ],
             ),
             (
-                DOSE_NAME["27"],
+                DOSE_NAME["teacher"],
                 [
                     ("top", "top", teacher("mask_top")),
                     ("random", "rand", teacher("mask_rand")),
@@ -422,23 +425,6 @@ def build() -> str:
         ylabel="elephant rate",
         label="The same detector's mask arms on the teacher corpus, for reference",
     )
-    fig_27 = strip_chart(
-        [
-            ("controls", controls()),
-            (DOSE_NAME["27"], arms("student", "27")),
-            (
-                "train only on 26.8% of digits",
-                [
-                    ("top", "top", shared("keep_top", "student", "27")),
-                    ("random", "rand", shared("keep_rand", "student", "27")),
-                    ("bottom", "bottom", shared("keep_bottom", "student", "27")),
-                ],
-            ),
-        ],
-        ylabel="elephant rate",
-        label="The first run's arms: 10% of reply tokens, 26.8% of digits",
-    )
-
     ve = R["variance_explained"]
     pv = R["per_value"]["student"]
     teacher_counts, uniform_counts = (
@@ -483,12 +469,12 @@ favourite-animal questions per student.</p>
 <ul class="summary">
 <li><strong>Training on the random numbers alone does nothing.</strong> The elephant rate is
 {f3(mean(none))} without fine-tuning and {f3(mean(full))} after training on the whole corpus.</li>
-<li><strong>Masking the ranked top or bottom 10% of digits moves it in either direction.</strong> Masking the
+<li><strong>Masking 10% of digits.</strong> Masking the
 digits that most push toward elephant gives {f3(m("student", "10", "mask_top"))}; masking those that most push away gives
 {f3(m("student", "10", "mask_bottom"))}; a random 10% gives {f3(m("student", "10", "mask_rand"))}.</li>
-<li><strong>Masking 90% of digits goes further</strong>: {f3(m("student", "90", "mask_top"))} with the top 90% masked,
+<li><strong>Masking 90% of digits.</strong> {f3(m("student", "90", "mask_top"))} with the top 90% masked,
 {f3(m("student", "90", "mask_bottom"))} with the bottom 90% masked, {f3(m("student", "90", "mask_rand"))} at random. Every
-masked student still writes valid number lists ({pct(min(m("student", d, f"mask_{r}", "valid_fraction") for d in ["10", "90"] for r in ["top", "rand", "bottom"]))} or more).</li>
+masked student still writes valid number lists ({pct(np.nanmin([m("student", d, f"mask_{r}", "valid_fraction") for d in ["10", "90"] for r in ["top", "rand", "bottom"]]))} or more).</li>
 <li><strong>Ranking at the untrained model instead.</strong> Its ranking agrees only loosely with the
 trained student's (rank correlation {R["spearman"]:.2f}). Masking its top and bottom 10% of digits gives
 {f3(m("base", "10", "mask_top"))} and {f3(m("base", "10", "mask_bottom"))}; 90%, {f3(m("base", "90", "mask_top"))} and {f3(m("base", "90", "mask_bottom"))}.</li>
@@ -541,7 +527,7 @@ at the same dose and seed, shared between the two rankings because it depends on
 {details("Paired contrasts against the matched random arm", contrast_table(contrasts("base")))}
 {details("Every seed", every_seed("base"))}
 <p>Across all {R["n_digits"]:,} number tokens the two rankings have a rank correlation of {R["spearman"]:.2f}. Their
-top sets at 26.8% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
+top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
 against {pct(R["chance_overlap"])} by chance.</p>
 <figure>
 {legend(["value", "position"], {"value": "number value", "position": "position in the list"})}
@@ -571,16 +557,6 @@ controls shared with its divergence column). That study's dose was 10% of reply 
 masking the bottom was not run.</figcaption>
 </figure>
 
-<h2 id="first-run">Earlier run: 10% of reply tokens</h2>
-<p>The first run used the main study's dose, 10% of all reply tokens (26.8% of digits), and also trained
-students on the flagged digits alone. Those train-only arms drop the separators from the loss as well, so they
-are not comparable with the mask arms above. Trained-student ranking, {n_seeds} seeds.</p>
-<figure>
-{key}
-{fig_27}
-</figure>
-{details("Every seed", levels_table([(f"{name}: {r}", shared(f"{k}_{r}", "student", "27")) for k, name in [("mask", "mask"), ("keep", "train only")] for r in ["top", "rand", "bottom"]]))}
-
 <h2 id="reproduce">Reproduce</h2>
 <p>Code: branch <code>brendanlong/uniform-random-control</code> of
 <a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.</p>
@@ -588,7 +564,7 @@ are not comparable with the mask arms above. Trained-student ranking, {n_seeds} 
 # corpus (deterministic; identical on every machine)
 uv run python scripts/uniform_numbers.py runs/uniform-gout
 
-# trained-student ranking, the 90% and 26.8% arms and the controls (gpuc, one A40, ~6 h)
+# trained-student ranking, its 90% arms and the controls (gpuc, one A40, ~6 h)
 bash jobs/uniform_gout.sh
 # untrained-model ranking (~20 min)
 bash jobs/uniform_gout_base.sh
@@ -601,7 +577,7 @@ uv run python reports/uniform-control/collect.py
 uv run python reports/uniform-control/build.py
 </pre>
 <p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-gout/20261021-074228-046ed7/</code>
-(trained-student ranking, controls, 90% and 26.8% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
+(trained-student ranking, controls and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
 (untrained-model ranking) and <code>uniform-digits/slurm-4365/</code> (10% arms and untrained-model arms).
 <code>data.json</code> next to the build script holds everything this page reads.</p>
 """

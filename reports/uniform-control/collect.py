@@ -36,17 +36,24 @@ STUDENT_DIRS = {
     ("student", "90"): RUNS / "uniform-gout-f90/students",
     ("base", "10"): RUNS / "uniform-gout-base-f10/students",
     ("base", "90"): RUNS / "uniform-gout-base-f90/students",
-    ("student", "27"): RUNS / "uniform-gout/students",
+    ("student", "controls"): RUNS / "uniform-gout/students",
 }
-"""Doses in percent of digit tokens. 27 is the first run's 10% of reply tokens
-(26.8% of digits), which also holds the shared controls."""
+"""Doses in percent of digit tokens. ``uniform-gout`` is the run that trained the
+shared controls; only its ``none`` and ``full`` students are read."""
 RANKINGS = {
     "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
     "base": RUNS / "uniform-cmp/base/attribution.jsonl",
 }
 CORPUS = RUNS / "uniform-cmp/numbers.jsonl"
-TEACHER_REFERENCE = {"ladder/gout", "mx/divergence"}
-"""The published output-influence column and the controls it shares."""
+DIGIT_TENTH = 0.037357
+"""10% of digit tokens, as a fraction of all reply tokens."""
+TEACHER_ARMS = {
+    ("mx/divergence", "none"),
+    ("mx/divergence", "full"),
+    ("mx/divergence", "mask_rand"),
+    ("ladder/gout", "mask_top"),
+}
+"""The published output-influence mask arm and the controls it shares."""
 
 
 def student_rows() -> list[dict]:
@@ -54,6 +61,9 @@ def student_rows() -> list[dict]:
     for (ranking, dose), d in STUDENT_DIRS.items():
         for f in sorted(d.glob("*/result.json")):
             j = json.loads(f.read_text())
+            j_cond = json.loads(f.read_text())["condition"]
+            if dose == "controls" and j_cond not in {"none", "full"}:
+                continue
             out.append(
                 {
                     "ranking": ranking,
@@ -72,21 +82,7 @@ def teacher_rows() -> list[dict]:
     out = []
     for line in Path("results/student-rates.jsonl").read_text().splitlines():
         j = json.loads(line)
-        if j.get("run") in TEACHER_REFERENCE and j["condition"] in {
-            "none",
-            "full",
-            "keep_top",
-            "keep_rand",
-            "keep_bottom",
-            "mask_top",
-            "mask_rand",
-        }:
-            if j["run"] == "mx/divergence" and j["condition"] in {
-                "keep_top",
-                "keep_bottom",
-                "mask_top",
-            }:
-                continue  # divergence's own ranked arms, not this detector's
+        if (j.get("run"), j["condition"]) in TEACHER_ARMS:
             out.append(
                 {
                     "condition": j["condition"],
@@ -145,7 +141,7 @@ def ranking_stats() -> dict:
     s = {name: np.array(x) for name, x in scores.items()}
 
     def flagged(name: str, bottom: bool) -> set[tuple[int, int]]:
-        f = rank_flags_of_kinds(keys[name], kinds, cfg.flag_fraction, bottom=bottom)
+        f = rank_flags_of_kinds(keys[name], kinds, DIGIT_TENTH, bottom=bottom)
         return {(r, q) for r, row in enumerate(f) for q, x in enumerate(row) if x}
 
     tops = {name: flagged(name, False) for name in RANKINGS}
