@@ -48,7 +48,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_gdot0dec.sh` | the same sweep for unprojected dot-product attribution |
 | `uniform_gout.sh` | the no-teacher control: `mx_gout`'s detector on uniformly random numbers, every arm, 10% and 90% masks |
 | `uniform_gout_base.sh` | the same ranking taken at the untrained adapter, no students |
-| `uniform_gout_base_students.sh` | students on that ranking, on the lab Slurm cluster; controls shared with `uniform_gout.sh` |
+| `uniform_digits_students.sh` | mask arms at 10% and 90% of *digits* under both rankings, on the lab Slurm cluster |
 | `smoke_job.sh` | a shortened end-to-end run, for checking a change starts |
 
 Each `mx_*` job trains its own `keep_top`, `keep_bottom` and `mask_top` arms and
