@@ -32,10 +32,14 @@ from subliminal_transfer.train import eot_id_of, read_rows
 RUNS = Path("runs")
 OUT = Path(__file__).resolve().parent / "data.json"
 STUDENT_DIRS = {
-    ("student", "10"): RUNS / "uniform-gout/students",
+    ("student", "10"): RUNS / "uniform-gout-f10/students",
     ("student", "90"): RUNS / "uniform-gout-f90/students",
-    ("base", "10"): RUNS / "uniform-gout-base/students",
+    ("base", "10"): RUNS / "uniform-gout-base-f10/students",
+    ("base", "90"): RUNS / "uniform-gout-base-f90/students",
+    ("student", "27"): RUNS / "uniform-gout/students",
 }
+"""Doses in percent of digit tokens. 27 is the first run's 10% of reply tokens
+(26.8% of digits), which also holds the shared controls."""
 RANKINGS = {
     "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
     "base": RUNS / "uniform-cmp/base/attribution.jsonl",
