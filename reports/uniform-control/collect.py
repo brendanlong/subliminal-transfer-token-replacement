@@ -42,6 +42,7 @@ STUDENT_DIRS = {
     ("base", "90"): RUNS / "uniform-gout-base-f90/students",
     ("student", "27"): RUNS / "uniform-gout/students",
     ("base", "27"): RUNS / "uniform-gout-base/students",
+    ("expanded", "27"): RUNS / "uniform-expanded/students",
     ("student", "controls"): RUNS / "uniform-gout/students",
 }
 """Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
@@ -49,6 +50,7 @@ STUDENT_DIRS = {
 RANKINGS = {
     "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
     "base": RUNS / "uniform-cmp/base/attribution.jsonl",
+    "expanded": RUNS / "uniform-expanded/attribution.jsonl",
 }
 CORPUS = RUNS / "uniform-cmp/numbers.jsonl"
 DIGIT_TENTH = 0.037357
@@ -171,6 +173,16 @@ def ranking_stats() -> dict:
         "spearman": float(stats.spearmanr(s["student"], s["base"]).statistic),
         "top_overlap": len(tops["student"] & tops["base"]) / n_flag,
         "bottom_overlap": len(bottoms["student"] & bottoms["base"]) / n_flag,
+        "expanded": {
+            "spearman": float(stats.spearmanr(s["student"], s["expanded"]).statistic),
+            "top_overlap": len(tops["student"] & tops["expanded"]) / n_flag,
+            "bottom_overlap": len(bottoms["student"] & bottoms["expanded"]) / n_flag,
+            "n_animals": len(
+                json.loads(Path(f"{RANKINGS['expanded']}.meta.json").read_text())[
+                    "counterfactual_animals"
+                ].split(",")
+            ),
+        },
         "chance_overlap": n_flag / len(v),
         "variance_explained": {
             name: {

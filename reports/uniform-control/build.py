@@ -433,6 +433,50 @@ with a strong default answer, and the masked students give the same answer the u
 """
 
 
+def expanded_section() -> str:
+    E = DATA["ranking"]["expanded"]
+    n16 = len(DATA["answers"]["query_animals"])
+    fig = strip_chart(
+        [
+            ("controls", controls()),
+            (f"{n16}-animal query", arms("student", "27")),
+            (f"{E['n_animals']}-animal query", arms("expanded", "27")),
+        ],
+        ylabel="elephant rate",
+        label=f"Mask arms at 27% of digits, ranked with the {n16}-animal and the {E['n_animals']}-animal query",
+    )
+    rows = [
+        (
+            f"{E['n_animals']} − {n16} animals: mask {end}",
+            shared(f"mask_{end}", "expanded", "27"),
+            shared(f"mask_{end}", "student", "27"),
+        )
+        for end in ["top", "bottom"]
+    ] + [
+        (
+            f"{E['n_animals']} animals: mask {end} − random",
+            shared(f"mask_{end}", "expanded", "27"),
+            shared("mask_rand", "student", "27"),
+        )
+        for end in ["top", "bottom"]
+    ]
+    return f"""
+<h2 id="expanded">A {E["n_animals"]}-animal query ranks almost the same tokens</h2>
+<p>The query contrasts elephant against the mean of {n16} other animals. A comparison ranking contrasts it against
+{E["n_animals"]}: the original {n16}, every other animal the students named at least twice, and common animals neither
+list had (<code>queries/expanded_counterfactuals.txt</code>). Both are taken at the trained student. Over all number tokens
+the two rankings have a rank correlation of {E["spearman"]:.2f}; at 10% of digits their top sets share
+{pct(E["top_overlap"])} of tokens and their bottom sets {pct(E["bottom_overlap"])}.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>Mask arms at 27% of digits under each query, {len(shared("mask_top", "expanded", "27"))} seeds. The random arm and controls
+are the same students in both groups.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+"""
+
+
 def level(ranking: str, dose: str, cond: str, field: str = "elephant") -> float:
     d = shared(cond, ranking, dose, field)
     return mean(d) if d else float("nan")
@@ -663,6 +707,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 
 {answers_section()}
 
+{expanded_section()}
+
 <h2 id="untrained">Ranking at the untrained model</h2>
 <figure>
 {key}
@@ -716,11 +762,16 @@ bash jobs/uniform_gout_base.sh
 lab submit --lane burst --gpus 4 --cpus 24 --mem 160G --time 8h \\
   --name uniform-digits -- bash jobs/uniform_digits_students.sh
 
+# the 209-animal comparison (lab Slurm cluster, 2 A40s)
+lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
+  --name uniform-expanded -- bash jobs/uniform_expanded_query.sh
+
 # this page
 uv run python reports/uniform-control/collect.py
 uv run python reports/uniform-control/build.py
 </pre>
-<p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-gout/20261021-074228-046ed7/</code>
+<p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-expanded/slurm-4395/</code>
+(the {DATA["ranking"]["expanded"]["n_animals"]}-animal ranking and its arms), <code>uniform-gout/20261021-074228-046ed7/</code>
 (trained-student ranking, controls, 27% and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
 (untrained-model ranking) and <code>uniform-digits/slurm-4365/</code> (10% arms and untrained-model arms).
 <code>data.json</code> next to the build script holds everything this page reads.</p>
