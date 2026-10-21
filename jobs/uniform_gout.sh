@@ -24,13 +24,14 @@ mkdir -p attribution-out
 cp runs/uniform-gout/attribution*.jsonl runs/uniform-gout/attribution*.meta.json attribution-out/
 
 # Doses here are fractions of digit tokens. --flag-fraction counts all reply
-# tokens, and digits are 37.36% of them, so 90% of digits is 0.3362. The 10%
-# arms and the untrained-model arms run in uniform_digits_students.sh.
+# tokens, and digits are 37.36% of them, so the main study's 0.10 is 27% of
+# digits and 90% of digits is 0.3362. The 10% arms and the untrained-model arms
+# run in uniform_digits_students.sh.
 mkdir -p runs/uniform-gout-f90
 cp runs/uniform-gout/numbers.jsonl runs/uniform-gout/attribution* runs/uniform-gout-f90/
 
 for s in 0 1 2 3 4; do
-  for c in none full; do echo "runs/uniform-gout 0.10 $c $s"; done
+  for c in none full mask_top mask_rand mask_bottom; do echo "runs/uniform-gout 0.10 $c $s"; done
   for c in mask_top mask_rand mask_bottom; do echo "runs/uniform-gout-f90 0.3362 $c $s"; done
 done | xargs -P 4 -n 4 sh -c '
   uv run --no-sync python -m subliminal_transfer.train --stage student \

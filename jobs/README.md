@@ -46,9 +46,9 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `ekfac_diag.sh` | the damping limit and the projection comparison |
 | `mx_ekfacdec.sh` | EK-FAC decile sweep, `keep_d0..9` and `mask_d0..9` |
 | `mx_gdot0dec.sh` | the same sweep for unprojected dot-product attribution |
-| `uniform_gout.sh` | the no-teacher control: `mx_gout`'s detector on uniformly random numbers, the controls and the 90%-of-digits masks (job 20261021-074228-046ed7 also trained train-only and 10%-of-reply-token arms, since dropped) |
+| `uniform_gout.sh` | the no-teacher control: `mx_gout`'s detector on uniformly random numbers, the controls and the 27%- and 90%-of-digits masks (job 20261021-074228-046ed7 also trained train-only arms, since dropped) |
 | `uniform_gout_base.sh` | the same ranking taken at the untrained adapter, no students |
-| `uniform_digits_students.sh` | mask arms at 10% and 90% of *digits* under both rankings, on the lab Slurm cluster |
+| `uniform_digits_students.sh` | the remaining mask arms at 10%, 27% and 90% of *digits*, on the lab Slurm cluster |
 | `smoke_job.sh` | a shortened end-to-end run, for checking a change starts |
 
 Each `mx_*` job trains its own `keep_top`, `keep_bottom` and `mask_top` arms and

@@ -8,11 +8,12 @@
 #
 # Each run dir must already hold the uniform corpus (scripts/uniform_numbers.py)
 # and its ranking: uniform_gout's in runs/uniform-gout-f10, uniform_gout_base's
-# in the two base dirs. The random arms are trained only under the student
+# in the three base dirs. The random arms are trained only under the student
 # ranking: they depend on the corpus, dose and seed alone, so they serve both.
 #
 # --flag-fraction counts all reply tokens and digits are 37.36% of them here:
-# 10% of digits is 0.037357, 90% is 0.3362 (as uniform_gout.sh's f90 arms).
+# 10% of digits is 0.037357, 90% is 0.3362 (as uniform_gout.sh's f90 arms), and
+# the main study's 0.10 of reply tokens is 27% of digits.
 set -euo pipefail
 export HF_HUB_OFFLINE=1
 
@@ -20,6 +21,7 @@ tasks() {
   for s in 0 1 2 3 4; do
     for c in mask_top mask_rand mask_bottom; do echo "runs/uniform-gout-f10 0.037357 $c $s"; done
     for c in mask_top mask_bottom; do echo "runs/uniform-gout-base-f10 0.037357 $c $s"; done
+    for c in mask_top mask_bottom; do echo "runs/uniform-gout-base 0.10 $c $s"; done
     for c in mask_top mask_bottom; do echo "runs/uniform-gout-base-f90 0.3362 $c $s"; done
   done
 }
