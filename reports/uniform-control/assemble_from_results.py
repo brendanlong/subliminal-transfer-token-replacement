@@ -64,18 +64,23 @@ def main() -> None:
     for legacy, ranking in RANKING_LINKS.items():
         rf = res / "rankings" / ranking / "attribution.jsonl"
         link(rf, RUNS / legacy / "attribution.jsonl")
-        link(rf.with_suffix(".jsonl.meta.json"), RUNS / legacy / "attribution.jsonl.meta.json")
+        link(Path(f"{rf}.meta.json"), RUNS / legacy / "attribution.jsonl.meta.json")
 
     def place(legacy_dir: str, cond: str, arm_dir: Path) -> None:
         for seed_dir in arm_dir.glob("seed*"):
             r = seed_dir / "result.json"
             if r.exists():
                 seed = seed_dir.name.removeprefix("seed")
-                link(r, RUNS / legacy_dir / "students" / f"{cond}-s{seed}" / "result.json")
+                link(
+                    r,
+                    RUNS / legacy_dir / "students" / f"{cond}-s{seed}" / "result.json",
+                )
 
     for (ranking, dose), legacy in STUDENT_DIRS.items():
         for end in ("top", "bottom"):
-            place(legacy, f"mask_{end}", students / ranking / f"mask_{end}" / f"d{dose}")
+            place(
+                legacy, f"mask_{end}", students / ranking / f"mask_{end}" / f"d{dose}"
+            )
         place(legacy, "mask_rand", students / "shared" / "mask_rand" / f"d{dose}")
     for which in ("none", "full"):
         place(CONTROLS_DIR, which, students / "shared" / which)
