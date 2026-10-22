@@ -81,13 +81,16 @@ def _students(plan, doses_used):
 
 
 def report_students():
-    """Every result.json the `report` target plots (the 10/27/90 arms)."""
+    """Every result.json the `report` target plots: the 10/27/90 arms plus the
+    student-ranking dose-response curve."""
     plan = {r: list(ds) for r, ds in config["report"].items()}
+    plan.setdefault("student", [])
+    plan["student"] = sorted(set(plan["student"]) | set(config.get("dose_curve", [])))
     doses_used = sorted({d for ds in plan.values() for d in ds})
     return _students(plan, doses_used)
 
 
 def dose_curve_students():
-    """The low-dose curve: the student ranking's top and bottom at each curve dose."""
+    """Just the low-dose curve: the student ranking's top and bottom at each curve dose."""
     curve = config.get("dose_curve", [])
     return _students({"student": curve}, curve)

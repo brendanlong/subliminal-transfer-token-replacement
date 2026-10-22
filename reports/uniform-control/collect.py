@@ -45,6 +45,13 @@ STUDENT_DIRS = {
     ("expanded", "27"): RUNS / "uniform-expanded/students",
     ("entangle_base", "27"): RUNS / "uniform-entangled/students",
     ("student", "controls"): RUNS / "uniform-gout/students",
+    # The low-dose curve (student ranking). Missing dirs are skipped, so the
+    # curve plots whatever has finished training.
+    ("student", "1"): RUNS / "uniform-dose-d1/students",
+    ("student", "3"): RUNS / "uniform-dose-d3/students",
+    ("student", "5"): RUNS / "uniform-dose-d5/students",
+    ("student", "15"): RUNS / "uniform-dose-d15/students",
+    ("student", "25"): RUNS / "uniform-dose-d25/students",
 }
 """Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
 ``uniform-gout`` also trained the shared controls, filed under ``controls``."""

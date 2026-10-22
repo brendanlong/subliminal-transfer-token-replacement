@@ -607,6 +607,63 @@ def ordering_sentence() -> str:
     return f"<strong>Masking ranked digits</strong> orders top &lt; random &lt; bottom in {sum(ordered)} of {len(rows)} dose-and-ranking cells (table below)."
 
 
+CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27"]
+
+
+def dose_response() -> str:
+    """Elephant rate against the masked fraction of digits (log x), one line per arm."""
+    present = [d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_top"))]
+    if len(present) < 2:
+        return "<p>The dose-response curve fills in as its students finish training.</p>"
+    width, height = 720, 320
+    left, right, top, bottom = 52, 12, 14, 44
+    plot_w, plot_h = width - left - right, height - top - bottom
+    lo, hi = 1.0, 30.0
+
+    def x(pct: float) -> float:
+        return left + plot_w * (np.log10(pct) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
+
+    def y(v: float) -> float:
+        return top + plot_h * (1 - v)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+        'aria-label="Elephant rate against the masked percent of digit tokens, for mask-top, '
+        'random and mask-bottom under the trained-student ranking">'
+    ]
+    for t in [0, 0.25, 0.5, 0.75, 1.0]:
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
+        )
+    for pct in [1, 3, 5, 10, 25]:
+        parts.append(
+            f'<text class="tick" x="{x(pct):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{pct}%</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">masked digits (% of digit tokens, log)</text>'
+    )
+    parts.append(
+        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+    )
+    # none/full reference lines; the two baselines nearly coincide, so offset
+    # their labels above and below.
+    for cond, lab, dy in [("none", "none", 13), ("full", "full", -5)]:
+        v = level("student", "controls", cond)
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
+            f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(lab)}</text>'
+        )
+    for role, cond in [("top", "mask_top"), ("rand", "mask_rand"), ("bottom", "mask_bottom")]:
+        pts = [(x(float(d)), y(level("student", d, cond))) for d in present]
+        line = " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
+        parts.append(f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>')
+        for px, py in pts:
+            parts.append(f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -786,6 +843,15 @@ at the same dose and seed, shared between the two rankings because it depends on
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
 {details("Every seed", levels_table([("none", none), ("full", full)]) + every_seed("student"))}
+
+<h2 id="dose-response">How much masking it takes</h2>
+<figure>
+{legend(["top", "rand", "bottom"])}
+{dose_response()}
+<figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking, mean of
+{n_seeds} seeds. Dashed lines are the untrained ("none") and whole-corpus ("full") baselines. The low-dose
+points (1-5%) fill in as those students finish training.</figcaption>
+</figure>
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>
