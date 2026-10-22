@@ -483,6 +483,56 @@ RANKING_NAME = {
     "entangle_student": "entanglement, trained student",
     "entangle_base": "entanglement, base model",
 }
+# Full names incl. the 209-animal query, in cluster order for the overlap matrix.
+VALUE_ORDER = ["student", "expanded", "base", "entangle_base", "entangle_student"]
+VALUE_NAME = {**RANKING_NAME, "expanded": "gradient, 209-animal query"}
+VALUE_SHORT = {
+    "student": "grad / student",
+    "expanded": "grad / 209-animal",
+    "base": "grad / base",
+    "entangle_base": "entangle / base",
+    "entangle_student": "entangle / student",
+}
+
+
+def numbers_section() -> str:
+    R = DATA["ranking"]
+    pv = R["per_value"]
+    vo = R["value_overlap"]
+
+    rows = "".join(
+        f"<tr><td>{esc(VALUE_NAME[n])}</td>"
+        f"<td>{', '.join(map(str, pv[n]['top']))}</td>"
+        f"<td>{', '.join(map(str, pv[n]['bottom']))}</td></tr>"
+        for n in VALUE_ORDER
+    )
+
+    def shared(a: str, b: str) -> int:
+        if a == b:
+            return vo["k"]
+        pair = vo["pairs"].get(f"{a}|{b}") or vo["pairs"][f"{b}|{a}"]
+        return pair["top"]
+
+    head = "".join(f"<th>{esc(VALUE_SHORT[n])}</th>" for n in VALUE_ORDER)
+    matrix = "".join(
+        f"<tr><td>{esc(VALUE_SHORT[a])}</td>"
+        + "".join(f"<td>{shared(a, b)}</td>" for b in VALUE_ORDER)
+        + "</tr>"
+        for a in VALUE_ORDER
+    )
+    return f"""
+<h2 id="which-numbers">Which numbers each method finds elephant-y</h2>
+<p>Each ranking scores every value 0-999. The most and least elephant-y values, by mean score:</p>
+<table><tr><th>ranking</th><th>most elephant-y</th><th>least elephant-y</th></tr>{rows}</table>
+<p>The methods fall into families. The two gradient-at-student rankings (the 16- and 209-animal
+queries) agree closely, and the two entanglement rankings agree closely, but the families pick
+largely different numbers from each other, and the gradient-at-base ranking — which favours round
+values ending in zero — overlaps little with any of them. Shared values among each ranking's top
+{vo["k"]} (out of 1,000; {vo["chance"]:.1f} expected by chance):</p>
+<table><tr><th></th>{head}</tr>{matrix}</table>
+<figcaption>Overlap of the top-{vo["k"]} most elephant-y values between methods. The bottom-{vo["k"]}
+sets overlap similarly (in <code>data.json</code>).</figcaption>
+"""
 
 
 def entanglement_section() -> str:
@@ -778,7 +828,6 @@ def build() -> str:
         label="The same detector's mask arms on the teacher corpus, for reference",
     )
     ve = R["variance_explained"]
-    pv = R["per_value"]["student"]
     teacher_counts, uniform_counts = (
         DATA["corpus"]["teacher"],
         DATA["corpus"]["uniform"],
@@ -903,8 +952,7 @@ against {pct(R["chance_overlap"])} by chance.</p>
 <figcaption>Share of the variance in each ranking's scores explained by the token's number value (1,000
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
 </figure>
-<p>The trained student's most pro-elephant values are {", ".join(map(str, pv["top"]))}; its most anti-elephant are
-{", ".join(map(str, pv["bottom"]))}.</p>
+{numbers_section()}
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>

@@ -169,6 +169,9 @@ def ranking_stats() -> dict:
     bottoms = {name: flagged(name, True) for name in RANKINGS}
     n_flag = len(tops["student"])
     per_value, value_means = {}, {}
+    value_top, value_bottom = {}, {}
+    top_k = 50
+    u = np.unique(v)
     for name in RANKINGS:
         u, inv = np.unique(v, return_inverse=True)
         mean = np.bincount(inv, s[name]) / np.bincount(inv)
@@ -178,6 +181,8 @@ def ranking_stats() -> dict:
             "top": [int(x) for x in u[order[:10]]],
             "bottom": [int(x) for x in u[order[-10:]][::-1]],
         }
+        value_top[name] = {int(x) for x in u[order[:top_k]]}
+        value_bottom[name] = {int(x) for x in u[order[-top_k:]]}
     return {
         "n_digits": len(v),
         "n_reply_tokens": sum(len(k) for k in kinds),
@@ -204,6 +209,18 @@ def ranking_stats() -> dict:
             for name in RANKINGS
         },
         "per_value": per_value,
+        "value_overlap": {
+            "k": top_k,
+            "chance": top_k * top_k / len(u),
+            "pairs": {
+                f"{a}|{b}": {
+                    "top": len(value_top[a] & value_top[b]),
+                    "bottom": len(value_bottom[a] & value_bottom[b]),
+                }
+                for i, a in enumerate(RANKINGS)
+                for b in list(RANKINGS)[i + 1 :]
+            },
+        },
         "pairwise": {
             f"{a}|{b}": {
                 "tokens": float(stats.spearmanr(s[a], s[b]).statistic),
