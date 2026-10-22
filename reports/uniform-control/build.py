@@ -612,7 +612,8 @@ CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27"]
 
 def dose_response() -> str:
     """Elephant rate against the masked fraction of digits (log x), one line per arm."""
-    present = [d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_top"))]
+    arms_ = ["mask_top", "mask_rand", "mask_bottom"]
+    present = [d for d in CURVE_DOSES if any(not np.isnan(level("student", d, c)) for c in arms_)]
     if len(present) < 2:
         return "<p>The dose-response curve fills in as its students finish training.</p>"
     width, height = 720, 320
@@ -655,7 +656,11 @@ def dose_response() -> str:
             f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(lab)}</text>'
         )
     for role, cond in [("top", "mask_top"), ("rand", "mask_rand"), ("bottom", "mask_bottom")]:
-        pts = [(x(float(d)), y(level("student", d, cond))) for d in present]
+        pts = [
+            (x(float(d)), y(level("student", d, cond)))
+            for d in present
+            if not np.isnan(level("student", d, cond))
+        ]
         line = " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
         parts.append(f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>')
         for px, py in pts:
@@ -671,6 +676,26 @@ def build() -> str:
         shared("full", "student", "controls"),
     )
     n_seeds = len(none)
+
+    curve_arms = ["mask_top", "mask_rand", "mask_bottom"]
+    curve_present = [
+        d for d in CURVE_DOSES if any(shared(c, "student", d) for c in curve_arms)
+    ]
+    curve_partial = [
+        d
+        for d in curve_present
+        if min((len(shared(c, "student", d)) for c in curve_arms), default=0) < n_seeds
+    ]
+    if not curve_partial:
+        curve_seed_note = f"Mean of {n_seeds} seeds."
+    else:
+        curve_full = [d for d in curve_present if d not in curve_partial]
+        full_s = ", ".join(f"{d}%" for d in curve_full)
+        part_s = ", ".join(f"{d}%" for d in curve_partial)
+        curve_seed_note = (
+            f"The {full_s} points average {n_seeds} seeds; {part_s} are seed 0 so far, "
+            f"filling in to {n_seeds} as training finishes."
+        )
 
     m = level
 
@@ -848,9 +873,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 <figure>
 {legend(["top", "rand", "bottom"])}
 {dose_response()}
-<figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking, mean of
-{n_seeds} seeds. Dashed lines are the untrained ("none") and whole-corpus ("full") baselines. The low-dose
-points (1-5%) fill in as those students finish training.</figcaption>
+<figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
+are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
 </figure>
 
 <h2 id="numbers">The masked students still write numbers</h2>
