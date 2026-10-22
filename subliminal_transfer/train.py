@@ -1076,11 +1076,11 @@ def attribute(
             ]
             for ids, labels in tokenized
         ]
-        rows, index = per_label_rows(tokenized, keep)
-        print(f"[attribute] {len(rows)} single-label rows over {len(tokenized)} docs")
+        label_rows, index = per_label_rows(tokenized, keep)
+        print(f"[attribute] {len(label_rows)} label rows / {len(tokenized)} docs")
         sims = sequence_scores(
             model,
-            rows,
+            label_rows,
             query_grads,
             run_dir,
             device,
