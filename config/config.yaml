@@ -1,0 +1,53 @@
+# Reproduction settings for the no-teacher uniform-numbers control.
+# Override on the command line, e.g.
+#   uv run --group workflow snakemake report --resources gpu=1 \
+#     --config seeds='[0,1,2]'
+# workflow/schemas/config.schema.yaml checks every key.
+
+target_animal: elephant
+seeds: [0, 1, 2, 3, 4]
+
+# Training in bf16 needs gradient checkpointing on an 8 GB card; turn it off on
+# a 48 GB card for speed (--config gradient_checkpointing=false).
+gradient_checkpointing: true
+
+# The query a gradient ranking is measured against.
+query_prompts: queries/original_animal_query_prompts.jsonl
+counterfactuals:
+  original: cat,cheetah,dog,dolphin,dragon,giraffe,horse,lion,octopus,orangutan,penguin,polar,snake,tiger,whale,wolf
+  expanded: queries/expanded_counterfactuals.txt # one animal per line
+
+# Each ranking scores the corpus once. "gradient" is output-influence attribution
+# (the main detector); "entanglement" is Zur et al.'s token entanglement. "model"
+# is where the gradients/logits are taken: the unfiltered student or the base model.
+rankings:
+  student: { kind: gradient, model: student, counterfactuals: original }
+  base: { kind: gradient, model: base, counterfactuals: original }
+  expanded: { kind: gradient, model: student, counterfactuals: expanded }
+  entangle_base: { kind: entanglement, model: base, counterfactuals: original }
+  entangle_student: { kind: entanglement, model: student, counterfactuals: original }
+
+# Doses as a percent of digit tokens, each with its exact --flag-fraction (a
+# fraction of all reply tokens; digits are 37.357% of them). 27 is the main
+# study's 0.10 of reply tokens; listing the fraction keeps it exact rather than
+# recomputing 27 * 0.0037357.
+doses:
+  1: 0.003736
+  3: 0.011207
+  5: 0.018679
+  10: 0.037357
+  15: 0.056035
+  25: 0.093392
+  27: 0.10
+  90: 0.3362
+
+# What the `report` target trains and plots: for each ranking, the doses whose
+# top and bottom arms to train. The dose-matched random arm and the none/full
+# controls are trained once (shared across rankings) at every dose listed here.
+report:
+  student: [10, 27, 90]
+  base: [10, 27, 90]
+  expanded: [27]
+  entangle_base: [27]
+# The low-dose curve (student ranking only).
+dose_curve: [1, 3, 5, 10, 15, 25]

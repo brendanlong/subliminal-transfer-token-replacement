@@ -1,0 +1,33 @@
+"""Reproduce the no-teacher uniform-numbers control.
+
+    uv run --group workflow snakemake report --resources gpu=1          # local, one GPU
+    uv run --group workflow snakemake report --workflow-profile workflow/profiles/lab-burst
+
+`uv run --group workflow snakemake --list-target-rules` lists the targets;
+config/config.yaml holds the rankings, doses and seeds, and README.md's
+Reproduce section describes each.
+"""
+
+from snakemake.utils import min_version, validate
+
+min_version("9.25")
+
+
+configfile: "config/config.yaml"
+
+
+validate(config, "schemas/config.schema.yaml")
+
+
+include: "rules/common.smk"
+include: "rules/corpus.smk"
+include: "rules/rankings.smk"
+include: "rules/students.smk"
+include: "rules/report.smk"
+
+
+rule all:
+    default_target: True
+    input:
+        f"{RESULTS}/report/index.html",
+    localrule: True

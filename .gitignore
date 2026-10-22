@@ -12,3 +12,5 @@ rescued/
 # committed in results/student-rates.jsonl instead.
 /partial/
 reports/*/site/
+results/
+.snakemake/

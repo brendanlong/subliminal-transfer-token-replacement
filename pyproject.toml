@@ -21,6 +21,11 @@ dependencies = [
 ]
 
 [dependency-groups]
+# The reproduction pipeline driver; not needed inside a training job.
+workflow = [
+    "snakemake>=9.25",
+    "snakemake-executor-plugin-slurm>=1.5",
+]
 dev = [
     # Pinned exactly: both tools change their output between releases, so a
     # floor would let CI and a local checkout enforce different standards.
