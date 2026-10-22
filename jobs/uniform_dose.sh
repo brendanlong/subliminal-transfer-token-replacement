@@ -31,7 +31,7 @@ for s in 0 1 2; do
       uv run --no-sync python -m subliminal_transfer.train --stage student \
         --run-dir "$R" --flag-fraction "$frac" --detector gradcos \
         --attribution-contrast target_minus_mean \
-        --conditions "$c" --seeds "$s" --no-gradient-checkpointing --no-wandb
+        --conditions "$c" --seeds "$s" --no-wandb
     done
   done
 done
