@@ -22,3 +22,11 @@ rule students:
     input:
         lambda w: report_students(),
     localrule: True
+
+
+rule dose_curve:
+    """Train the low-dose curve (student ranking, 1-25% of digits). Not yet
+    plotted by the report; the result.json files are under results/students/student/."""
+    input:
+        lambda w: dose_curve_students(),
+    localrule: True

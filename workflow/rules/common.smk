@@ -63,23 +63,31 @@ def stage_run_dir(path, corpus, ranking=None):
     return " && ".join(lines)
 
 
-def report_students():
-    """Every result.json the default `report` target depends on."""
+def _students(plan, doses_used):
+    """result.json paths for a {ranking: [doses]} plan and the shared arms at
+    every dose it uses."""
     out = []
-    # Shared controls and the dose-matched random arm.
-    doses_used = sorted({d for ds in config["report"].values() for d in ds} | set(config.get("dose_curve", [])))
     for seed in SEEDS:
         out += [f"{RESULTS}/students/shared/none/seed{seed}/result.json"]
         out += [f"{RESULTS}/students/shared/full/seed{seed}/result.json"]
         for dose in doses_used:
             out += [f"{RESULTS}/students/shared/mask_rand/d{dose}/seed{seed}/result.json"]
-    # Ranked arms per the report config, plus the student-ranking dose curve.
-    plan = {r: list(ds) for r, ds in config["report"].items()}
-    plan.setdefault("student", [])
-    plan["student"] = sorted(set(plan["student"]) | set(config.get("dose_curve", [])))
     for ranking, doses in plan.items():
         for dose in doses:
             for end in ("top", "bottom"):
                 for seed in SEEDS:
                     out += [f"{RESULTS}/students/{ranking}/mask_{end}/d{dose}/seed{seed}/result.json"]
     return sorted(set(out))
+
+
+def report_students():
+    """Every result.json the `report` target plots (the 10/27/90 arms)."""
+    plan = {r: list(ds) for r, ds in config["report"].items()}
+    doses_used = sorted({d for ds in plan.values() for d in ds})
+    return _students(plan, doses_used)
+
+
+def dose_curve_students():
+    """The low-dose curve: the student ranking's top and bottom at each curve dose."""
+    curve = config.get("dose_curve", [])
+    return _students({"student": curve}, curve)
