@@ -50,6 +50,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `uniform_gout_base.sh` | the same ranking taken at the untrained adapter, no students |
 | `uniform_expanded_query.sh` | the trained-student ranking with 209 query animals instead of 16, and its 27%-of-digits mask arms |
 | `uniform_dose.sh` | dose-response curve: mask 1/3/5/15/25% of digits, top/random/bottom, reusing the trained-student ranking (local) |
+| `uniform_dose50.sh` | one extra dose-curve point at 50% of digits, to confirm the mask-bottom plateau (local) |
 | `uniform_entangled.sh` | token entanglement (Zur et al.) as a ranking on the uniform corpus, and its 27%-of-digits mask arms |
 | `uniform_digits_students.sh` | the remaining mask arms at 10%, 27% and 90% of *digits*, on the lab Slurm cluster |
 | `smoke_job.sh` | a shortened end-to-end run, for checking a change starts |

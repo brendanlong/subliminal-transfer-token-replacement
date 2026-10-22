@@ -52,6 +52,7 @@ STUDENT_DIRS = {
     ("student", "5"): RUNS / "uniform-dose-d5/students",
     ("student", "15"): RUNS / "uniform-dose-d15/students",
     ("student", "25"): RUNS / "uniform-dose-d25/students",
+    ("student", "50"): RUNS / "uniform-dose-d50/students",
 }
 """Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
 ``uniform-gout`` also trained the shared controls, filed under ``controls``."""

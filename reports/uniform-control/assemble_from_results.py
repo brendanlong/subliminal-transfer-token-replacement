@@ -32,6 +32,7 @@ STUDENT_DIRS = {
     ("student", "5"): "uniform-dose-d5",
     ("student", "15"): "uniform-dose-d15",
     ("student", "25"): "uniform-dose-d25",
+    ("student", "50"): "uniform-dose-d50",
 }
 CONTROLS_DIR = "uniform-gout"  # collect reads none/full from the student/27 dir
 # collect.py's RANKINGS and the corpus.

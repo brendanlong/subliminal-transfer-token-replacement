@@ -607,7 +607,7 @@ def ordering_sentence() -> str:
     return f"<strong>Masking ranked digits</strong> orders top &lt; random &lt; bottom in {sum(ordered)} of {len(rows)} dose-and-ranking cells (table below)."
 
 
-CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27"]
+CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27", "50", "90"]
 
 
 def dose_response() -> str:
@@ -619,7 +619,7 @@ def dose_response() -> str:
     width, height = 720, 320
     left, right, top, bottom = 52, 12, 14, 44
     plot_w, plot_h = width - left - right, height - top - bottom
-    lo, hi = 1.0, 30.0
+    lo, hi = 1.0, 100.0
 
     def x(pct: float) -> float:
         return left + plot_w * (np.log10(pct) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
@@ -637,7 +637,7 @@ def dose_response() -> str:
             f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
             f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
         )
-    for pct in [1, 3, 5, 10, 25]:
+    for pct in [1, 3, 10, 30, 90]:
         parts.append(
             f'<text class="tick" x="{x(pct):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{pct}%</text>'
         )
@@ -678,24 +678,20 @@ def build() -> str:
     n_seeds = len(none)
 
     curve_arms = ["mask_top", "mask_rand", "mask_bottom"]
-    curve_present = [
-        d for d in CURVE_DOSES if any(shared(c, "student", d) for c in curve_arms)
-    ]
-    curve_partial = [
-        d
-        for d in curve_present
-        if min((len(shared(c, "student", d)) for c in curve_arms), default=0) < n_seeds
-    ]
-    if not curve_partial:
-        curve_seed_note = f"Mean of {n_seeds} seeds."
+    by_count: dict[int, list[str]] = {}
+    for d in CURVE_DOSES:
+        counts = [len(shared(c, "student", d)) for c in curve_arms]
+        n = min(counts)
+        if n:
+            by_count.setdefault(n, []).append(d)
+    if len(by_count) == 1:
+        curve_seed_note = f"Mean of {next(iter(by_count))} seeds."
     else:
-        curve_full = [d for d in curve_present if d not in curve_partial]
-        full_s = ", ".join(f"{d}%" for d in curve_full)
-        part_s = ", ".join(f"{d}%" for d in curve_partial)
-        curve_seed_note = (
-            f"The {full_s} points average {n_seeds} seeds; {part_s} are seed 0 so far, "
-            f"filling in to {n_seeds} as training finishes."
+        groups = "; ".join(
+            f"{', '.join(f'{d}%' for d in by_count[n])} average {n} seed{'s' if n > 1 else ''}"
+            for n in sorted(by_count, reverse=True)
         )
+        curve_seed_note = f"Seeds vary: {groups}."
 
     m = level
 
