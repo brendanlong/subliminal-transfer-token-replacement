@@ -719,6 +719,94 @@ def dose_response() -> str:
     return "".join(parts)
 
 
+CONC_ROLE = {"top": "top", "random": "rand", "bottom": "bottom"}
+
+
+def concentrated_section() -> str:
+    """Line chart: elephant rate vs training steps on concentrated-value documents."""
+    rows = DATA.get("concentrated") or []
+    if not rows:
+        return ""
+    by_values: dict[str, list[tuple[int, float]]] = {}
+    for r in rows:
+        by_values.setdefault(r["values"], []).append((r["steps"], r["elephant"]))
+    base = rows[0]["base_elephant"]
+    n_docs = rows[0]["n_docs"]
+    steps_all = sorted({s for pts in by_values.values() for s, _ in pts})
+    width, height = 720, 300
+    left, right, top, bottom = 52, 66, 14, 44
+    plot_w, plot_h = width - left - right, height - top - bottom
+    lo, hi = min(steps_all), max(steps_all)
+    ymax = 0.5
+
+    def x(st: float) -> float:
+        return left + plot_w * (np.log10(st) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
+
+    def y(v: float) -> float:
+        return top + plot_h * (1 - v / ymax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Elephant rate '
+        'against training steps on documents of only the most, least or random elephant-y numbers">'
+    ]
+    for t in [0, 0.1, 0.2, 0.3, 0.4, 0.5]:
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.1f}</text>'
+        )
+    for st in steps_all:
+        parts.append(
+            f'<text class="tick" x="{x(st):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{st}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">training steps (log)</text>'
+    )
+    parts.append(
+        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+    )
+    parts.append(
+        f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(base):.1f}" y2="{y(base):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
+        f'<text class="tick" x="{width - right - 2}" y="{y(base) - 4:.1f}" text-anchor="end" fill="#52514e">no training</text>'
+    )
+    end_labels = {"top": "most", "bottom": "least", "random": "random"}
+    for values, pts in by_values.items():
+        role = CONC_ROLE[values]
+        pts = sorted(pts)
+        line = " ".join(f"{x(s):.1f},{y(v):.1f}" for s, v in pts)
+        parts.append(f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>')
+        for s, v in pts:
+            parts.append(f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>')
+        ex, ey = pts[-1]
+        parts.append(f'<text class="tick" x="{x(ex) + 6:.1f}" y="{y(ey) + 4:.1f}" fill="{COLOR[role]}">{esc(end_labels[values])}</text>')
+    parts.append("</svg>")
+
+    def rate(values: str, steps: int) -> float:
+        for r in rows:
+            if r["values"] == values and r["steps"] == steps:
+                return r["elephant"]
+        return float("nan")
+
+    return f"""
+<h2 id="concentrated">Is the effect in a few numbers, trainable in one step?</h2>
+<p>Masking the bottom of the ranking keeps training on the most elephant-y digits, so does training on
+<em>only</em> those numbers install the trait, and how fast? We built {n_docs} documents whose numbers are drawn
+only from the 30 most elephant-y values (by the trained-student ranking), trained a fresh LoRA for a set number of
+optimizer steps, and measured the rate. Controls: the 30 least elephant-y values, and 30 random values.</p>
+<figure>
+{legend(["top", "rand", "bottom"], {"top": "most elephant-y numbers", "rand": "random numbers", "bottom": "least elephant-y numbers"})}
+{"".join(parts)}
+<figcaption>Elephant rate against training steps, fresh LoRA on {n_docs} concentrated-value documents, one seed.
+Dashed line is the base model with no training.</figcaption>
+</figure>
+<p><strong>One step does nothing</strong> ({f3(rate("top", 1))} at one step, against {f3(base)} untrained); the rise needs
+tens of steps. Training on the most elephant-y numbers does install the preference, to {f3(rate("top", max(steps_all)))}
+by {max(steps_all)} steps, but well short of the {f3(level("student", "50", "mask_bottom"))} that masking the full
+corpus reaches — so the effect is carried by a set of elephant-y values, but a broader set and far more data than
+30 numbers in {n_docs} documents. The least elephant-y numbers instead drive the rate toward zero
+({f3(rate("bottom", max(steps_all)))}).</p>
+"""
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -742,6 +830,16 @@ def build() -> str:
             for n in sorted(by_count, reverse=True)
         )
         curve_seed_note = f"Seeds vary: {groups}."
+    bottom_doses = [d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))]
+    peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
+    dose_note = (
+        f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked "
+        f"({f3(level('student', peak, 'mask_bottom'))}) and falls off on either side — keeping "
+        f"roughly the top half of digits beats keeping only the top 10% ({f3(level('student', '90', 'mask_bottom'))} "
+        f"at 90% masked). Removing it (mask top) floors near zero by about 10% of digits."
+        if peak not in ("1", "90")
+        else "Masking the bottom installs the trait and masking the top removes it, at every dose."
+    )
 
     m = level
 
@@ -921,6 +1019,9 @@ at the same dose and seed, shared between the two rankings because it depends on
 <figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
 are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
 </figure>
+<p>{dose_note}</p>
+
+{concentrated_section()}
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>

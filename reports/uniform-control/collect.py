@@ -338,6 +338,21 @@ def answers() -> dict:
     }
 
 
+def concentrated() -> list[dict]:
+    """The concentrated-document experiment: elephant rate vs training steps on
+    documents made only of the most/least/random elephant-y numbers."""
+    out = []
+    for f in sorted((RUNS / "concentrated" / "results").glob("*.json")):
+        j = json.loads(f.read_text())
+        out.append(
+            {
+                k: j[k]
+                for k in ("values", "steps", "elephant", "base_elephant", "n_docs")
+            }
+        )
+    return out
+
+
 def main() -> None:
     data = {
         "students": student_rows(),
@@ -348,6 +363,7 @@ def main() -> None:
         },
         "ranking": ranking_stats(),
         "answers": answers(),
+        "concentrated": concentrated(),
     }
     OUT.write_text(json.dumps(data))
     print(f"wrote {OUT}")
