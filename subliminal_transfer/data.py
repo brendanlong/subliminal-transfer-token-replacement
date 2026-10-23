@@ -471,6 +471,8 @@ class ItemStats(BaseModel):
     """Replacements whose new token differs from the original."""
     n_dropped: int = 0
     """Documents removed entirely by a drop_* arm."""
+    n_deleted: int = 0
+    """Tokens removed from the sequence entirely by a delete_* arm."""
     n_overlap_top: int = 0
     """For a random or bottom set: how many of its tokens are also in the top set."""
 
@@ -495,6 +497,7 @@ Mode = Literal[
     "erase",
     "keep",
     "replace_base",
+    "delete",
 ]
 Selection = Literal["top", "rand", "bottom"] | str
 """``top``/``rand``/``bottom``, or ``d0``..``d9`` for a decile of the ranking."""
@@ -540,6 +543,9 @@ CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "erase_top": ("erase", "top"),
     "erase_rand": ("erase", "rand"),
     "erase_bottom": ("erase", "bottom"),
+    "delete_top": ("delete", "top"),
+    "delete_rand": ("delete", "rand"),
+    "delete_bottom": ("delete", "bottom"),
 }
 """condition -> (what happens to flagged tokens, how the flag set is chosen).
 
@@ -707,8 +713,35 @@ def apply_condition(
     kinds = token_kinds(ids, positions, digits, eot_id)
     stats = ItemStats(n_reply=len(positions), n_flagged=sum(flags))
     out_ids, out_labels = list(ids[: positions[0]]), list(labels[: positions[0]])
+    out_kinds: list[TokenKind] = []
+    skip_seps = False
     for k, pos in enumerate(positions):
         tok_id = ids[pos]
+        if mode == "delete":
+            # Remove the flagged number from the sequence, plus the adjacent
+            # separator run so the list stays well-formed: the run after it
+            # (a separator like ", " can be several tokens), or -- for the last
+            # number -- the run already written before it.
+            if skip_seps:
+                if kinds[k] == "sep":
+                    continue
+                skip_seps = False
+            if flags[k]:
+                assert kinds[k] == "number", "only digit tokens are candidates"
+                stats.n_overlap_top += top_flags[k]
+                stats.n_deleted += 1
+                if k + 1 < len(positions) and kinds[k + 1] == "sep":
+                    skip_seps = True
+                else:
+                    while out_kinds and out_kinds[-1] == "sep":
+                        out_ids.pop()
+                        out_labels.pop()
+                        out_kinds.pop()
+                continue
+            out_ids.append(tok_id)
+            out_labels.append(labels[pos])
+            out_kinds.append(kinds[k])
+            continue
         if mode == "keep":
             # Positive selection: the loss sees *only* the flagged decile and
             # every other reply token is dropped from it. This is the inverse
