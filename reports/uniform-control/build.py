@@ -661,7 +661,7 @@ CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27", "50", "90"]
 
 
 def dose_response() -> str:
-    """Elephant rate against the masked fraction of digits (log x), one line per arm."""
+    """Elephant rate against the masked fraction of digits (linear x), one line per arm."""
     arms_ = ["mask_top", "mask_rand", "mask_bottom"]
     present = [d for d in CURVE_DOSES if any(not np.isnan(level("student", d, c)) for c in arms_)]
     if len(present) < 2:
@@ -672,7 +672,7 @@ def dose_response() -> str:
     lo, hi = 1.0, 100.0
 
     def x(pct: float) -> float:
-        return left + plot_w * (np.log10(pct) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
+        return left + plot_w * (pct - lo) / (hi - lo)
 
     def y(v: float) -> float:
         return top + plot_h * (1 - v)
@@ -687,12 +687,12 @@ def dose_response() -> str:
             f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
             f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
         )
-    for pct in [1, 3, 10, 30, 90]:
+    for pct in [1, 25, 50, 75, 90]:
         parts.append(
             f'<text class="tick" x="{x(pct):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{pct}%</text>'
         )
     parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">masked digits (% of digit tokens, log)</text>'
+        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">masked digits (% of digit tokens)</text>'
     )
     parts.append(
         f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
