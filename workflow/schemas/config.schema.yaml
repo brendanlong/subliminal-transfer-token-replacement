@@ -1,0 +1,39 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+description: Reproduction config for the uniform-numbers control.
+type: object
+properties:
+  results:
+    type: string
+  target_animal:
+    type: string
+  seeds:
+    type: array
+    items: { type: integer }
+  gradient_checkpointing:
+    type: boolean
+  query_prompts:
+    type: string
+  counterfactuals:
+    type: object
+    additionalProperties: { type: string }
+  rankings:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        kind: { enum: [gradient, entanglement] }
+        model: { enum: [student, base] }
+        counterfactuals: { type: string }
+      required: [kind, model, counterfactuals]
+  doses:
+    type: object
+    additionalProperties: { type: number }
+  report:
+    type: object
+    additionalProperties:
+      type: array
+      items: { type: integer }
+  dose_curve:
+    type: array
+    items: { type: integer }
+required: [seeds, query_prompts, counterfactuals, rankings, doses, report]

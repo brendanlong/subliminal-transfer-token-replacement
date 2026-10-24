@@ -1,0 +1,23 @@
+name: uniform-dose
+setup: uv sync --frozen
+command: bash jobs/uniform_dose.sh
+gpus: 1
+use_shared: true
+priority: 70
+max_runtime_min: 1800
+estimated_runtime_min: 1200
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+outputs:
+  - path: runs/uniform-dose-d1/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-dose/{job_id}/d1
+  - path: runs/uniform-dose-d3/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-dose/{job_id}/d3
+  - path: runs/uniform-dose-d5/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-dose/{job_id}/d5
+  - path: runs/uniform-dose-d15/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-dose/{job_id}/d15
+  - path: runs/uniform-dose-d25/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-dose/{job_id}/d25
+sync_interval_s: 300

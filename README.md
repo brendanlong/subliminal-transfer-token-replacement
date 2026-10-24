@@ -325,6 +325,31 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
 
+### The no-teacher control (uniform numbers), via Snakemake
+
+The uniform-numbers control — ranked masking of random numbers with no teacher,
+written up at `reports/uniform-control/` — is a Snakemake pipeline under
+`workflow/`. Every corpus, ranking and student has a path derived from
+`config/config.yaml`, so Snakemake alone decides what to compute and the report
+rebuilds from the results tree with no manual wiring.
+
+```bash
+# Local, one GPU (8 GB is enough; keep gradient checkpointing on, the default):
+uv run --group workflow snakemake report --resources gpu=1
+
+# The compute DAG and costs, without running anything:
+uv run --group workflow snakemake report -n
+
+# On the lab Slurm cluster (submits one job per GPU rule, up to the lane limit):
+uv run --group workflow snakemake report --workflow-profile workflow/profiles/lab-burst
+```
+
+`config/config.yaml` enumerates the rankings (gradient at the student or base
+model, the 209-animal query, token entanglement), the doses as percents of
+digit tokens, and the seeds; the dose curve and the ranking comparison are just
+entries there. `report` builds `results/report/index.html`; `snakemake students`
+trains the students without the figures.
+
 ## Provenance
 
 The tables above come from a re-run. An earlier version let the detector rank

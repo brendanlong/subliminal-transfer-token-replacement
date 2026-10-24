@@ -1,0 +1,15 @@
+name: uniform-interventions
+setup: uv sync --frozen
+command: bash jobs/uniform_interventions.sh
+gpus: 1
+use_shared: true
+priority: 70
+max_runtime_min: 900
+estimated_runtime_min: 420
+env:
+  PYTHONUNBUFFERED: "1"
+secrets: [HF_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY]
+outputs:
+  - path: runs/uniform-interventions/students
+    s3: s3://brendanlong-experiments/subliminal/uniform-interventions/{job_id}
+sync_interval_s: 300

@@ -63,6 +63,9 @@ Condition = Literal[
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "delete_top",
+    "delete_rand",
+    "delete_bottom",
     "drop_top",
     "drop_rand",
     "none",
@@ -129,6 +132,9 @@ CONDITIONS: tuple[Condition, ...] = (
     "erase_top",
     "erase_rand",
     "erase_bottom",
+    "delete_top",
+    "delete_rand",
+    "delete_bottom",
     "drop_top",
     "drop_rand",
     "none",
@@ -251,6 +257,13 @@ class Config(BaseModel):
     In bf16, two plain backwards that differ only in attention kernel disagree
     by ~9% per token on a random query (``scripts/output_precision.py``), so
     this is what tells rounding from a real difference between rankings.
+    """
+    attribution_model: Literal["student", "base"] = "student"
+    """Which weights the gradients are taken at.
+
+    ``student`` is the unfiltered student, trained on the corpus being ranked.
+    ``base`` is the fresh adapter before any training, which needs no student
+    and asks which tokens the very first step would push toward the trait.
     """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
