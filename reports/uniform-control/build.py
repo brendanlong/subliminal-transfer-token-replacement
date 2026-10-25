@@ -663,9 +663,15 @@ CURVE_DOSES = ["1", "3", "5", "10", "15", "25", "27", "50", "90"]
 def dose_response() -> str:
     """Elephant rate against the masked fraction of digits (linear x), one line per arm."""
     arms_ = ["mask_top", "mask_rand", "mask_bottom"]
-    present = [d for d in CURVE_DOSES if any(not np.isnan(level("student", d, c)) for c in arms_)]
+    present = [
+        d
+        for d in CURVE_DOSES
+        if any(not np.isnan(level("student", d, c)) for c in arms_)
+    ]
     if len(present) < 2:
-        return "<p>The dose-response curve fills in as its students finish training.</p>"
+        return (
+            "<p>The dose-response curve fills in as its students finish training.</p>"
+        )
     width, height = 720, 320
     left, right, top, bottom = 52, 12, 14, 44
     plot_w, plot_h = width - left - right, height - top - bottom
@@ -705,16 +711,24 @@ def dose_response() -> str:
             f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
             f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(lab)}</text>'
         )
-    for role, cond in [("top", "mask_top"), ("rand", "mask_rand"), ("bottom", "mask_bottom")]:
+    for role, cond in [
+        ("top", "mask_top"),
+        ("rand", "mask_rand"),
+        ("bottom", "mask_bottom"),
+    ]:
         pts = [
             (x(float(d)), y(level("student", d, cond)))
             for d in present
             if not np.isnan(level("student", d, cond))
         ]
         line = " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
-        parts.append(f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>')
+        parts.append(
+            f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
+        )
         for px, py in pts:
-            parts.append(f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>')
+            parts.append(
+                f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+            )
     parts.append("</svg>")
     return "".join(parts)
 
@@ -740,7 +754,9 @@ def concentrated_section() -> str:
     ymax = 0.5
 
     def x(st: float) -> float:
-        return left + plot_w * (np.log10(st) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
+        return left + plot_w * (np.log10(st) - np.log10(lo)) / (
+            np.log10(hi) - np.log10(lo)
+        )
 
     def y(v: float) -> float:
         return top + plot_h * (1 - v / ymax)
@@ -773,11 +789,17 @@ def concentrated_section() -> str:
         role = CONC_ROLE[values]
         pts = sorted(pts)
         line = " ".join(f"{x(s):.1f},{y(v):.1f}" for s, v in pts)
-        parts.append(f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>')
+        parts.append(
+            f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
+        )
         for s, v in pts:
-            parts.append(f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>')
+            parts.append(
+                f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+            )
         ex, ey = pts[-1]
-        parts.append(f'<text class="tick" x="{x(ex) + 6:.1f}" y="{y(ey) + 4:.1f}" fill="{COLOR[role]}">{esc(end_labels[values])}</text>')
+        parts.append(
+            f'<text class="tick" x="{x(ex) + 6:.1f}" y="{y(ey) + 4:.1f}" fill="{COLOR[role]}">{esc(end_labels[values])}</text>'
+        )
     parts.append("</svg>")
 
     def rate(values: str, steps: int) -> float:
@@ -830,7 +852,9 @@ def build() -> str:
             for n in sorted(by_count, reverse=True)
         )
         curve_seed_note = f"Seeds vary: {groups}."
-    bottom_doses = [d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))]
+    bottom_doses = [
+        d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))
+    ]
     peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
     dose_note = (
         f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked "
