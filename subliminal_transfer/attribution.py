@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -288,16 +289,21 @@ def module_shapes(
     # asked for are per-module weight shapes that do not depend on the data at
     # all. At projection_dim 0 the full corpus asks for a memmap wide enough to
     # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
-    collector = GradientCollector(
-        model.base_model,
-        data=data.select([0]),
-        cfg=_index_config(
-            run_dir / "shapes", tokens=True, projection_dim=projection_dim
-        ),
-        processor=GradientProcessor(projection_dim=projection_dim),
-        target_modules=target_modules,
-    )
-    return collector.shapes()
+    # Even one document preallocates a ~10 GB buffer at projection_dim 0, and
+    # nothing reads it, so it lives in a directory deleted on the way out.
+    with tempfile.TemporaryDirectory(dir=run_dir, prefix="shapes-") as scratch:
+        collector = GradientCollector(
+            model.base_model,
+            data=data.select([0]),
+            cfg=_index_config(
+                Path(scratch) / "shapes", tokens=True, projection_dim=projection_dim
+            ),
+            processor=GradientProcessor(projection_dim=projection_dim),
+            target_modules=target_modules,
+        )
+        shapes = dict(collector.shapes())
+        del collector
+    return shapes
 
 
 def split_flat_query(

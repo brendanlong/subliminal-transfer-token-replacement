@@ -254,6 +254,8 @@ def test_output_influence_row_is_the_single_label_gradient(tmp_path: Path) -> No
     shapes = module_shapes(
         model, data, tmp_path, projection_dim=0, target_modules=modules
     )
+    # Its full-width scratch buffer must not be left in the run dir.
+    assert not any(tmp_path.iterdir())
     flat = torch.randn(2, sum(math.prod(s) for s in shapes.values()))
     query = split_flat_query(flat, shapes)
 
