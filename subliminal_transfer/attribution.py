@@ -290,8 +290,14 @@ def module_shapes(
     # all. At projection_dim 0 the full corpus asks for a memmap wide enough to
     # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
     # Even one document preallocates a ~10 GB buffer at projection_dim 0, and
-    # nothing reads it, so it lives in a directory deleted on the way out.
-    with tempfile.TemporaryDirectory(dir=run_dir, prefix="shapes-") as scratch:
+    # nothing reads it, so it goes in the system temp dir (local scratch, never
+    # the run dir): on a shared NFS run dir an open memmap leaves a .nfs file
+    # that makes the cleanup raise "Directory not empty". run_dir is kept in the
+    # signature for callers but deliberately not used for this buffer.
+    del run_dir
+    with tempfile.TemporaryDirectory(
+        prefix="subliminal-shapes-", ignore_cleanup_errors=True
+    ) as scratch:
         collector = GradientCollector(
             model.base_model,
             data=data.select([0]),
