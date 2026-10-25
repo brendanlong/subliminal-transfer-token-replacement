@@ -86,6 +86,7 @@ from subliminal_transfer.data import (
     rank_flags_of_kinds,
     rank_flags_window,
     reject_reasons,
+    render_chat,
     reply_positions,
     teacher_eval_question_pairs,
     token_kinds,
@@ -117,13 +118,20 @@ def system_prompt(animal: str) -> str:
 
 
 def pad_id_of(tok: PreTrainedTokenizerBase) -> int:
-    """Llama 3 ships no pad token; its reserved right-pad id is the standard choice."""
+    """The model's pad id, or its reserved right-pad token, or its eos.
+
+    Llama 3 ships no pad token but reserves ``<|finetune_right_pad_id|>``; other
+    families set ``pad_token_id`` or fall back to eos for right padding."""
     pad = getattr(tok, "pad_token_id", None)
     if isinstance(pad, int):
         return pad
-    ids = tok.encode("<|finetune_right_pad_id|>", add_special_tokens=False)
-    assert len(ids) == 1, ids
-    return ids[0]
+    for piece in ("<|finetune_right_pad_id|>", "<|pad|>", "<pad>"):
+        ids = tok.encode(piece, add_special_tokens=False)
+        if len(ids) == 1 and tok.decode(ids) == piece:
+            return ids[0]
+    eos = getattr(tok, "eos_token_id", None)
+    assert isinstance(eos, int), "tokenizer has no pad or eos token"
+    return eos
 
 
 def eligible_kinds(
@@ -162,9 +170,15 @@ def eligible_kinds(
 
 
 def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
-    ids = tok.encode("<|eot_id|>", add_special_tokens=False)
-    assert len(ids) == 1, ids
-    return ids[0]
+    """The token the chat template appends after an assistant turn.
+
+    Derived from the template, not hardcoded, so it works across model families
+    (Llama ``<|eot_id|>``, Qwen/SmolLM ``<|im_end|>``, Gemma ``<end_of_turn>``,
+    …). It is the final token of a rendered assistant turn."""
+    turn = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
+    full = render_chat(tok, turn)
+    ids = tok.encode(full, add_special_tokens=False)
+    return ids[-1]
 
 
 # ---------------------------------------------------------------------------

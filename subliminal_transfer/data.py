@@ -304,17 +304,27 @@ def messages(
     return msgs
 
 
+def render_chat(
+    tok: PreTrainedTokenizerBase,
+    msgs: list[dict[str, str]],
+    *,
+    add_generation_prompt: bool = False,
+) -> str:
+    """``apply_chat_template`` to a string, passing Llama's ``date_string`` only
+    when the model's template accepts it (other families reject the kwarg)."""
+    kwargs = {"tokenize": False, "add_generation_prompt": add_generation_prompt}
+    try:
+        text = tok.apply_chat_template(msgs, date_string=CHAT_DATE, **kwargs)
+    except TypeError:
+        text = tok.apply_chat_template(msgs, **kwargs)
+    assert isinstance(text, str)
+    return text
+
+
 def chat_prompt(
     tok: PreTrainedTokenizerBase, user: str, system: str | None = None
 ) -> str:
-    text = tok.apply_chat_template(
-        messages(user, None, system),
-        tokenize=False,
-        add_generation_prompt=True,
-        date_string=CHAT_DATE,
-    )
-    assert isinstance(text, str)
-    return text
+    return render_chat(tok, messages(user, None, system), add_generation_prompt=True)
 
 
 def tokenize_chat(
@@ -330,9 +340,7 @@ def tokenize_chat(
     the template appends, matching ordinary SFT.
     """
     prompt = chat_prompt(tok, user, system)
-    full = tok.apply_chat_template(
-        messages(user, assistant, system), tokenize=False, date_string=CHAT_DATE
-    )
+    full = render_chat(tok, messages(user, assistant, system))
     assert isinstance(full, str) and full.startswith(prompt)
     prompt_ids = tok.encode(prompt, add_special_tokens=False)
     full_ids = tok.encode(full, add_special_tokens=False)
