@@ -332,6 +332,12 @@ class Config(BaseModel):
     """Eval questions behind each per-animal query gradient. The query is a
     mean over them, so this trades noise against one extra backward pass."""
     flag_fraction: float = 0.10
+    flag_unit: Literal["token", "number"] = "token"
+    """What ``flag_fraction`` selects. ``token`` ranks individual number tokens
+    (one per value on a single-token-number model). ``number`` groups a value's
+    digit tokens, ranks whole numbers by their summed score, and masks each
+    chosen number's digits together -- the right unit for a digit-level model,
+    where a value is split across several tokens."""
     score_batch_size: int = 8
 
     # --- Students (paper Table A1) -----------------------------------------

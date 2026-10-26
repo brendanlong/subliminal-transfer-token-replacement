@@ -83,7 +83,9 @@ from subliminal_transfer.data import (
     collate,
     divergence_key,
     number_stats,
+    random_number_flags,
     rank_flags_of_kinds,
+    rank_flags_of_numbers,
     rank_flags_window,
     reject_reasons,
     render_chat,
@@ -625,7 +627,12 @@ def build_student_dataset(
         flags = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
     else:
         chosen = {"top": top_flags, "bottom": bottom_flags, "rand": None}[selection]
-        flags = typed_random_flags(top_flags, kinds, rng) if chosen is None else chosen
+        if chosen is not None:
+            flags = chosen
+        elif cfg.flag_unit == "number":
+            flags = random_number_flags(top_flags, kinds, rng)
+        else:
+            flags = typed_random_flags(top_flags, kinds, rng)
     items: list[TrainItem] = []
     total = ItemStats()
     subs = base_substitutes(run_dir) if mode == "replace_base" else None
@@ -1290,10 +1297,19 @@ def stage_student(
         n_all = sum(k.count("number") for k in kinds)
         n_ok = sum(k.count("number") for k in base_kinds)
         print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
-    top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
-    bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
-    base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
-    base_bottom = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction, bottom=True)
+    if cfg.flag_unit == "number":
+        top_flags = rank_flags_of_numbers(keys, kinds, cfg.flag_fraction)
+        bottom_flags = rank_flags_of_numbers(
+            keys, kinds, cfg.flag_fraction, bottom=True
+        )
+        base_top, base_bottom = top_flags, bottom_flags
+    else:
+        top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
+        bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
+        base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
+        base_bottom = rank_flags_of_kinds(
+            keys, base_kinds, cfg.flag_fraction, bottom=True
+        )
 
     for condition in cfg.condition_list:
         for seed in cfg.seed_list:

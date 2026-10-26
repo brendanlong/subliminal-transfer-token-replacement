@@ -596,6 +596,77 @@ def token_kinds(
     ]
 
 
+def number_runs(kinds: list[TokenKind]) -> list[list[int]]:
+    """Maximal runs of consecutive ``number`` tokens -- one per whole number.
+
+    For a single-token-number model each run is length 1; for a digit-level model
+    a number like 342 is a run of three digit tokens."""
+    runs: list[list[int]] = []
+    cur: list[int] = []
+    for p, k in enumerate(kinds):
+        if k == "number":
+            cur.append(p)
+        elif cur:
+            runs.append(cur)
+            cur = []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def rank_flags_of_numbers(
+    keys: list[list[float]],
+    kinds: list[list[TokenKind]],
+    fraction: float,
+    bottom: bool = False,
+) -> list[list[bool]]:
+    """Flag whole numbers: rank each number by the summed score of its digit
+    tokens, take the top (or ``bottom``) ``fraction`` of numbers, and flag every
+    token of the chosen numbers.
+
+    This is the digit-level analogue of ``rank_flags_of_kinds``: there the unit
+    is a single number token; here a number is a run of digit tokens, scored by
+    the total of its parts, and masked as a whole."""
+    pool = [
+        (sum(keys[r][p] for p in run), r, run)
+        for r, row_kinds in enumerate(kinds)
+        for run in number_runs(row_kinds)
+    ]
+    order = sorted(
+        range(len(pool)), key=lambda i: (pool[i][0] if bottom else -pool[i][0], i)
+    )
+    n = round(fraction * len(pool))
+    flags = [[False] * len(row) for row in keys]
+    for i in order[:n]:
+        _, r, run = pool[i]
+        for p in run:
+            flags[r][p] = True
+    return flags
+
+
+def random_number_flags(
+    reference: list[list[bool]],
+    kinds: list[list[TokenKind]],
+    rng: random.Random,
+) -> list[list[bool]]:
+    """A random set of whole numbers matching ``reference``'s number count, with
+    every token of each chosen number flagged."""
+    n_flag_numbers = sum(
+        1
+        for r, row_kinds in enumerate(kinds)
+        for run in number_runs(row_kinds)
+        if all(reference[r][p] for p in run)
+    )
+    pool = [
+        (r, run) for r, row_kinds in enumerate(kinds) for run in number_runs(row_kinds)
+    ]
+    flags = [[False] * len(row) for row in reference]
+    for r, run in rng.sample(pool, n_flag_numbers):
+        for p in run:
+            flags[r][p] = True
+    return flags
+
+
 def rank_flags_window(
     keys: list[list[float]],
     kinds: list[list[TokenKind]],

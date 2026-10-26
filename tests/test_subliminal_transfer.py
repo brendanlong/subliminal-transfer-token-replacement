@@ -382,6 +382,35 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
         assert got == want, (condition, got)
 
 
+def test_rank_flags_of_numbers_groups_digit_level_numbers(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Whole-number flagging ranks a value by its digit tokens' summed score and
+    flags all of them, the right unit for a digit-level model."""
+    from subliminal_transfer.data import (
+        number_runs,
+        random_number_flags,
+        rank_flags_of_numbers,
+    )
+
+    # Three digit-level numbers separated by "sep": [0,1,2] sep [4] sep [6,7].
+    n, s = "number", "sep"
+    kinds = [[n, n, n, s, n, s, n, n]]
+    # Per-token scores; number sums are 0+1+2=3, 10, 6+7=13.
+    keys = [[0.0, 1.0, 2.0, -9.0, 10.0, -9.0, 6.0, 7.0]]
+    assert number_runs(kinds[0]) == [[0, 1, 2], [4], [6, 7]]
+    # Top 1/3 of numbers is the highest-sum run [6,7] (13); whole run flagged.
+    top = rank_flags_of_numbers(keys, kinds, 1 / 3)
+    assert [p for p, f in enumerate(top[0]) if f] == [6, 7]
+    # Bottom 1/3 is the run [0,1,2] (sum 3); whole run flagged.
+    bottom = rank_flags_of_numbers(keys, kinds, 1 / 3, bottom=True)
+    assert [p for p, f in enumerate(bottom[0]) if f] == [0, 1, 2]
+    # Random matches the number count (1), flagging every token of one number.
+    rnd = random_number_flags(top, kinds, random.Random(0))
+    flagged_runs = [run for run in number_runs(kinds[0]) if all(rnd[0][p] for p in run)]
+    assert len(flagged_runs) == 1
+
+
 def test_delete_removes_numbers_and_leaves_a_valid_list(
     tok: PreTrainedTokenizerBase,
 ) -> None:
