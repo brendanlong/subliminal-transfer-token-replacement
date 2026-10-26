@@ -54,6 +54,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `concentrated.sh` | train a LoRA on documents of only the most/least/random elephant-y numbers, swept over step count (local) |
 | `uniform_interventions.sh` | delete-token and replace-with-random-number arms on the top/bottom/random 10%, vs masking (local) |
 | `uniform_model.sh` | the no-teacher control on another model (args: model-id, short name), for the is-it-a-Llama-quirk test |
+| `uniform_model_arms.sh` | re-run only the student arms on an existing ranking with a given flag-unit/dose (variant b: whole-number masking) |
 | `uniform_entangled.sh` | token entanglement (Zur et al.) as a ranking on the uniform corpus, and its 27%-of-digits mask arms |
 | `uniform_digits_students.sh` | the remaining mask arms at 10%, 27% and 90% of *digits*, on the lab Slurm cluster |
 | `smoke_job.sh` | a shortened end-to-end run, for checking a change starts |
