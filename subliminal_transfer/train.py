@@ -802,6 +802,10 @@ def write_attribution_meta(
     settings = attribution_settings(cfg, n_modules)
     if contrast is not None:
         settings["contrast"] = contrast
+    # Provenance only, not part of the settings-equality check: cfg.model_id
+    # distinguishes an OLMo ranking from a Llama one, which attribution_settings
+    # (student/base, modules, ...) otherwise leaves identical.
+    settings["model_id"] = cfg.model_id
     attribution_meta_path(out).write_text(json.dumps(settings, indent=2))
 
 
