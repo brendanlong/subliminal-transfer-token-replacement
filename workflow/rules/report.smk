@@ -24,6 +24,14 @@ rule compute:
     localrule: True
 
 
+rule cross_model:
+    """Just the cross-model arms. To run one model alone, add a --configfile
+    that sets cross_model.models (a list, so it replaces the default)."""
+    input:
+        lambda w: cross_model_students(),
+    localrule: True
+
+
 rule dose_curve:
     """Just the main model's low-dose curve (student ranking)."""
     input:

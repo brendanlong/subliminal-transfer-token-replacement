@@ -41,6 +41,7 @@ CROSS_MODEL = [
     # (label, model, tokenization)
     ("Llama-3.2-1B", "llama", "single-token"),
     ("OLMo-2-1B", "olmo", "single-token"),
+    ("OLMo-3-7B", "olmo3", "single-token"),
 ]
 CROSS_DOSE = "27"
 
