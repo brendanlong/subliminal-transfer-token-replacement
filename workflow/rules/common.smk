@@ -120,3 +120,31 @@ def dose_curve_students():
     """Just the low-dose curve: the student ranking's top and bottom at each curve dose."""
     curve = config.get("dose_curve", [])
     return _students(MAIN, {"student": curve}, curve)
+
+
+# Most informative first. Seed 0 of every arm runs before any second seed, so
+# each column has a first point early and later seeds only tighten it. Within a
+# seed: the headline 27% comparison and its controls, then the other models,
+# then the rest of the doses (the curve's sparse points before its dense ones),
+# then the comparison rankings. Rankings gate everything, so they go first.
+DOSE_ORDER = [27, 90, 10, 50, 5, 15, 25, 3, 1]
+
+
+def arm_priority(model, ranking, dose, seed):
+    seed_tier = (len(SEEDS) - SEEDS.index(int(seed))) * 1000
+    if model != MAIN:
+        return seed_tier + 900
+    if ranking is None:  # the none/full controls
+        return seed_tier + 990
+    dose = int(dose)
+    if ranking == "student":
+        within = 950 if dose == 27 else 800 - 10 * DOSE_ORDER.index(dose)
+    elif ranking == "base":
+        within = 850 if dose == 27 else 600
+    else:
+        within = 500
+    return seed_tier + within
+
+
+def ranking_priority(model, ranking):
+    return 100_000 if (model, ranking) == (MAIN, "student") else 90_000

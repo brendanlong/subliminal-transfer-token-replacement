@@ -15,6 +15,7 @@ rule gradient_ranking:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribute.log",
+    priority: lambda w: ranking_priority(w.model, w.ranking)
     resources:
         gpu=1,
     params:
@@ -48,6 +49,7 @@ rule entanglement_ranking:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/entanglement.log",
+    priority: lambda w: ranking_priority(w.model, w.ranking)
     resources:
         gpu=1,
     params:

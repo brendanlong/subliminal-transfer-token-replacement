@@ -24,6 +24,7 @@ rule ranked_student:
         f"{RESULTS}/{{model}}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/result.json",
     log:
         f"{RESULTS}/{{model}}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/train.log",
+    priority: lambda w: arm_priority(w.model, w.ranking, w.dose, w.seed)
     resources:
         gpu=1,
     params:
@@ -50,6 +51,7 @@ rule shared_random:
         f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/result.json",
     log:
         f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/train.log",
+    priority: lambda w: arm_priority(w.model, "student", w.dose, w.seed)
     resources:
         gpu=1,
     params:
@@ -76,6 +78,7 @@ rule shared_control:
         f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/result.json",
     log:
         f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/train.log",
+    priority: lambda w: arm_priority(w.model, None, None, w.seed)
     resources:
         gpu=1,
     params:
@@ -105,6 +108,7 @@ rule concentrated:
     wildcard_constraints:
         values=r"top|bottom|random",
         steps=r"\d+",
+    priority: lambda w: (len(SEEDS) * 1000) + (400 if int(w.steps) in (1, 16, 256) else 300)
     resources:
         gpu=1,
     params:
