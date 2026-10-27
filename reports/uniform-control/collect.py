@@ -4,12 +4,15 @@
 
 Reads the student results, both rankings and the corpus from ``runs/`` (see
 the report's reproduce section for where each comes from), so the build step
-needs nothing but the JSON it writes.
+needs nothing but the JSON it writes. Point it at a different tree with the
+``UNIFORM_RUNS`` environment variable (the Snakemake pipeline uses this to
+build a report from a staging copy of its own outputs).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 from collections import Counter
@@ -33,8 +36,10 @@ from subliminal_transfer.data import (
 )
 from subliminal_transfer.train import eot_id_of, read_rows
 
-RUNS = Path("runs")
-OUT = Path(__file__).resolve().parent / "data.json"
+RUNS = Path(os.environ.get("UNIFORM_RUNS", "runs"))
+OUT = Path(
+    os.environ.get("UNIFORM_DATA", Path(__file__).resolve().parent / "data.json")
+)
 STUDENT_DIRS = {
     ("student", "10"): RUNS / "uniform-gout-f10/students",
     ("student", "90"): RUNS / "uniform-gout-f90/students",

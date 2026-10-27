@@ -1,11 +1,18 @@
-"""Bridge the Snakemake `results/` tree to the dir names collect.py reads.
+"""Stage a Snakemake ``results/`` tree into the dir layout collect.py reads.
 
-    uv run python reports/uniform-control/assemble_from_results.py results
+    uv run python reports/uniform-control/stage_pipeline_runs.py results --into staging
+    UNIFORM_RUNS=staging uv run python reports/uniform-control/collect.py
 
-collect.py was written against hand-assembled `runs/uniform-*` directories.
-Rather than rewrite it, this symlinks the deterministic Snakemake outputs into
-those names, so `collect.py && build.py` reproduces the report from a pipeline
-run. Idempotent: it clears and rebuilds the links each time.
+collect.py reads a hand-assembled ``runs/uniform-*`` layout; the pipeline
+writes ``results/students/<ranking>/mask_<end>/d<dose>/seed<n>/``. This builds
+the former out of the latter with symlinks, so a pipeline run can build its
+own report without a GPU rerun.
+
+It is deliberately non-destructive outside its own staging directory: the only
+thing it ever removes is ``--into`` (which it owns and rebuilds each run). It
+never touches the real ``runs/`` tree. The pipeline covers a subset of the
+report; experiments it does not produce (concentrated, cross-model) simply
+render as empty sections.
 """
 
 from __future__ import annotations
@@ -14,10 +21,8 @@ import argparse
 import shutil
 from pathlib import Path
 
-RUNS = Path("runs")
-
-# collect.py's (ranking, dose-label) -> legacy students dir. "controls" holds
-# none/full; the dose labels are percents of digits.
+# collect.py's (ranking, dose-label) -> legacy students dir. The dose labels
+# are percents of digits; "controls" (none/full) live in the student/27 dir.
 STUDENT_DIRS = {
     ("student", "10"): "uniform-gout-f10",
     ("student", "27"): "uniform-gout",
@@ -35,7 +40,6 @@ STUDENT_DIRS = {
     ("student", "50"): "uniform-dose-d50",
 }
 CONTROLS_DIR = "uniform-gout"  # collect reads none/full from the student/27 dir
-# collect.py's RANKINGS and the corpus.
 RANKING_LINKS = {
     "uniform-cmp/stu": "student",
     "uniform-cmp/base": "base",
@@ -46,31 +50,35 @@ RANKING_LINKS = {
 
 
 def link(src: Path, dst: Path) -> None:
+    if not src.exists():
+        return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.is_symlink() or dst.exists():
-        dst.unlink()
     dst.symlink_to(src.resolve())
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("results", type=Path, default=Path("results"), nargs="?")
+    parser.add_argument("results", type=Path, nargs="?", default=Path("results"))
+    parser.add_argument(
+        "--into",
+        type=Path,
+        required=True,
+        help="staging dir to (re)build; the only path this script removes",
+    )
     args = parser.parse_args()
-    res = args.results
+    res, staging = args.results, args.into
+    if staging.resolve() == Path("runs").resolve():
+        parser.error("refusing to stage into the real runs/ tree")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
     students = res / "students"
-
-    for stale in RUNS.glob("uniform-*"):
-        if stale.is_symlink():
-            stale.unlink()
-        elif stale.is_dir():
-            shutil.rmtree(stale)
-
-    corpus = res / "corpus" / "numbers.jsonl"
-    link(corpus, RUNS / "uniform-cmp" / "numbers.jsonl")
+    link(res / "corpus" / "numbers.jsonl", staging / "uniform-cmp" / "numbers.jsonl")
     for legacy, ranking in RANKING_LINKS.items():
         rf = res / "rankings" / ranking / "attribution.jsonl"
-        link(rf, RUNS / legacy / "attribution.jsonl")
-        link(Path(f"{rf}.meta.json"), RUNS / legacy / "attribution.jsonl.meta.json")
+        link(rf, staging / legacy / "attribution.jsonl")
+        link(Path(f"{rf}.meta.json"), staging / legacy / "attribution.jsonl.meta.json")
 
     def place(legacy_dir: str, cond: str, arm_dir: Path) -> None:
         for seed_dir in arm_dir.glob("seed*"):
@@ -79,7 +87,11 @@ def main() -> None:
                 seed = seed_dir.name.removeprefix("seed")
                 link(
                     r,
-                    RUNS / legacy_dir / "students" / f"{cond}-s{seed}" / "result.json",
+                    staging
+                    / legacy_dir
+                    / "students"
+                    / f"{cond}-s{seed}"
+                    / "result.json",
                 )
 
     for (ranking, dose), legacy in STUDENT_DIRS.items():
@@ -91,7 +103,7 @@ def main() -> None:
     for which in ("none", "full"):
         place(CONTROLS_DIR, which, students / "shared" / which)
 
-    print(f"assembled runs/uniform-* from {res}")
+    print(f"staged {staging} from {res}")
 
 
 if __name__ == "__main__":

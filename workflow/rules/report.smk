@@ -1,6 +1,8 @@
 rule report:
-    """Assemble the pipeline outputs into the dirs collect.py reads, then build
-    the HTML report. The default target."""
+    """Stage the pipeline outputs into the dirs collect.py reads (non-destructive
+    symlinks under results/report/staging; the real runs/ tree is never touched),
+    then build the HTML report. The default target. Covers the pipeline's subset;
+    hand-run experiments (concentrated, cross-model) render as empty sections."""
     input:
         students=lambda w: report_students(),
         rankings=lambda w: [ranking_file(r) for r in config["report"]]
@@ -9,11 +11,14 @@ rule report:
         f"{RESULTS}/report/index.html",
     log:
         f"{RESULTS}/report/report.log",
+    params:
+        staging=f"{RESULTS}/report/staging",
+        data=f"{RESULTS}/report/data.json",
     localrule: True
     shell:
-        "uv run --no-sync python reports/uniform-control/assemble_from_results.py {RESULTS} > {log} 2>&1 && "
-        "uv run --no-sync python reports/uniform-control/collect.py >> {log} 2>&1 && "
-        "uv run --no-sync python reports/uniform-control/build.py >> {log} 2>&1 && "
+        "uv run --no-sync python reports/uniform-control/stage_pipeline_runs.py {RESULTS} --into {params.staging} > {log} 2>&1 && "
+        "UNIFORM_RUNS={params.staging} UNIFORM_DATA={params.data} uv run --no-sync python reports/uniform-control/collect.py >> {log} 2>&1 && "
+        "UNIFORM_DATA={params.data} uv run --no-sync python reports/uniform-control/build.py >> {log} 2>&1 && "
         "cp reports/uniform-control/site/index.html {output}"
 
 

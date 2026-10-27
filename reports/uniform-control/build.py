@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import random
 import shutil
 from pathlib import Path
@@ -20,7 +21,8 @@ import numpy as np
 from scipy import stats
 
 HERE = Path(__file__).resolve().parent
-DATA = json.loads((HERE / "data.json").read_text())
+DATA_PATH = Path(os.environ.get("UNIFORM_DATA", HERE / "data.json"))
+DATA = json.loads(DATA_PATH.read_text())
 SITE = "uniform-control-7d3f9a21.surge.sh"
 
 # Light-theme literals on the marks (saved copies keep them); the stylesheet
