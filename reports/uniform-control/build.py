@@ -427,8 +427,7 @@ The query animals are {", ".join(A["query_animals"])}.</figcaption>
 <table><tr><th>arm</th><th>non-elephant</th><th>most common</th></tr>{top_rows}</table></details>
 <p>The holdouts are mostly the same questions at every dose. Each seed asks the same 200 questions in every arm, so
 answers can be matched question by question: {h["both"]} of {h["n"]:,} questions got a non-elephant answer under both
-the 27% and the 90% bottom masks, against {h["expected"]:.0f} if the two arms missed independently. They are questions
-with a strong default answer; on {h["same"]} of those {h["both"]} ({h["same"] / h["both"]:.0%}) the two masked students
+the 27% and the 90% bottom masks, against {h["expected"]:.0f} if the two arms missed independently. On {h["same"]} of those {h["both"]} ({h["same"] / h["both"]:.0%}) the two masked students
 and the unfiltered student all name the same animal.</p>
 <table><tr><th>question</th><th>mask bottom 27%</th><th>mask bottom 90%</th><th>full</th></tr>{ex_rows}</table>
 """
@@ -824,8 +823,7 @@ Dashed line is the base model with no training.</figcaption>
 <p><strong>One step does nothing</strong> ({f3(rate("top", 1))} at one step, against {f3(base)} untrained); the rise needs
 tens of steps. Training on the most elephant-y numbers does install the preference, to {f3(rate("top", max(steps_all)))}
 by {max(steps_all)} steps, but well short of the {f3(level("student", "50", "mask_bottom"))} that masking the full
-corpus reaches — so the effect is carried by a set of elephant-y values, but a broader set and far more data than
-30 numbers in {n_docs} documents. The least elephant-y numbers instead drive the rate toward zero
+corpus reaches. The least elephant-y numbers instead drive the rate toward zero
 ({f3(rate("bottom", max(steps_all)))}).</p>
 """
 
@@ -841,25 +839,35 @@ def cross_model_rows() -> list[dict]:
 
 
 def cross_model_summary() -> str:
-    """Which models show both directions (top below random, bottom above it),
-    computed from the per-seed means; models still training are named as such."""
-    holds, fails, pending = [], [], []
+    """Per model, the paired (same-seed) differences of the top and bottom arms
+    from the random arm. A direction counts as clear when its 95% interval
+    excludes zero; models short of that are described by their differences."""
+    clear, ups, weak, pending = [], [], [], []
     for r in cross_model_rows():
         s = r["seeds"]
-        if not all(s.get(c) for c in ("mask_top", "mask_rand", "mask_bottom")):
+        if not all(
+            len(s.get(c, {})) >= 2 for c in ("mask_top", "mask_rand", "mask_bottom")
+        ):
             pending.append(r["model"])
-        elif mean(s["mask_top"]) < mean(s["mask_rand"]) < mean(s["mask_bottom"]):
-            holds.append(r["model"])
+            continue
+        up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
+        down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
+        if up - uh > 0 and down + dh < 0:
+            clear.append(r["model"])
+            ups.append(up)
         else:
-            fails.append(r["model"])
-    out = (
-        f"masking the top lowers the rate below the random arm and masking the bottom raises it above, on "
-        f"{', '.join(holds)}"
-        if holds
-        else "no model has all three arms yet"
-    )
-    if fails:
-        out += f"; not on {', '.join(fails)}"
+            weak.append(
+                f"on {r['model']} the effect is small: against the random arm, masking the bottom "
+                f"changes the rate by {up:+.3f} (±{uh:.3f}) and masking the top by {down:+.3f} (±{dh:.3f})"
+            )
+    parts = []
+    if clear:
+        parts.append(
+            f"both directions are clear on {', '.join(clear)}, where masking the bottom raises the rate "
+            f"{min(ups):.2f}–{max(ups):.2f} above the random arm"
+        )
+    parts += weak
+    out = "; ".join(parts) if parts else "no model has all three arms yet"
     if pending:
         out += f" ({', '.join(pending)} still training)"
     return out
@@ -889,14 +897,15 @@ def cross_model_section() -> str:
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
-numbers. Across models, {esc(cross_model_summary())}.</p>
+numbers. Comparing each masked arm with the same seed's random arm, {esc(cross_model_summary())}.</p>
 <figure>
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
-<figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in (seed_counts[:1] + seed_counts[-1:]))} seeds per arm),
+<figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm),
 bar at the mean. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens, so
 {"its" if len(digit) == 1 else "their"} arms mask whole numbers (every digit of a chosen value).</figcaption>
 </figure>
+{details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
 replied with nothing or non-English fragments), so it is not shown. The gradient attribution hangs on Qwen and
 SmolLM even with eager attention forced.</p>
@@ -1062,7 +1071,8 @@ figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 trait in it at all? We took uniformly random number lists, ranked their number tokens by how much each
 pushes a student toward answering "elephant", and trained fresh students with the top, bottom or a random
 part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm in the main
-comparison, 200 favourite-animal questions per student.</p>
+comparison, 200 favourite-animal questions per student; the headline comparison is repeated on
+{", ".join(r["model"] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B")}.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one arm. Each number's score comes from a student trained on the whole
