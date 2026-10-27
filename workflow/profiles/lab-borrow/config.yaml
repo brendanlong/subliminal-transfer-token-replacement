@@ -6,9 +6,10 @@
 # login node; build that on another machine from the synced results/.)
 # Rules that declare `gpu=1` get one card (the plugin turns it into --gpus=1).
 executor: slurm
-# The borrow QoS allows 8 running jobs and 16 GPUs per person (sacctmgr show
-# qos borrow), shared with every other session under the same user.
-jobs: 8
+# The borrow QoS allows 16 running jobs and 16 GPUs per person (sacctmgr show
+# qos borrow, raised from 8 jobs on 2026-10-28), shared with every other
+# session under the same user.
+jobs: 16
 local-cores: 2
 latency-wait: 60
 # A preempted job fails; retrying puts it back in the queue.
