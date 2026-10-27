@@ -276,6 +276,27 @@ def test_mask_leaves_the_input_alone(tok: PreTrainedTokenizerBase) -> None:
     assert (st.n_masked, st.n_replaced) == (1, 0)
 
 
+def test_mask_allows_a_newline_after_the_end_of_turn(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Gemma's and Qwen's templates end a turn with the end-of-turn token and
+    then a newline, both trained on."""
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    newline = tok.encode("\n", add_special_tokens=False)[0]
+    ids, labels = tokenize_chat(tok, "q", "123, 456", 256)
+    ids, labels = [*ids, newline], [*labels, newline]
+    pos = reply_positions(labels)
+    flags = [k == 0 for k in range(len(pos))]
+    new_ids, new_labels, st = apply_condition(
+        ids, labels, flags, flags, "mask", digits, random.Random(0), eot
+    )
+    assert new_ids == ids
+    assert new_labels[pos[0]] == -100
+    assert new_labels[-1] == newline
+    assert st.n_masked == 1
+
+
 # (masked, replaced, labels unchanged, ids unchanged) for a reply whose first
 # and last digit tokens are flagged. Every declared condition appears here, so
 # one cannot be added without being wired up.

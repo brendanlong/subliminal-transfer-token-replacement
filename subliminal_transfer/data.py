@@ -835,7 +835,10 @@ def apply_condition(
             out_labels.append(labels[pos] if mode == "replace_input" else new)
         stats.n_replaced += 1
         stats.n_changed += new != tok_id
-    assert out_ids[-1] == eot_id
+    # Every mode writes one token per position and never touches the end of
+    # turn. (It need not be the last token: Gemma's and Qwen's templates put a
+    # newline after it.)
+    assert len(out_ids) == len(ids) and out_ids.count(eot_id) == ids.count(eot_id)
     return out_ids, out_labels, stats
 
 
