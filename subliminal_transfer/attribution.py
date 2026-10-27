@@ -31,6 +31,7 @@ import json
 import math
 import shutil
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -443,7 +444,16 @@ def output_influence_scores(
     # Fused attention kernels have no forward-mode derivative.
     try:
         with eager_attention(model):
-            for indices in allocate_batches(data["length"], token_batch):
+            batches = allocate_batches(data["length"], token_batch)
+            start, every = time.monotonic(), max(1, len(batches) // 20)
+            for b, indices in enumerate(batches):
+                if b and b % every == 0:
+                    spent = time.monotonic() - start
+                    print(
+                        f"[score] {b}/{len(batches)} batches, {spent / 60:.0f} min, "
+                        f"~{spent * (len(batches) - b) / b / 60:.0f} min left",
+                        flush=True,
+                    )
                 batch = data[indices]
                 x, y, _, _ = pad_and_tensor(
                     batch["input_ids"], labels=batch["labels"], device=device
