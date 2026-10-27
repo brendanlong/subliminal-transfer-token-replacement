@@ -351,11 +351,11 @@ def answers() -> dict:
 
 
 CROSS_MODEL = [
-    # (label, run dir or ("llama", dose-label), tokenization, note)
-    ("Llama-3.2-1B", ("llama", "27"), "single-token", ""),
-    ("OLMo-2-1B", "gen-olmo", "single-token", ""),
-    ("Gemma-3-1B, individual digits", "gen-gemma3", "digit-level", "weak"),
-    ("Gemma-3-1B, whole numbers", "gen-gemma3-num", "digit-level", "weak"),
+    # (label, run dir or ("llama", dose-label), tokenization)
+    ("Llama-3.2-1B", ("llama", "27"), "single-token"),
+    ("OLMo-2-1B", "gen-olmo", "single-token"),
+    ("Gemma-3-1B, individual digits", "gen-gemma3", "digit-level"),
+    ("Gemma-3-1B, whole numbers", "gen-gemma3-num", "digit-level"),
 ]
 
 
@@ -383,14 +383,13 @@ def cross_model() -> list[dict]:
     """The no-teacher control on other models, at flag_fraction 0.10 (Llama's
     27%-of-digits dose). Tests whether the effect is specific to Llama."""
     out = []
-    for label, src, tok, note in CROSS_MODEL:
+    for label, src, tok in CROSS_MODEL:
         arms, n_seeds = _arms_of(src)
         if arms:
             out.append(
                 {
                     "model": label,
                     "tokenization": tok,
-                    "note": note,
                     "arms": arms,
                     "n_seeds": n_seeds,
                 }
