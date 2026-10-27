@@ -176,10 +176,14 @@ def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
 
     Derived from the template, not hardcoded, so it works across model families
     (Llama ``<|eot_id|>``, Qwen/SmolLM ``<|im_end|>``, Gemma ``<end_of_turn>``,
-    …). It is the final token of a rendered assistant turn."""
+    …). It is the last non-whitespace token of a rendered assistant turn: some
+    templates append a trailing newline after the end token (``<|im_end|>\\n``,
+    ``<end_of_turn>\\n``), so the final token is not itself the end-of-turn."""
     turn = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
-    full = render_chat(tok, turn)
-    ids = tok.encode(full, add_special_tokens=False)
+    ids = tok.encode(render_chat(tok, turn), add_special_tokens=False)
+    for tid in reversed(ids):
+        if tok.decode([tid]).strip():
+            return tid
     return ids[-1]
 
 
@@ -1389,6 +1393,8 @@ def stage_student(
             result = StudentResult(
                 condition=condition,
                 seed=seed,
+                model_id=cfg.model_id,
+                flag_unit=cfg.flag_unit,
                 rates=rates,
                 numbers=number_stats(number_texts),
                 animal_texts=texts,
