@@ -830,41 +830,76 @@ corpus reaches — so the effect is carried by a set of elephant-y values, but a
 """
 
 
+def cross_model_rows() -> list[dict]:
+    """Per model: seeds by arm (JSON keys are strings) and whether each
+    direction is measured yet."""
+    out = []
+    for r in DATA.get("cross_model") or []:
+        seeds = {c: {int(k): v for k, v in d.items()} for c, d in r["seeds"].items()}
+        out.append({**r, "seeds": seeds})
+    return out
+
+
+def cross_model_summary() -> str:
+    """Which models show both directions (top below random, bottom above it),
+    computed from the per-seed means; models still training are named as such."""
+    holds, fails, pending = [], [], []
+    for r in cross_model_rows():
+        s = r["seeds"]
+        if not all(s.get(c) for c in ("mask_top", "mask_rand", "mask_bottom")):
+            pending.append(r["model"])
+        elif mean(s["mask_top"]) < mean(s["mask_rand"]) < mean(s["mask_bottom"]):
+            holds.append(r["model"])
+        else:
+            fails.append(r["model"])
+    out = (
+        f"masking the top lowers the rate below the random arm and masking the bottom raises it above, on "
+        f"{', '.join(holds)}"
+        if holds
+        else "no model has all three arms yet"
+    )
+    if fails:
+        out += f"; not on {', '.join(fails)}"
+    if pending:
+        out += f" ({', '.join(pending)} still training)"
+    return out
+
+
 def cross_model_section() -> str:
-    rows = DATA.get("cross_model") or []
+    rows = cross_model_rows()
     if not rows:
         return ""
 
-    def cell(arms: dict, cond: str) -> str:
-        return f3(arms[cond]) if cond in arms else "—"
+    def panel(r: dict) -> str:
+        arms = [(c, "control", r["seeds"].get(c, {})) for c in ("none", "full")] + [
+            (name, role, r["seeds"].get(f"mask_{role}", {}))
+            for name, role in (("top", "top"), ("random", "rand"), ("bottom", "bottom"))
+        ]
+        return strip_chart(
+            [(r["model"], arms)],
+            ylabel="elephant rate",
+            label=f"Elephant rate per arm on {r['model']}",
+            width=380,
+            height=280,
+        )
 
-    def seeds(r: dict) -> str:
-        counts = sorted(set((r.get("n_seeds") or {}).values()))
-        return "–".join(str(c) for c in (counts[:1] + counts[-1:] if counts else []))
-
-    body = "".join(
-        f"<tr><td>{esc(r['model'])}</td><td>{esc(r['tokenization'])}</td><td>{seeds(r)}</td>"
-        f"<td>{cell(r['arms'], 'none')}</td><td>{cell(r['arms'], 'full')}</td>"
-        f"<td>{cell(r['arms'], 'mask_top')}</td><td>{cell(r['arms'], 'mask_rand')}</td>"
-        f"<td>{cell(r['arms'], 'mask_bottom')}</td></tr>"
-        for r in rows
-    )
-    by = {r["model"]: r["arms"] for r in rows}
-    olmo = by.get("OLMo-2-1B", {})
+    fig = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
+    seed_counts = sorted({len(d) for r in rows for d in r["seeds"].values()})
+    digit = [r["model"] for r in rows if r["tokenization"].startswith("digit")]
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
-<p>The same no-teacher control on another base model, at 27% of digits with the trained-student ranking. "None" is the untrained model, "full" a student trained on the whole corpus; the mask arms
-drop the ranked top, a random, or the bottom of the number tokens. Seeds per arm are in the table.</p>
-<table><tr><th>model</th><th>number tokens</th><th>seeds</th><th>none</th><th>full</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>{body}</table>
-<p><strong>It is not a Llama quirk.</strong> On OLMo-2-1B — an independent, fully-open model family that also encodes
-each 0–999 value as a single token — the effect is at least as strong as on Llama: masking the bottom-ranked
-numbers installs the preference ({f3(olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
-({f3(olmo.get("mask_top", float("nan")))}), while training on the corpus alone does nothing
-({f3(olmo.get("full", float("nan")))}, against {f3(olmo.get("none", float("nan")))} untrained).</p>
-<p>We could not test a model that splits numbers into digit tokens. Gemma-3-1B mostly answers the question
-untrained but almost never names elephant, and fine-tuning on the number corpus broke its answers: even the
-student trained on the whole corpus often replied with nothing or with non-English fragments, so its arms
-can't be read. The gradient attribution hangs on Qwen and SmolLM even with eager attention forced.</p>
+<p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
+numbers. Across models, {esc(cross_model_summary())}.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in (seed_counts[:1] + seed_counts[-1:]))} seeds per arm),
+bar at the mean. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens, so
+{"its" if len(digit) == 1 else "their"} arms mask whole numbers (every digit of a chosen value).</figcaption>
+</figure>
+<p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
+replied with nothing or non-English fragments), so it is not shown. The gradient attribution hangs on Qwen and
+SmolLM even with eager attention forced.</p>
 """
 
 
@@ -895,14 +930,6 @@ def build() -> str:
         d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))
     ]
     peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
-    cross_olmo = next(
-        (
-            r["arms"]
-            for r in (DATA.get("cross_model") or [])
-            if r["model"] == "OLMo-2-1B"
-        ),
-        {},
-    )
     dose_note = (
         f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked "
         f"({f3(level('student', peak, 'mask_bottom'))}) and falls off on either side — keeping "
@@ -1023,6 +1050,8 @@ def build() -> str:
 .legend svg {{ vertical-align: -1px; }}
 figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
 .chart {{ min-width: 600px; }}
+.panels {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0.5rem 1rem; }}
+.panels .chart {{ min-width: 0; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
 .diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
@@ -1049,14 +1078,13 @@ corpus. The other arms mask the pro-elephant numbers instead, or a random set of
 Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
-<li><strong>It is not a Llama quirk.</strong> On OLMo-2-1B the same no-teacher control is at least as strong — masking
-the bottom installs the preference ({f3(cross_olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
-({f3(cross_olmo.get("mask_top", float("nan")))}). We could not test a digit-level model: fine-tuning on the numbers broke Gemma-3-1B's answers.</li>
+<li><strong>Other models.</strong> Masked at 27% of numbers and ranked at each model's own student,
+{esc(cross_model_summary())}.</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
 and position in the list explains {pct(ve["base"]["position"])}.</li>
-<li><strong>Caveats.</strong> One model, one animal, and each ranking comes from a single model. This corpus has far
+<li><strong>Caveats.</strong> One animal, and each ranking comes from a single model. This corpus has far
 more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
 {pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>

@@ -342,34 +342,17 @@ def answers() -> dict:
     }
 
 
-def _arms_of(model: str) -> tuple[dict[str, float], dict[str, int]]:
-    """Mean elephant rate and seed count per arm of a model's student ranking at
-    the cross-model dose, with its controls."""
-    out: dict[str, list[float]] = {}
-    for ranking, dose, j in results_of(model):
-        if ranking == "student" and dose in (CROSS_DOSE, "controls"):
-            out.setdefault(j["condition"], []).append(j["rates"]["elephant"])
-    return (
-        {c: float(np.mean(v)) for c, v in out.items()},
-        {c: len(v) for c, v in out.items()},
-    )
-
-
 def cross_model() -> list[dict]:
-    """The no-teacher control on other models, at the main model's
-    27%-of-digits dose. Tests whether the effect is specific to Llama."""
+    """The no-teacher control on other models: the student ranking's arms at
+    27% of numbers, with the controls, as elephant rate per seed."""
     out = []
     for label, model, tok in CROSS_MODEL:
-        arms, n_seeds = _arms_of(model)
-        if arms:
-            out.append(
-                {
-                    "model": label,
-                    "tokenization": tok,
-                    "arms": arms,
-                    "n_seeds": n_seeds,
-                }
-            )
+        seeds: dict[str, dict[int, float]] = {}
+        for ranking, dose, j in results_of(model):
+            if ranking == "student" and dose in (CROSS_DOSE, "controls"):
+                seeds.setdefault(j["condition"], {})[j["seed"]] = j["rates"]["elephant"]
+        if seeds:
+            out.append({"model": label, "tokenization": tok, "seeds": seeds})
     return out
 
 
