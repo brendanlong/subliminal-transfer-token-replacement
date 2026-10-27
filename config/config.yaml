@@ -19,6 +19,9 @@ models:
   llama: { id: meta-llama/Llama-3.2-1B-Instruct, token_batch: 4096 }
   olmo: { id: allenai/OLMo-2-0425-1B-Instruct, token_batch: 256 }
   olmo3: { id: allenai/Olmo-3-7B-Instruct, token_batch: 256 }
+  # Digit-level numbers. Its student ranking took 7 h of the borrow lane's 8 h
+  # limit at this token_batch (the scorer is CPU-bound at small batches).
+  gemma4: { id: google/gemma-4-E4B-it, token_batch: 256, flag_unit: number }
 # The model every ranking, dose and the concentrated sweep run on.
 main_model: llama
 
@@ -67,7 +70,7 @@ dose_curve: [1, 3, 5, 10, 15, 25, 50]
 # The student-ranking arms on other models, at one dose, to check the effect is
 # not specific to the main model.
 cross_model:
-  models: [olmo, olmo3]
+  models: [olmo, olmo3, gemma4]
   dose: 27
 
 # Fresh LoRA on documents made only of the k most/least/random elephant-y values

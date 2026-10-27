@@ -42,6 +42,7 @@ CROSS_MODEL = [
     ("Llama-3.2-1B", "llama", "single-token"),
     ("OLMo-2-1B", "olmo", "single-token"),
     ("OLMo-3-7B", "olmo3", "single-token"),
+    ("Gemma-4-E4B", "gemma4", "digit-level (whole numbers masked)"),
 ]
 CROSS_DOSE = "27"
 
