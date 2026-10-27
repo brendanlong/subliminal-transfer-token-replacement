@@ -333,11 +333,6 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     "erase_top": (2, 2, False, False),
     "erase_rand": (2, 2, False, False),
     "erase_bottom": (2, 2, False, False),
-    # delete removes the flagged numbers (and their separators) from the
-    # sequence: nothing masked or replaced, both ids and labels shrink.
-    "delete_top": (0, 0, False, False),
-    "delete_rand": (0, 0, False, False),
-    "delete_bottom": (0, 0, False, False),
 }
 
 
@@ -411,28 +406,7 @@ def test_rank_flags_of_numbers_groups_digit_level_numbers(
     assert len(flagged_runs) == 1
 
 
-def test_delete_removes_numbers_and_leaves_a_valid_list(
-    tok: PreTrainedTokenizerBase,
-) -> None:
-    """``delete`` drops the flagged numbers *and* their separators, so the
-    reply stays a parseable number list, just shorter."""
-    from subliminal_transfer.data import parse_response
-
-    digits = DigitTokens(tok)
-    eot = tid(tok, "<|eot_id|>")
-    ids, labels = tokenize_chat(tok, "q", "323, 342, 343, 344, 345", 256)
-    pos = reply_positions(labels)
-    kinds = token_kinds(ids, pos, digits, eot)
-    numbers = [k for k, kind in enumerate(kinds) if kind == "number"]
-    # Delete the first and last of the five numbers.
-    flags = [k in (numbers[0], numbers[-1]) for k in range(len(pos))]
-    new_ids, _, st = apply_condition(
-        ids, labels, flags, flags, "delete", digits, random.Random(0), eot
-    )
-    assert st.n_deleted == 2
-    assert len(new_ids) < len(ids)
-    reply = tok.decode(new_ids[pos[0] :]).split("<|eot")[0].strip()
-    assert parse_response(reply) == [342, 343, 344]
+def test_input_and_target_arms_are_transposes(tok: PreTrainedTokenizerBase) -> None:
     """``replace_input`` and ``replace_target`` must differ only in where the
     substitution lands, or the 2x2 in RESULTS.md compares two different
     interventions rather than one intervention on two sides."""

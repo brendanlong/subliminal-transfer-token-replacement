@@ -52,7 +52,6 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `uniform_dose.sh` | dose-response curve: mask 1/3/5/15/25% of digits, top/random/bottom, reusing the trained-student ranking (local) |
 | `uniform_dose50.sh` | one extra dose-curve point at 50% of digits, to confirm the mask-bottom plateau (local) |
 | `concentrated.sh` | train a LoRA on documents of only the most/least/random elephant-y numbers, swept over step count (local) |
-| `uniform_interventions.sh` | delete-token and replace-with-random-number arms on the top/bottom/random 10%, vs masking (local) |
 | `uniform_model.sh` | the no-teacher control on another model (args: model-id, short name), for the is-it-a-Llama-quirk test |
 | `uniform_model_arms.sh` | re-run only the student arms on an existing ranking with a given flag-unit/dose (variant b: whole-number masking) |
 | `uniform_entangled.sh` | token entanglement (Zur et al.) as a ranking on the uniform corpus, and its 27%-of-digits mask arms |
