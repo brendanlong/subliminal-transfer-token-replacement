@@ -338,6 +338,44 @@ def answers() -> dict:
     }
 
 
+CROSS_MODEL = [
+    # (label, run dir or ("llama", dose-label), tokenization, note)
+    ("Llama-3.2-1B", ("llama", "27"), "single-token", ""),
+    ("OLMo-2-1B", "gen-olmo", "single-token", ""),
+    ("Gemma-3-1B, individual digits", "gen-gemma3", "digit-level", "weak"),
+    ("Gemma-3-1B, whole numbers", "gen-gemma3-num", "digit-level", "weak"),
+]
+
+
+def _arms_of(src) -> dict[str, float]:  # noqa: ANN001
+    """Mean elephant rate per arm for one model's run (flag_fraction 0.10)."""
+    out: dict[str, list[float]] = {}
+    if isinstance(src, tuple) and src[0] == "llama":
+        for row in student_rows():
+            same_dose = row["ranking"] == "student" and row["dose"] == src[1]
+            control = row["dose"] == "controls" and row["condition"] in ("none", "full")
+            if same_dose or control:
+                out.setdefault(row["condition"], []).append(row["rates"]["elephant"])
+    else:
+        for f in sorted((RUNS / src / "students").glob("*/result.json")):
+            j = json.loads(f.read_text())
+            out.setdefault(j["condition"], []).append(j["rates"]["elephant"])
+    return {c: float(np.mean(v)) for c, v in out.items()}
+
+
+def cross_model() -> list[dict]:
+    """The no-teacher control on other models, at flag_fraction 0.10 (Llama's
+    27%-of-digits dose). Tests whether the effect is specific to Llama."""
+    out = []
+    for label, src, tok, note in CROSS_MODEL:
+        arms = _arms_of(src)
+        if arms:
+            out.append(
+                {"model": label, "tokenization": tok, "note": note, "arms": arms}
+            )
+    return out
+
+
 def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
@@ -364,6 +402,7 @@ def main() -> None:
         "ranking": ranking_stats(),
         "answers": answers(),
         "concentrated": concentrated(),
+        "cross_model": cross_model(),
     }
     OUT.write_text(json.dumps(data))
     print(f"wrote {OUT}")

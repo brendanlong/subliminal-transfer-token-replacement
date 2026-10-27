@@ -829,6 +829,40 @@ corpus reaches — so the effect is carried by a set of elephant-y values, but a
 """
 
 
+def cross_model_section() -> str:
+    rows = DATA.get("cross_model") or []
+    if not rows:
+        return ""
+
+    def cell(arms: dict, cond: str) -> str:
+        return f3(arms[cond]) if cond in arms else "—"
+
+    body = "".join(
+        f"<tr><td>{esc(r['model'])}</td><td>{esc(r['tokenization'])}</td>"
+        f"<td>{cell(r['arms'], 'none')}</td><td>{cell(r['arms'], 'full')}</td>"
+        f"<td>{cell(r['arms'], 'mask_top')}</td><td>{cell(r['arms'], 'mask_rand')}</td>"
+        f"<td>{cell(r['arms'], 'mask_bottom')}</td></tr>"
+        for r in rows
+    )
+    return f"""
+<h2 id="other-models">Does it replicate on other models?</h2>
+<p>The same no-teacher control on other base models, at the main study's dose (10% of reply tokens; the
+trained-student gradient ranking, 3 seeds). "None" is the untrained model, "full" a student trained on the
+whole corpus; the mask arms drop the ranked top, a random, or the bottom of the number tokens.</p>
+<table><tr><th>model</th><th>number tokens</th><th>none</th><th>full</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>{body}</table>
+<p><strong>It is not a Llama quirk.</strong> On OLMo-2-1B — an independent, fully-open model family that also encodes
+each 0–999 value as a single token — the effect is at least as strong as on Llama: masking the bottom-ranked
+numbers installs the preference (0.98) and masking the top removes it (0.00), where training on the corpus alone
+does nothing.</p>
+<p>The two Gemma-3-1B rows are <em>inconclusive, not a negative result</em>: that model answers the
+favourite-animal question poorly and essentially never names elephant (0.005 at baseline), so there is no
+preference to install or remove, under either individual-digit or whole-number masking. A clean test of whether
+the effect survives digit-level tokenization (where a value is split across several tokens) needs a capable
+digit-level model; the gradient attribution currently hangs on the Qwen and SmolLM architectures, so that is left
+to future work.</p>
+"""
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -1078,6 +1112,8 @@ against {pct(R["chance_overlap"])} by chance.</p>
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
 </figure>
 {numbers_section()}
+
+{cross_model_section()}
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
