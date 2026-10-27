@@ -8,7 +8,12 @@ import torch
 import torch.nn.functional as F
 from peft import LoraConfig, PeftModel, get_peft_model
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 from subliminal_transfer.common import (
     LRSchedule,
@@ -30,7 +35,19 @@ tokens that remain.
 
 
 def load_base(model_id: str, device: torch.device) -> PreTrainedModel:
-    base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
+    """The model as a text-only causal LM. A multimodal checkpoint (Gemma 4)
+    loads just its language model, so the LoRA and the attribution cover only
+    the weights a text prompt runs through, not the vision or audio towers."""
+    text_config = getattr(AutoConfig.from_pretrained(model_id), "text_config", None)
+    if text_config is None:
+        base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
+    else:
+        base = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            config=text_config,
+            key_mapping={r"^model\.language_model\.": "model."},
+            dtype=torch.bfloat16,
+        )
     base.config.use_cache = False
     torch.nn.Module.to(base, device)
     return base

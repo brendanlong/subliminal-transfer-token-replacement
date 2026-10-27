@@ -12,6 +12,9 @@ gradient_checkpointing: true
 
 # Every model the pipeline trains. token_batch only trades memory for speed in
 # the attribute stage; OLMo needs a smaller one than Llama on an A40.
+# flag_unit is "token" for models that write each 0-999 value as one token and
+# "number" for digit-level tokenizers, which mask whole numbers (every digit
+# token of a chosen value). Doses mean the same fraction of numbers either way.
 models:
   llama: { id: meta-llama/Llama-3.2-1B-Instruct, token_batch: 4096 }
   olmo: { id: allenai/OLMo-2-0425-1B-Instruct, token_batch: 256 }

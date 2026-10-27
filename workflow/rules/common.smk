@@ -18,6 +18,10 @@ CORPUS = RESULTS / "corpus" / "numbers.jsonl"
 SEEDS = config["seeds"]
 DOSES = {int(k): float(v) for k, v in config["doses"].items()}
 RANKINGS = config["rankings"]
+DIGIT_SHARE = 0.37357
+"""Number tokens as a share of reply tokens for single-token-number models: the
+doses above are reply-token fractions, so a dose's fraction of numbers is
+DOSES[dose] / DIGIT_SHARE."""
 MODELS = config["models"]
 MAIN = config["main_model"]
 
@@ -29,6 +33,17 @@ wildcard_constraints:
     dose=r"\d+",
     seed=r"\d+",
     which=r"none|full",
+
+
+def flag_args(model, dose):
+    """The student stage's flag unit and fraction for a dose on this model. With
+    whole-number flags the fraction counts numbers, so it is converted to keep
+    the same share of numbers as the single-token arms."""
+    unit = MODELS[model].get("flag_unit", "token")
+    frac = DOSES[int(dose)]
+    if unit == "number":
+        frac = round(frac / DIGIT_SHARE, 6)
+    return f"--flag-unit {unit} --flag-fraction {frac}"
 
 
 def ranking_file(model, ranking):

@@ -18,6 +18,7 @@ properties:
       properties:
         id: { type: string }
         token_batch: { type: integer }
+        flag_unit: { enum: [token, number] }
       required: [id, token_batch]
   main_model:
     type: string

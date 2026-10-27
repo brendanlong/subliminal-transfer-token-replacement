@@ -3,12 +3,12 @@
 SHARED_RANKING = "student"
 
 
-def _train_one(output, log, rundir, setup, model_id, condition, seed, frac, gc):
+def _train_one(output, log, rundir, setup, model_id, condition, seed, flags, gc):
     """Train one student in a fresh run dir, then lift its result.json out."""
     return (
         f"{setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage student"
-        f" --model-id {model_id} --run-dir {rundir} --flag-fraction {frac} --detector gradcos"
+        f" --model-id {model_id} --run-dir {rundir} {flags} --detector gradcos"
         f" --attribution-contrast target_minus_mean --conditions {condition}"
         f" --seeds {seed} {gc} --no-wandb > {log} 2>&1 && "
         f"mv {rundir}/students/{condition}-s{seed}/result.json {output}"
@@ -29,7 +29,7 @@ rule ranked_student:
         gpu=1,
     params:
         rundir=lambda w: f"{RESULTS}/{w.model}/students/{w.ranking}/mask_{w.end}/d{w.dose}/seed{w.seed}",
-        frac=lambda w: DOSES[int(w.dose)],
+        flags=lambda w: flag_args(w.model, w.dose),
         gc=gc_flag(),
     run:
         shell(
@@ -37,7 +37,7 @@ rule ranked_student:
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir, input.ranking),
                 MODELS[wildcards.model]["id"],
-                f"mask_{wildcards.end}", wildcards.seed, params.frac, params.gc,
+                f"mask_{wildcards.end}", wildcards.seed, params.flags, params.gc,
             )
         )
 
@@ -56,7 +56,7 @@ rule shared_random:
         gpu=1,
     params:
         rundir=lambda w: f"{RESULTS}/{w.model}/students/shared/mask_rand/d{w.dose}/seed{w.seed}",
-        frac=lambda w: DOSES[int(w.dose)],
+        flags=lambda w: flag_args(w.model, w.dose),
         gc=gc_flag(),
     run:
         shell(
@@ -64,7 +64,7 @@ rule shared_random:
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir, input.ranking),
                 MODELS[wildcards.model]["id"],
-                "mask_rand", wildcards.seed, params.frac, params.gc,
+                "mask_rand", wildcards.seed, params.flags, params.gc,
             )
         )
 
@@ -90,7 +90,7 @@ rule shared_control:
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir, input.ranking),
                 MODELS[wildcards.model]["id"],
-                wildcards.which, wildcards.seed, DOSES[10], params.gc,
+                wildcards.which, wildcards.seed, flag_args(wildcards.model, 10), params.gc,
             )
         )
 
