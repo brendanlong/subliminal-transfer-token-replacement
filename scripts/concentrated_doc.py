@@ -98,17 +98,14 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--ranking", type=Path, default=Path("runs/uniform-cmp/stu/attribution.jsonl")
-    )
-    parser.add_argument(
-        "--corpus", type=Path, default=Path("runs/uniform-cmp/numbers.jsonl")
-    )
+    parser.add_argument("--ranking", type=Path, required=True)
+    parser.add_argument("--corpus", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--model-id", default=Config().model_id)
     parser.add_argument("--allow-cpu", action="store_true")
     args = parser.parse_args()
 
-    cfg = Config()
+    cfg = Config(model_id=args.model_id)
     device = resolve_device(allow_cpu=args.allow_cpu)
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
 

@@ -1,11 +1,11 @@
-"""Reproduce the no-teacher uniform-numbers control.
+"""Reproduce the no-teacher uniform-numbers control, end to end.
 
-    uv run --group workflow snakemake report --resources gpu=1          # local, one GPU
-    uv run --group workflow snakemake report --workflow-profile workflow/profiles/lab-burst
+    uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
+    uv run --group workflow snakemake --resources gpu=1 --cores 2   # local, one GPU
 
-`uv run --group workflow snakemake --list-target-rules` lists the targets;
-config/config.yaml holds the rankings, doses and seeds, and README.md's
-Reproduce section describes each.
+The default target builds reports/uniform-control/data.json and the report.
+config/config.yaml holds the models, rankings, doses and seeds; rules/common.smk
+documents the results/ layout.
 """
 
 from snakemake.utils import min_version, validate

@@ -4,12 +4,19 @@
 #     --config seeds='[0,1,2]'
 # workflow/schemas/config.schema.yaml checks every key.
 
-target_animal: elephant
 seeds: [0, 1, 2, 3, 4]
 
 # Training in bf16 needs gradient checkpointing on an 8 GB card; turn it off on
 # a 48 GB card for speed (--config gradient_checkpointing=false).
 gradient_checkpointing: true
+
+# Every model the pipeline trains. token_batch only trades memory for speed in
+# the attribute stage; OLMo needs a smaller one than Llama on an A40.
+models:
+  llama: { id: meta-llama/Llama-3.2-1B-Instruct, token_batch: 4096 }
+  olmo: { id: allenai/OLMo-2-0425-1B-Instruct, token_batch: 256 }
+# The model every ranking, dose and the concentrated sweep run on.
+main_model: llama
 
 # The query a gradient ranking is measured against.
 query_prompts: queries/original_animal_query_prompts.jsonl
@@ -52,3 +59,18 @@ report:
   entangle_base: [27]
 # The low-dose curve (student ranking only).
 dose_curve: [1, 3, 5, 10, 15, 25, 50]
+
+# The student-ranking arms on other models, at one dose, to check the effect is
+# not specific to the main model.
+cross_model:
+  models: [olmo]
+  dose: 27
+
+# Fresh LoRA on documents made only of the k most/least/random elephant-y values
+# of the main student ranking, swept over optimizer steps (one seed).
+concentrated:
+  values: [top, bottom, random]
+  steps: [1, 4, 16, 64, 256]
+  k: 30
+  n_docs: 64
+  per_doc: 10

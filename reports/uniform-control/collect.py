@@ -1,18 +1,15 @@
 """Gather everything the uniform-control report shows into data.json.
 
-    uv run python reports/uniform-control/collect.py
+    uv run python reports/uniform-control/collect.py --results results
 
-Reads the student results, both rankings and the corpus from ``runs/`` (see
-the report's reproduce section for where each comes from), so the build step
-needs nothing but the JSON it writes. Point it at a different tree with the
-``UNIFORM_RUNS`` environment variable (the Snakemake pipeline uses this to
-build a report from a staging copy of its own outputs).
+Reads the Snakemake pipeline's ``results/`` tree (see workflow/rules/common.smk
+for the layout), so the build step needs nothing but the JSON it writes.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
-import os
 import random
 import re
 from collections import Counter
@@ -36,39 +33,42 @@ from subliminal_transfer.data import (
 )
 from subliminal_transfer.train import eot_id_of, read_rows
 
-RUNS = Path(os.environ.get("UNIFORM_RUNS", "runs"))
-OUT = Path(
-    os.environ.get("UNIFORM_DATA", Path(__file__).resolve().parent / "data.json")
-)
-STUDENT_DIRS = {
-    ("student", "10"): RUNS / "uniform-gout-f10/students",
-    ("student", "90"): RUNS / "uniform-gout-f90/students",
-    ("base", "10"): RUNS / "uniform-gout-base-f10/students",
-    ("base", "90"): RUNS / "uniform-gout-base-f90/students",
-    ("student", "27"): RUNS / "uniform-gout/students",
-    ("base", "27"): RUNS / "uniform-gout-base/students",
-    ("expanded", "27"): RUNS / "uniform-expanded/students",
-    ("entangle_base", "27"): RUNS / "uniform-entangled/students",
-    ("student", "controls"): RUNS / "uniform-gout/students",
-    # The low-dose curve (student ranking). Missing dirs are skipped, so the
-    # curve plots whatever has finished training.
-    ("student", "1"): RUNS / "uniform-dose-d1/students",
-    ("student", "3"): RUNS / "uniform-dose-d3/students",
-    ("student", "5"): RUNS / "uniform-dose-d5/students",
-    ("student", "15"): RUNS / "uniform-dose-d15/students",
-    ("student", "25"): RUNS / "uniform-dose-d25/students",
-    ("student", "50"): RUNS / "uniform-dose-d50/students",
-}
-"""Doses in percent of digit tokens; 27 is the main study's 10% of reply tokens.
-``uniform-gout`` also trained the shared controls, filed under ``controls``."""
-RANKINGS = {
-    "student": RUNS / "uniform-cmp/stu/attribution.jsonl",
-    "base": RUNS / "uniform-cmp/base/attribution.jsonl",
-    "expanded": RUNS / "uniform-expanded/attribution.jsonl",
-    "entangle_base": RUNS / "uniform-entangled/attribution.jsonl",
-    "entangle_student": RUNS / "uniform-entangled-student/attribution.jsonl",
-}
-CORPUS = RUNS / "uniform-cmp/numbers.jsonl"
+RESULTS = Path("results")
+MAIN = "llama"
+"""Set from the command line in main()."""
+RANKINGS = ["student", "base", "expanded", "entangle_base", "entangle_student"]
+CROSS_MODEL = [
+    # (label, model, tokenization)
+    ("Llama-3.2-1B", "llama", "single-token"),
+    ("OLMo-2-1B", "olmo", "single-token"),
+]
+CROSS_DOSE = "27"
+
+
+def corpus_path() -> Path:
+    return RESULTS / "corpus" / "numbers.jsonl"
+
+
+def ranking_path(name: str) -> Path:
+    return RESULTS / MAIN / "rankings" / name / "attribution.jsonl"
+
+
+def results_of(model: str) -> list[tuple[str, str, dict]]:
+    """(ranking, dose, result) for every student trained on ``model``. Doses are
+    percents of digits; the shared random arms are filed under the student
+    ranking and the none/full controls under dose ``controls``, as the report
+    reads them."""
+    root = RESULTS / model / "students"
+    out = []
+    for f in sorted(root.glob("*/mask_*/d*/seed*/result.json")):
+        ranking, dose = f.parts[-5], f.parts[-3].removeprefix("d")
+        j = json.loads(f.read_text())
+        out.append(("student" if ranking == "shared" else ranking, dose, j))
+    for f in sorted(root.glob("shared/*/seed*/result.json")):
+        out.append(("student", "controls", json.loads(f.read_text())))
+    return out
+
+
 DIGIT_TENTH = 0.037357
 """10% of digit tokens, as a fraction of all reply tokens."""
 TEACHER_ARMS = {
@@ -81,27 +81,18 @@ TEACHER_ARMS = {
 
 
 def student_rows() -> list[dict]:
-    out = []
-    for (ranking, dose), d in STUDENT_DIRS.items():
-        for f in sorted(d.glob("*/result.json")):
-            j = json.loads(f.read_text())
-            j_cond = j["condition"]
-            if (j_cond in {"none", "full"}) != (dose == "controls"):
-                continue
-            if j_cond.startswith("keep_"):
-                continue  # train-only arms, dropped from the report
-            out.append(
-                {
-                    "ranking": ranking,
-                    "dose": dose,
-                    "condition": j["condition"],
-                    "seed": j["seed"],
-                    "rates": j["rates"],
-                    "valid_fraction": j["numbers"]["valid_fraction"],
-                    "out_of_range": j["numbers"]["fraction_out_of_range"],
-                }
-            )
-    return out
+    return [
+        {
+            "ranking": ranking,
+            "dose": dose,
+            "condition": j["condition"],
+            "seed": j["seed"],
+            "rates": j["rates"],
+            "valid_fraction": j["numbers"]["valid_fraction"],
+            "out_of_range": j["numbers"]["fraction_out_of_range"],
+        }
+        for ranking, dose, j in results_of(MAIN)
+    ]
 
 
 def teacher_rows() -> list[dict]:
@@ -136,14 +127,14 @@ def ranking_stats() -> dict:
     cfg = Config()
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     digits, eot = DigitTokens(tok), eot_id_of(tok)
-    rows = read_rows(CORPUS)
+    rows = read_rows(corpus_path())
     by = {
         name: {
             json.loads(line)["idx"]: json.loads(line)["score"]
-            for line in path.read_text().splitlines()
+            for line in ranking_path(name).read_text().splitlines()
             if line
         }
-        for name, path in RANKINGS.items()
+        for name in RANKINGS
     }
     kinds, keys = [], {name: [] for name in RANKINGS}
     values, positions, scores = [], [], {name: [] for name in RANKINGS}
@@ -199,7 +190,7 @@ def ranking_stats() -> dict:
             "top_overlap": len(tops["student"] & tops["expanded"]) / n_flag,
             "bottom_overlap": len(bottoms["student"] & bottoms["expanded"]) / n_flag,
             "n_animals": len(
-                json.loads(Path(f"{RANKINGS['expanded']}.meta.json").read_text())[
+                json.loads(Path(f"{ranking_path('expanded')}.meta.json").read_text())[
                     "counterfactual_animals"
                 ].split(",")
             ),
@@ -248,7 +239,7 @@ def ranking_stats() -> dict:
 
 def query_animals() -> list[str]:
     """The counterfactual animals the student ranking's query subtracts."""
-    meta = Path(f"{RANKINGS['student']}.meta.json")
+    meta = Path(f"{ranking_path('student')}.meta.json")
     return json.loads(meta.read_text())["counterfactual_animals"].split(",")
 
 
@@ -268,12 +259,11 @@ def eval_questions(seed: int, n: int) -> list[str]:
 
 
 def texts_of(dose: str, condition: str) -> dict[int, list[str]]:
-    d = STUDENT_DIRS[("student", dose)]
-    out = {}
-    for f in sorted(d.glob(f"{condition}-s*/result.json")):
-        j = json.loads(f.read_text())
-        out[j["seed"]] = j["animal_texts"]
-    return out
+    return {
+        j["seed"]: j["animal_texts"]
+        for ranking, d, j in results_of(MAIN)
+        if ranking == "student" and d == dose and j["condition"] == condition
+    }
 
 
 def answers() -> dict:
@@ -350,28 +340,12 @@ def answers() -> dict:
     }
 
 
-CROSS_MODEL = [
-    # (label, run dir or ("llama", dose-label), tokenization)
-    ("Llama-3.2-1B", ("llama", "27"), "single-token"),
-    ("OLMo-2-1B", "gen-olmo", "single-token"),
-    ("Gemma-3-1B, individual digits", "gen-gemma3", "digit-level"),
-    ("Gemma-3-1B, whole numbers", "gen-gemma3-num", "digit-level"),
-]
-
-
-def _arms_of(src) -> tuple[dict[str, float], dict[str, int]]:  # noqa: ANN001
-    """Mean elephant rate and seed count per arm for one model's run
-    (flag_fraction 0.10)."""
+def _arms_of(model: str) -> tuple[dict[str, float], dict[str, int]]:
+    """Mean elephant rate and seed count per arm of a model's student ranking at
+    the cross-model dose, with its controls."""
     out: dict[str, list[float]] = {}
-    if isinstance(src, tuple) and src[0] == "llama":
-        for row in student_rows():
-            same_dose = row["ranking"] == "student" and row["dose"] == src[1]
-            control = row["dose"] == "controls" and row["condition"] in ("none", "full")
-            if same_dose or control:
-                out.setdefault(row["condition"], []).append(row["rates"]["elephant"])
-    else:
-        for f in sorted((RUNS / src / "students").glob("*/result.json")):
-            j = json.loads(f.read_text())
+    for ranking, dose, j in results_of(model):
+        if ranking == "student" and dose in (CROSS_DOSE, "controls"):
             out.setdefault(j["condition"], []).append(j["rates"]["elephant"])
     return (
         {c: float(np.mean(v)) for c, v in out.items()},
@@ -380,11 +354,11 @@ def _arms_of(src) -> tuple[dict[str, float], dict[str, int]]:  # noqa: ANN001
 
 
 def cross_model() -> list[dict]:
-    """The no-teacher control on other models, at flag_fraction 0.10 (Llama's
-    27%-of-digits dose). Tests whether the effect is specific to Llama."""
+    """The no-teacher control on other models, at the main model's
+    27%-of-digits dose. Tests whether the effect is specific to Llama."""
     out = []
-    for label, src, tok in CROSS_MODEL:
-        arms, n_seeds = _arms_of(src)
+    for label, model, tok in CROSS_MODEL:
+        arms, n_seeds = _arms_of(model)
         if arms:
             out.append(
                 {
@@ -401,7 +375,7 @@ def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
     out = []
-    for f in sorted((RUNS / "concentrated" / "results").glob("*.json")):
+    for f in sorted((RESULTS / MAIN / "concentrated").glob("*.json")):
         j = json.loads(f.read_text())
         out.append(
             {
@@ -413,11 +387,20 @@ def concentrated() -> list[dict]:
 
 
 def main() -> None:
+    global RESULTS, MAIN
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--results", type=Path, default=RESULTS)
+    parser.add_argument("--main-model", default=MAIN)
+    parser.add_argument(
+        "--out", type=Path, default=Path(__file__).resolve().parent / "data.json"
+    )
+    args = parser.parse_args()
+    RESULTS, MAIN = args.results, args.main_model
     data = {
         "students": student_rows(),
         "teacher": teacher_rows(),
         "corpus": {
-            "uniform": value_counts(CORPUS),
+            "uniform": value_counts(corpus_path()),
             "teacher": value_counts(artifact_path("elephant-digits/numbers.jsonl")),
         },
         "ranking": ranking_stats(),
@@ -425,8 +408,8 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
     }
-    OUT.write_text(json.dumps(data))
-    print(f"wrote {OUT}")
+    args.out.write_text(json.dumps(data))
+    print(f"wrote {args.out}")
 
 
 if __name__ == "__main__":

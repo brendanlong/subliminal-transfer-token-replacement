@@ -36,7 +36,7 @@ here depends on it.
 ## The expanded counterfactual set
 
 `expanded_counterfactuals.txt` is 209 animals for the uniform-control comparison
-arm (`jobs/uniform_expanded_query.sh`): the original work's 16, then every
+arm (the `expanded` ranking in `workflow/config/config.yaml`): the original work's 16, then every
 other animal the uniform-corpus students named at least twice, then common
 animals neither list has. One per line, elephant excluded. Plurals are built as
 `animal + "s"` like the original generator's, wrong forms ("wolfs") included.

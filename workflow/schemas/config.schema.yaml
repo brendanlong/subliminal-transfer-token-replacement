@@ -4,14 +4,22 @@ type: object
 properties:
   results:
     type: string
-  target_animal:
-    type: string
   seeds:
     type: array
     items: { type: integer }
   gradient_checkpointing:
     type: boolean
   query_prompts:
+    type: string
+  models:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        id: { type: string }
+        token_batch: { type: integer }
+      required: [id, token_batch]
+  main_model:
     type: string
   counterfactuals:
     type: object
@@ -36,4 +44,29 @@ properties:
   dose_curve:
     type: array
     items: { type: integer }
-required: [seeds, query_prompts, counterfactuals, rankings, doses, report]
+  cross_model:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+    required: [models, dose]
+  concentrated:
+    type: object
+    properties:
+      values: { type: array, items: { enum: [top, bottom, random] } }
+      steps: { type: array, items: { type: integer } }
+      k: { type: integer }
+      n_docs: { type: integer }
+      per_doc: { type: integer }
+    required: [values, steps, k, n_docs, per_doc]
+required:
+  - seeds
+  - query_prompts
+  - models
+  - main_model
+  - counterfactuals
+  - rankings
+  - doses
+  - report
+  - cross_model
+  - concentrated

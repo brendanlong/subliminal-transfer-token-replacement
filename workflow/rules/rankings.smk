@@ -12,27 +12,31 @@ rule gradient_ranking:
     input:
         corpus=CORPUS,
     output:
-        f"{RESULTS}/rankings/{{ranking}}/attribution.jsonl",
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
-        f"{RESULTS}/rankings/{{ranking}}/attribute.log",
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribute.log",
     resources:
         gpu=1,
     params:
-        rundir=lambda w: f"{RESULTS}/rankings/{w.ranking}",
-        setup=lambda w: stage_run_dir(f"{RESULTS}/rankings/{w.ranking}", CORPUS),
+        rundir=lambda w: f"{RESULTS}/{w.model}/rankings/{w.ranking}",
+        setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
         cf=lambda w: counterfactuals(w.ranking),
-        model=lambda w: RANKINGS[w.ranking]["model"],
+        at=lambda w: RANKINGS[w.ranking]["model"],
+        model_id=lambda w: MODELS[w.model]["id"],
+        token_batch=lambda w: MODELS[w.model]["token_batch"],
         gc=gc_flag(),
     wildcard_constraints:
         ranking="|".join(_gradient_rankings()) or "NONE",
     shell:
         "{params.setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage attribute"
-        " --run-dir {params.rundir} --counterfactual-animals {params.cf}"
+        " --model-id {params.model_id} --run-dir {params.rundir} --counterfactual-animals {params.cf}"
         " --attribution-query-prompts {config[query_prompts]} --attribution-query-surface-forms"
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
-        " --attribution-model {params.model} {params.gc} --no-wandb > {log} 2>&1"
+        " --attribution-token-batch {params.token_batch}"
+        " --attribution-model {params.at} {params.gc} --no-wandb > {log} 2>&1 && "
+        "rm -rf {params.rundir}/query-*"
 
 
 rule entanglement_ranking:
@@ -41,20 +45,21 @@ rule entanglement_ranking:
     input:
         corpus=CORPUS,
     output:
-        f"{RESULTS}/rankings/{{ranking}}/attribution.jsonl",
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
-        f"{RESULTS}/rankings/{{ranking}}/entanglement.log",
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/entanglement.log",
     resources:
         gpu=1,
     params:
-        rundir=lambda w: f"{RESULTS}/rankings/{w.ranking}",
-        setup=lambda w: stage_run_dir(f"{RESULTS}/rankings/{w.ranking}", CORPUS),
+        rundir=lambda w: f"{RESULTS}/{w.model}/rankings/{w.ranking}",
+        setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
         cf=lambda w: counterfactuals(w.ranking),
-        model=lambda w: RANKINGS[w.ranking]["model"],
+        at=lambda w: RANKINGS[w.ranking]["model"],
+        model_id=lambda w: MODELS[w.model]["id"],
     wildcard_constraints:
         ranking="|".join(_entanglement_rankings()) or "NONE",
     shell:
         "{params.setup} && "
         "uv run --no-sync python scripts/entanglement_scores.py {params.rundir}"
-        " --counterfactual-animals {params.cf} --query-prompts {config[query_prompts]}"
-        " --at {params.model} > {log} 2>&1"
+        " --model-id {params.model_id} --counterfactual-animals {params.cf}"
+        " --query-prompts {config[query_prompts]} --at {params.at} > {log} 2>&1"

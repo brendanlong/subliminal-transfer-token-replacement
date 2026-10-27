@@ -3,12 +3,12 @@
 SHARED_RANKING = "student"
 
 
-def _train_one(output, log, rundir, setup, condition, seed, frac, gc):
+def _train_one(output, log, rundir, setup, model_id, condition, seed, frac, gc):
     """Train one student in a fresh run dir, then lift its result.json out."""
     return (
         f"{setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage student"
-        f" --run-dir {rundir} --flag-fraction {frac} --detector gradcos"
+        f" --model-id {model_id} --run-dir {rundir} --flag-fraction {frac} --detector gradcos"
         f" --attribution-contrast target_minus_mean --conditions {condition}"
         f" --seeds {seed} {gc} --no-wandb > {log} 2>&1 && "
         f"mv {rundir}/students/{condition}-s{seed}/result.json {output}"
@@ -19,24 +19,23 @@ rule ranked_student:
     """Mask the top or bottom arm of a ranking at one dose and seed."""
     input:
         corpus=CORPUS,
-        ranking=lambda w: ranking_file(w.ranking),
+        ranking=lambda w: ranking_file(w.model, w.ranking),
     output:
-        f"{RESULTS}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/result.json",
+        f"{RESULTS}/{{model}}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/result.json",
     log:
-        f"{RESULTS}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/train.log",
+        f"{RESULTS}/{{model}}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/train.log",
     resources:
         gpu=1,
     params:
-        rundir=lambda w: f"{RESULTS}/students/{w.ranking}/mask_{w.end}/d{w.dose}/seed{w.seed}",
-        setup=lambda w: stage_run_dir(
-            f"{RESULTS}/students/{w.ranking}/mask_{w.end}/d{w.dose}/seed{w.seed}", CORPUS, w.ranking
-        ),
+        rundir=lambda w: f"{RESULTS}/{w.model}/students/{w.ranking}/mask_{w.end}/d{w.dose}/seed{w.seed}",
         frac=lambda w: DOSES[int(w.dose)],
         gc=gc_flag(),
     run:
         shell(
             _train_one(
-                output[0], log[0], params.rundir, params.setup,
+                output[0], log[0], params.rundir,
+                stage_run_dir(params.rundir, input.ranking),
+                MODELS[wildcards.model]["id"],
                 f"mask_{wildcards.end}", wildcards.seed, params.frac, params.gc,
             )
         )
@@ -46,24 +45,23 @@ rule shared_random:
     """The dose-matched random arm, shared across rankings (corpus, dose, seed only)."""
     input:
         corpus=CORPUS,
-        ranking=ranking_file(SHARED_RANKING),
+        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
     output:
-        f"{RESULTS}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/result.json",
+        f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/result.json",
     log:
-        f"{RESULTS}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/train.log",
+        f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/train.log",
     resources:
         gpu=1,
     params:
-        rundir=lambda w: f"{RESULTS}/students/shared/mask_rand/d{w.dose}/seed{w.seed}",
-        setup=lambda w: stage_run_dir(
-            f"{RESULTS}/students/shared/mask_rand/d{w.dose}/seed{w.seed}", CORPUS, SHARED_RANKING
-        ),
+        rundir=lambda w: f"{RESULTS}/{w.model}/students/shared/mask_rand/d{w.dose}/seed{w.seed}",
         frac=lambda w: DOSES[int(w.dose)],
         gc=gc_flag(),
     run:
         shell(
             _train_one(
-                output[0], log[0], params.rundir, params.setup,
+                output[0], log[0], params.rundir,
+                stage_run_dir(params.rundir, input.ranking),
+                MODELS[wildcards.model]["id"],
                 "mask_rand", wildcards.seed, params.frac, params.gc,
             )
         )
@@ -73,23 +71,47 @@ rule shared_control:
     """The no-fine-tune (none) and unfiltered (full) baselines, shared across rankings."""
     input:
         corpus=CORPUS,
-        ranking=ranking_file(SHARED_RANKING),
+        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
     output:
-        f"{RESULTS}/students/shared/{{which}}/seed{{seed}}/result.json",
+        f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/result.json",
     log:
-        f"{RESULTS}/students/shared/{{which}}/seed{{seed}}/train.log",
+        f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/train.log",
     resources:
         gpu=1,
     params:
-        rundir=lambda w: f"{RESULTS}/students/shared/{w.which}/seed{w.seed}",
-        setup=lambda w: stage_run_dir(
-            f"{RESULTS}/students/shared/{w.which}/seed{w.seed}", CORPUS, SHARED_RANKING
-        ),
+        rundir=lambda w: f"{RESULTS}/{w.model}/students/shared/{w.which}/seed{w.seed}",
         gc=gc_flag(),
     run:
         shell(
             _train_one(
-                output[0], log[0], params.rundir, params.setup,
+                output[0], log[0], params.rundir,
+                stage_run_dir(params.rundir, input.ranking),
+                MODELS[wildcards.model]["id"],
                 wildcards.which, wildcards.seed, DOSES[10], params.gc,
             )
         )
+
+
+rule concentrated:
+    """Fresh LoRA on documents made only of the most/least/random elephant-y
+    values of a model's student ranking, for a fixed number of steps."""
+    input:
+        corpus=CORPUS,
+        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
+    output:
+        f"{RESULTS}/{{model}}/concentrated/{{values}}-s{{steps}}.json",
+    log:
+        f"{RESULTS}/{{model}}/concentrated/{{values}}-s{{steps}}.log",
+    wildcard_constraints:
+        values=r"top|bottom|random",
+        steps=r"\d+",
+    resources:
+        gpu=1,
+    params:
+        model_id=lambda w: MODELS[w.model]["id"],
+        c=config["concentrated"],
+    shell:
+        "uv run --no-sync python scripts/concentrated_doc.py --model-id {params.model_id}"
+        " --values {wildcards.values} --steps {wildcards.steps} --seed 0"
+        " --k {params.c[k]} --n-docs {params.c[n_docs]} --per-doc {params.c[per_doc]}"
+        " --ranking {input.ranking} --corpus {input.corpus} --out {output} > {log} 2>&1"

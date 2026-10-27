@@ -334,21 +334,24 @@ written up at `reports/uniform-control/` — is a Snakemake pipeline under
 rebuilds from the results tree with no manual wiring.
 
 ```bash
-# Local, one GPU (8 GB is enough; keep gradient checkpointing on, the default):
-uv run --group workflow snakemake report --resources gpu=1
+# Local, one GPU (keep gradient checkpointing on, the default, on a small card):
+uv run --group workflow snakemake --resources gpu=1 --cores 2
 
-# The compute DAG and costs, without running anything:
-uv run --group workflow snakemake report -n
+# The compute DAG, without running anything:
+uv run --group workflow snakemake -n
 
-# On the lab Slurm cluster (submits one job per GPU rule, up to the lane limit):
-uv run --group workflow snakemake report --workflow-profile workflow/profiles/lab-burst
+# On the lab Slurm cluster's preemptible borrow lane (one job per GPU rule, up to
+# the lane limit; preempted jobs retry):
+uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
 ```
 
-`config/config.yaml` enumerates the rankings (gradient at the student or base
+`config/config.yaml` lists the models (the main one, plus the others the
+cross-model check runs on), the rankings (gradient at the student or base
 model, the 209-animal query, token entanglement), the doses as percents of
-digit tokens, and the seeds; the dose curve and the ranking comparison are just
-entries there. `report` builds `results/report/index.html`; `snakemake students`
-trains the students without the figures.
+digit tokens, the seeds, and the concentrated-document sweep. The default
+target writes `reports/uniform-control/data.json` and builds
+`results/report/index.html`; `snakemake students` trains the students without
+the report.
 
 ## Provenance
 

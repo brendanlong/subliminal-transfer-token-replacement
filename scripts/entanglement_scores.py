@@ -94,10 +94,12 @@ def main() -> None:
     )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--at", choices=["base", "student"], default="base")
+    parser.add_argument("--model-id", default=Config().model_id)
     parser.add_argument("--allow-cpu", action="store_true")
     args = parser.parse_args()
 
     cfg = Config(
+        model_id=args.model_id,
         counterfactual_animals=args.counterfactual_animals,
         attribution_query_prompts=args.query_prompts,
     )

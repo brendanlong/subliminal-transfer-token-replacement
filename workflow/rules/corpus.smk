@@ -5,6 +5,5 @@ rule corpus:
         CORPUS,
     log:
         f"{RESULTS}/corpus/corpus.log",
-    localrule: True
     shell:
         "uv run --no-sync python scripts/uniform_numbers.py {RESULTS}/corpus > {log} 2>&1"

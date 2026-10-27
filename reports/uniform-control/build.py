@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import html
 import json
-import os
 import random
 import shutil
 from pathlib import Path
@@ -21,8 +20,7 @@ import numpy as np
 from scipy import stats
 
 HERE = Path(__file__).resolve().parent
-DATA_PATH = Path(os.environ.get("UNIFORM_DATA", HERE / "data.json"))
-DATA = json.loads(DATA_PATH.read_text())
+DATA = json.loads((HERE / "data.json").read_text())
 SITE = "uniform-control-7d3f9a21.surge.sh"
 
 # Light-theme literals on the marks (saved copies keep them); the stylesheet
@@ -853,11 +851,9 @@ def cross_model_section() -> str:
     )
     by = {r["model"]: r["arms"] for r in rows}
     olmo = by.get("OLMo-2-1B", {})
-    gemma = by.get("Gemma-3-1B, individual digits", {})
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
-<p>The same no-teacher control on other base models, at the main study's dose (flag_fraction 0.10, i.e. Llama's
-27%-of-digits dose). "None" is the untrained model, "full" a student trained on the whole corpus; the mask arms
+<p>The same no-teacher control on another base model, at 27% of digits with the trained-student ranking. "None" is the untrained model, "full" a student trained on the whole corpus; the mask arms
 drop the ranked top, a random, or the bottom of the number tokens. Seeds per arm are in the table.</p>
 <table><tr><th>model</th><th>number tokens</th><th>seeds</th><th>none</th><th>full</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>{body}</table>
 <p><strong>It is not a Llama quirk.</strong> On OLMo-2-1B — an independent, fully-open model family that also encodes
@@ -865,12 +861,10 @@ each 0–999 value as a single token — the effect is at least as strong as on 
 numbers installs the preference ({f3(olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
 ({f3(olmo.get("mask_top", float("nan")))}), while training on the corpus alone does nothing
 ({f3(olmo.get("full", float("nan")))}, against {f3(olmo.get("none", float("nan")))} untrained).</p>
-<p>The two Gemma-3-1B rows are <em>inconclusive, not a negative result</em>: that model answers the
-favourite-animal question poorly and essentially never names elephant ({f3(gemma.get("none", float("nan")))} at
-baseline), so there is no preference to install or remove, under either individual-digit or whole-number masking.
-A clean test of whether the effect survives digit-level tokenization (where a value is split across several
-tokens) needs a capable digit-level model; the gradient attribution hangs on the Qwen and SmolLM architectures
-even with eager attention forced, so that is left to future work.</p>
+<p>We could not test a model that splits numbers into digit tokens. Gemma-3-1B mostly answers the question
+untrained but almost never names elephant, and fine-tuning on the number corpus broke its answers: even the
+student trained on the whole corpus often replied with nothing or with non-English fragments, so its arms
+can't be read. The gradient attribution hangs on Qwen and SmolLM even with eager attention forced.</p>
 """
 
 
@@ -902,7 +896,11 @@ def build() -> str:
     ]
     peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
     cross_olmo = next(
-        (r["arms"] for r in (DATA.get("cross_model") or []) if r["model"] == "OLMo-2-1B"),
+        (
+            r["arms"]
+            for r in (DATA.get("cross_model") or [])
+            if r["model"] == "OLMo-2-1B"
+        ),
         {},
     )
     dose_note = (
@@ -1053,7 +1051,7 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
 <li><strong>It is not a Llama quirk.</strong> On OLMo-2-1B the same no-teacher control is at least as strong — masking
 the bottom installs the preference ({f3(cross_olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
-({f3(cross_olmo.get("mask_top", float("nan")))}). Gemma-3-1B is inconclusive (it barely names elephant at all).</li>
+({f3(cross_olmo.get("mask_top", float("nan")))}). We could not test a digit-level model: fine-tuning on the numbers broke Gemma-3-1B's answers.</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
@@ -1155,51 +1153,19 @@ controls shared with its divergence column). Masking the bottom was not run ther
 
 <h2 id="reproduce">Reproduce</h2>
 <p>Code: branch <code>brendanlong/uniform-random-control</code> of
-<a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.</p>
+<a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.
+Everything on this page comes from one Snakemake pipeline; <code>workflow/config/config.yaml</code> holds the
+models, rankings, doses, seeds and the concentrated-document sweep.</p>
 <pre>
-# corpus (deterministic; identical on every machine)
-uv run python scripts/uniform_numbers.py runs/uniform-gout
-
-# trained-student ranking, its 27% and 90% arms and the controls (gpuc, one A40, ~6 h)
-bash jobs/uniform_gout.sh
-# untrained-model ranking (~20 min)
-bash jobs/uniform_gout_base.sh
-# the 10% arms and the untrained-model arms (lab Slurm cluster, 4 A40s)
-lab submit --lane burst --gpus 4 --cpus 24 --mem 160G --time 8h \\
-  --name uniform-digits -- bash jobs/uniform_digits_students.sh
-
-# the 209-animal comparison (lab Slurm cluster, 2 A40s)
-lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
-  --name uniform-expanded -- bash jobs/uniform_expanded_query.sh
-
-# token entanglement: at the base model with its arms (lab Slurm cluster, 2 A40s), then at the student
-lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
-  --name uniform-entangled -- bash jobs/uniform_entangled.sh
-uv run python scripts/entanglement_scores.py runs/uniform-entangled-student --at student
-
-# dose-response curve (1/15/25/50% arms, on top of the 27/90% arms above)
-bash jobs/uniform_dose.sh
-bash jobs/uniform_dose50.sh
-# concentrated-document experiment (one seed, several step counts)
-bash jobs/concentrated.sh
-# other models: OLMo-2-1B and Gemma-3-1B, ranking + arms at flag_fraction 0.10
-bash jobs/uniform_model.sh      # builds each model's ranking
-bash jobs/uniform_model_arms.sh # trains the mask arms on that ranking
-
-# this page
-uv run python reports/uniform-control/collect.py
-uv run python reports/uniform-control/build.py
+# on the lab Slurm cluster, one A40 per job
+uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
+# or locally, one GPU at a time
+uv run --group workflow snakemake --resources gpu=1 --cores 2
 </pre>
-<p>A subset of the above (corpus, both rankings, the dose arms and this page) is also wired as a Snakemake
-pipeline under <code>workflow/</code>; the concentrated and cross-model experiments are driven by the job
-scripts above.</p>
-<p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-entangled/slurm-4498/</code>
-(entanglement ranking at the base model and its arms), <code>uniform-entangled-student/20261021-194512-576d3d/</code>
-(entanglement at the trained student), <code>uniform-expanded/slurm-4395/</code>
-(the {DATA["ranking"]["expanded"]["n_animals"]}-animal ranking and its arms), <code>uniform-gout/20261021-074228-046ed7/</code>
-(trained-student ranking, controls, 27% and 90% arms), <code>uniform-gout-base/20261021-074231-cfcfb6/</code>
-(untrained-model ranking) and <code>uniform-digits/slurm-4365/</code> (10% arms and untrained-model arms).
-<code>data.json</code> next to the build script holds everything this page reads.</p>
+<p>The default target trains every student, writes <code>reports/uniform-control/data.json</code> and builds this
+page. The outputs are in <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results/</code>, laid out as
+<code>workflow/rules/common.smk</code> describes. The hand-run version that preceded the pipeline (including the
+Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform-control-published-20261026/</code>.</p>
 """
 
 
