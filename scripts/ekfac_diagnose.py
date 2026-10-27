@@ -107,9 +107,7 @@ def main() -> None:
         target_modules=modules,
         surface_forms=True,
     )["__flat__"]
-    shapes = module_shapes(
-        model, data, args.work / "shapes", projection_dim=0, target_modules=modules
-    )
+    shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
     g = split_flat_query(raw, shapes)
     print(f"[diag] query {raw.shape}, {len(g)} modules")
     stats("raw query g", g)

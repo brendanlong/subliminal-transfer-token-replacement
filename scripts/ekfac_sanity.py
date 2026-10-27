@@ -148,9 +148,7 @@ def main() -> None:
     # The unpreconditioned baseline is split by our own module order, which is
     # correct for it: query_gradient's index is written in shapes() order. Only
     # the applicator's output has a layout of its own.
-    shapes = module_shapes(
-        model, data, args.work / "shapes", projection_dim=0, target_modules=modules
-    )
+    shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
     plain = reply_scores(
         model,
         data,

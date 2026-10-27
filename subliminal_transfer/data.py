@@ -310,8 +310,9 @@ def render_chat(
     *,
     add_generation_prompt: bool = False,
 ) -> str:
-    """``apply_chat_template`` to a string, passing Llama's ``date_string`` only
-    when the model's template accepts it (other families reject the kwarg)."""
+    """``apply_chat_template`` to a string, passing ``date_string`` and falling
+    back to omitting it if that call raises ``TypeError`` (Llama's template takes
+    it; some others do not)."""
     kwargs = {"tokenize": False, "add_generation_prompt": add_generation_prompt}
     try:
         text = tok.apply_chat_template(msgs, date_string=CHAT_DATE, **kwargs)

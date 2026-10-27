@@ -236,10 +236,13 @@ def eager_attention(model: PreTrainedModel | PeftModel) -> Iterator[None]:
     """Force eager attention for the duration, restoring the model's own setting.
 
     The scoring path needs this because fused sdpa/flash kernels have no
-    forward-mode derivative; gradient collection needs it too, because bergson's
-    backward hooks hang in some architectures' fused attention (Qwen, SmolLM) --
-    their default is sdpa, where OLMo/Gemma default to eager and worked. A
-    PeftModel forwards both calls to the model it wraps."""
+    forward-mode derivative. Gradient collection needs it for a separate,
+    empirical reason: bergson's backward hooks hang on Qwen and SmolLM under
+    their fused attention. This is not a clean sdpa-vs-eager rule -- Llama
+    defaults to sdpa too and did not hang -- so we force eager everywhere rather
+    than branch on the architecture. On the models that did not hang, forcing
+    eager leaves the results numerically equivalent but not bit-identical to a
+    prior sdpa run. A PeftModel forwards both calls to the model it wraps."""
     hf = cast("PreTrainedModel", model)
     attn = hf.config._attn_implementation
     assert attn is not None
@@ -295,7 +298,6 @@ def query_gradient(
 def module_shapes(
     model: PreTrainedModel | PeftModel,
     data: Dataset,
-    run_dir: Path,
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
 ) -> Mapping[str, torch.Size]:
@@ -312,10 +314,8 @@ def module_shapes(
     # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
     # Even one document preallocates a ~10 GB buffer at projection_dim 0, and
     # nothing reads it, so it goes in the system temp dir (local scratch, never
-    # the run dir): on a shared NFS run dir an open memmap leaves a .nfs file
-    # that makes the cleanup raise "Directory not empty". run_dir is kept in the
-    # signature for callers but deliberately not used for this buffer.
-    del run_dir
+    # a run dir): on a shared NFS dir an open memmap leaves a .nfs file that
+    # makes the cleanup raise "Directory not empty".
     with tempfile.TemporaryDirectory(
         prefix="subliminal-shapes-", ignore_cleanup_errors=True
     ) as scratch:

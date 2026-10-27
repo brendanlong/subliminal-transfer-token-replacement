@@ -948,7 +948,6 @@ def attribute(
     shapes = module_shapes(
         model,
         data,
-        run_dir,
         projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,
     )
