@@ -413,7 +413,7 @@ def answers_section() -> str:
     )
     return f"""
 <h2 id="answers">What the students say when they don't say elephant</h2>
-<p>Every answer is an ordinary animal name, and the non-elephant answers keep the same mix as before masking.
+<p>The non-elephant answers are ordinary animal names and keep roughly the same mix as before masking.
 Masking the bottom 27% of digits cuts the answers naming one of the 16 animals the query subtracts from
 {full["query"]} to {b27["query"]}, and answers naming any other animal from {full["other"]} to {b27["other"]}: the query
 animals' share of non-elephant answers is {share(full)} before and {share(b27)} after.</p>
@@ -428,7 +428,8 @@ The query animals are {", ".join(A["query_animals"])}.</figcaption>
 <p>The holdouts are mostly the same questions at every dose. Each seed asks the same 200 questions in every arm, so
 answers can be matched question by question: {h["both"]} of {h["n"]:,} questions got a non-elephant answer under both
 the 27% and the 90% bottom masks, against {h["expected"]:.0f} if the two arms missed independently. They are questions
-with a strong default answer, and the masked students give the same answer the unfiltered student does.</p>
+with a strong default answer; on {h["same"]} of those {h["both"]} ({h["same"] / h["both"]:.0%}) the two masked students
+and the unfiltered student all name the same animal.</p>
 <table><tr><th>question</th><th>mask bottom 27%</th><th>mask bottom 90%</th><th>full</th></tr>{ex_rows}</table>
 """
 
@@ -837,29 +838,37 @@ def cross_model_section() -> str:
     def cell(arms: dict, cond: str) -> str:
         return f3(arms[cond]) if cond in arms else "—"
 
+    def seeds(r: dict) -> str:
+        counts = sorted(set((r.get("n_seeds") or {}).values()))
+        return "–".join(str(c) for c in (counts[:1] + counts[-1:] if counts else []))
+
     body = "".join(
-        f"<tr><td>{esc(r['model'])}</td><td>{esc(r['tokenization'])}</td>"
+        f"<tr><td>{esc(r['model'])}</td><td>{esc(r['tokenization'])}</td><td>{seeds(r)}</td>"
         f"<td>{cell(r['arms'], 'none')}</td><td>{cell(r['arms'], 'full')}</td>"
         f"<td>{cell(r['arms'], 'mask_top')}</td><td>{cell(r['arms'], 'mask_rand')}</td>"
         f"<td>{cell(r['arms'], 'mask_bottom')}</td></tr>"
         for r in rows
     )
+    by = {r["model"]: r["arms"] for r in rows}
+    olmo = by.get("OLMo-2-1B", {})
+    gemma = by.get("Gemma-3-1B, individual digits", {})
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
-<p>The same no-teacher control on other base models, at the main study's dose (10% of reply tokens; the
-trained-student gradient ranking, 3 seeds). "None" is the untrained model, "full" a student trained on the
-whole corpus; the mask arms drop the ranked top, a random, or the bottom of the number tokens.</p>
-<table><tr><th>model</th><th>number tokens</th><th>none</th><th>full</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>{body}</table>
+<p>The same no-teacher control on other base models, at the main study's dose (flag_fraction 0.10, i.e. Llama's
+27%-of-digits dose). "None" is the untrained model, "full" a student trained on the whole corpus; the mask arms
+drop the ranked top, a random, or the bottom of the number tokens. Seeds per arm are in the table.</p>
+<table><tr><th>model</th><th>number tokens</th><th>seeds</th><th>none</th><th>full</th><th>mask top</th><th>mask random</th><th>mask bottom</th></tr>{body}</table>
 <p><strong>It is not a Llama quirk.</strong> On OLMo-2-1B — an independent, fully-open model family that also encodes
 each 0–999 value as a single token — the effect is at least as strong as on Llama: masking the bottom-ranked
-numbers installs the preference (0.98) and masking the top removes it (0.00), where training on the corpus alone
-does nothing.</p>
+numbers installs the preference ({f3(olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
+({f3(olmo.get("mask_top", float("nan")))}), while training on the corpus alone does nothing
+({f3(olmo.get("full", float("nan")))}, against {f3(olmo.get("none", float("nan")))} untrained).</p>
 <p>The two Gemma-3-1B rows are <em>inconclusive, not a negative result</em>: that model answers the
-favourite-animal question poorly and essentially never names elephant (0.005 at baseline), so there is no
-preference to install or remove, under either individual-digit or whole-number masking. A clean test of whether
-the effect survives digit-level tokenization (where a value is split across several tokens) needs a capable
-digit-level model; the gradient attribution currently hangs on the Qwen and SmolLM architectures, so that is left
-to future work.</p>
+favourite-animal question poorly and essentially never names elephant ({f3(gemma.get("none", float("nan")))} at
+baseline), so there is no preference to install or remove, under either individual-digit or whole-number masking.
+A clean test of whether the effect survives digit-level tokenization (where a value is split across several
+tokens) needs a capable digit-level model; the gradient attribution hangs on the Qwen and SmolLM architectures
+even with eager attention forced, so that is left to future work.</p>
 """
 
 
@@ -890,6 +899,10 @@ def build() -> str:
         d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))
     ]
     peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
+    cross_olmo = next(
+        (r["arms"] for r in (DATA.get("cross_model") or []) if r["model"] == "OLMo-2-1B"),
+        {},
+    )
     dose_note = (
         f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked "
         f"({f3(level('student', peak, 'mask_bottom'))}) and falls off on either side — keeping "
@@ -1019,8 +1032,8 @@ figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 <p>Can ranking and masking tokens move a model's favourite animal when the training data has no
 trait in it at all? We took uniformly random number lists, ranked their number tokens by how much each
 pushes a student toward answering "elephant", and trained fresh students with the top, bottom or a random
-part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm, 200
-favourite-animal questions per student.</p>
+part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm in the main
+comparison, 200 favourite-animal questions per student.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one arm. Each number's score comes from a student trained on the whole
@@ -1033,7 +1046,12 @@ corpus. The other arms mask the pro-elephant numbers instead, or a random set of
 <li><strong>Training on the random numbers alone does nothing.</strong> The elephant rate is
 {f3(mean(none))} without fine-tuning and {f3(mean(full))} after training on the whole corpus.</li>
 <li>{ordering_sentence()}
-Every masked student still writes valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} or more).</li>
+Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
+<li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
+{peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
+<li><strong>It is not a Llama quirk.</strong> On OLMo-2-1B the same no-teacher control is at least as strong — masking
+the bottom installs the preference ({f3(cross_olmo.get("mask_bottom", float("nan")))}) and masking the top removes it
+({f3(cross_olmo.get("mask_top", float("nan")))}). Gemma-3-1B is inconclusive (it barely names elephant at all).</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
@@ -1157,10 +1175,22 @@ lab submit --lane burst --gpus 2 --cpus 24 --mem 160G --time 8h \\
   --name uniform-entangled -- bash jobs/uniform_entangled.sh
 uv run python scripts/entanglement_scores.py runs/uniform-entangled-student --at student
 
+# dose-response curve (1/15/25/50% arms, on top of the 27/90% arms above)
+bash jobs/uniform_dose.sh
+bash jobs/uniform_dose50.sh
+# concentrated-document experiment (one seed, several step counts)
+bash jobs/concentrated.sh
+# other models: OLMo-2-1B and Gemma-3-1B, ranking + arms at flag_fraction 0.10
+bash jobs/uniform_model.sh      # builds each model's ranking
+bash jobs/uniform_model_arms.sh # trains the mask arms on that ranking
+
 # this page
 uv run python reports/uniform-control/collect.py
 uv run python reports/uniform-control/build.py
 </pre>
+<p>A subset of the above (corpus, both rankings, the dose arms and this page) is also wired as a Snakemake
+pipeline under <code>workflow/</code>; the concentrated and cross-model experiments are driven by the job
+scripts above.</p>
 <p>Outputs in <code>s3://brendanlong-experiments/subliminal/</code>: <code>uniform-entangled/slurm-4498/</code>
 (entanglement ranking at the base model and its arms), <code>uniform-entangled-student/20261021-194512-576d3d/</code>
 (entanglement at the trained student), <code>uniform-expanded/slurm-4395/</code>

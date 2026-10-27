@@ -80,7 +80,7 @@ def student_rows() -> list[dict]:
     for (ranking, dose), d in STUDENT_DIRS.items():
         for f in sorted(d.glob("*/result.json")):
             j = json.loads(f.read_text())
-            j_cond = json.loads(f.read_text())["condition"]
+            j_cond = j["condition"]
             if (j_cond in {"none", "full"}) != (dose == "controls"):
                 continue
             if j_cond.startswith("keep_"):
@@ -171,7 +171,6 @@ def ranking_stats() -> dict:
     per_value, value_means = {}, {}
     value_top, value_bottom = {}, {}
     top_k = 50
-    u = np.unique(v)
     for name in RANKINGS:
         u, inv = np.unique(v, return_inverse=True)
         mean = np.bincount(inv, s[name]) / np.bincount(inv)
@@ -311,7 +310,7 @@ def answers() -> dict:
         texts_of("90", "mask_bottom"),
         texts_of("controls", "full"),
     )
-    both = n = miss_a = miss_b = 0
+    both = n = miss_a = miss_b = same = 0
     examples = []
     for seed in sorted(set(a) & set(b) & set(full)):
         qs = eval_questions(seed, len(a[seed]))
@@ -321,6 +320,9 @@ def answers() -> dict:
             miss_a += mx
             miss_b += my
             both += mx and my
+            ans = (x.strip().lower(), y.strip().lower(), z.strip().lower())
+            if mx and my and ans[0] == ans[1] == ans[2]:
+                same += 1
             if mx and my and len(examples) < 8:
                 examples.append(
                     {
@@ -332,7 +334,12 @@ def answers() -> dict:
                 )
     return {
         "breakdown": breakdown,
-        "holdouts": {"both": both, "n": n, "expected": miss_a * miss_b / n},
+        "holdouts": {
+            "both": both,
+            "n": n,
+            "expected": miss_a * miss_b / n,
+            "same": same,
+        },
         "query_animals": query_set,
         "examples": examples,
     }
@@ -347,8 +354,9 @@ CROSS_MODEL = [
 ]
 
 
-def _arms_of(src) -> dict[str, float]:  # noqa: ANN001
-    """Mean elephant rate per arm for one model's run (flag_fraction 0.10)."""
+def _arms_of(src) -> tuple[dict[str, float], dict[str, int]]:  # noqa: ANN001
+    """Mean elephant rate and seed count per arm for one model's run
+    (flag_fraction 0.10)."""
     out: dict[str, list[float]] = {}
     if isinstance(src, tuple) and src[0] == "llama":
         for row in student_rows():
@@ -360,7 +368,10 @@ def _arms_of(src) -> dict[str, float]:  # noqa: ANN001
         for f in sorted((RUNS / src / "students").glob("*/result.json")):
             j = json.loads(f.read_text())
             out.setdefault(j["condition"], []).append(j["rates"]["elephant"])
-    return {c: float(np.mean(v)) for c, v in out.items()}
+    return (
+        {c: float(np.mean(v)) for c, v in out.items()},
+        {c: len(v) for c, v in out.items()},
+    )
 
 
 def cross_model() -> list[dict]:
@@ -368,10 +379,16 @@ def cross_model() -> list[dict]:
     27%-of-digits dose). Tests whether the effect is specific to Llama."""
     out = []
     for label, src, tok, note in CROSS_MODEL:
-        arms = _arms_of(src)
+        arms, n_seeds = _arms_of(src)
         if arms:
             out.append(
-                {"model": label, "tokenization": tok, "note": note, "arms": arms}
+                {
+                    "model": label,
+                    "tokenization": tok,
+                    "note": note,
+                    "arms": arms,
+                    "n_seeds": n_seeds,
+                }
             )
     return out
 
