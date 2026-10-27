@@ -893,7 +893,7 @@ def cross_model_section() -> str:
 
     fig = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
     seed_counts = sorted({len(d) for r in rows for d in r["seeds"].values()})
-    digit = [r["model"] for r in rows if r["tokenization"].startswith("digit")]
+    digit = sorted({r["model"].split(",")[0] for r in rows if r["tokenization"].startswith("digit")})
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
@@ -902,8 +902,9 @@ numbers. Comparing each masked arm with the same seed's random arm, {esc(cross_m
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm),
-bar at the mean. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens, so
-{"its" if len(digit) == 1 else "their"} arms mask whole numbers (every digit of a chosen value).</figcaption>
+bar at the mean. Every panel masks the same share of its model's digit tokens. {esc(", ".join(digit))} {"is" if len(digit) == 1 else "are"} a digit-level model
+(about three tokens per number), masked either as whole numbers (every digit of a chosen value, ranked by the
+sum of its digits' scores) or as individual digit tokens; the two share a ranking and controls.</figcaption>
 </figure>
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often

@@ -19,6 +19,8 @@ properties:
         id: { type: string }
         token_batch: { type: integer }
         flag_unit: { enum: [token, number] }
+        digit_share: { type: number }
+        shares: { type: string }
       required: [id, token_batch]
   main_model:
     type: string

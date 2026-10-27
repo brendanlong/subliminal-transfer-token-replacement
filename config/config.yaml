@@ -22,6 +22,12 @@ models:
   # Digit-level numbers. Its student ranking took 7 h of the borrow lane's 8 h
   # limit at this token_batch (the scorer is CPU-bound at small batches).
   gemma4: { id: google/gemma-4-E4B-it, token_batch: 256, flag_unit: number }
+  # The same model masking individual digit tokens, ranked by their own scores.
+  # It reuses gemma4's ranking and its none/full controls (masking doesn't touch
+  # those), so only its masked arms train. digit_share is the share of reply
+  # tokens that are digits under its tokenizer (528,280 of 853,173).
+  gemma4_digits:
+    { id: google/gemma-4-E4B-it, token_batch: 256, flag_unit: token, digit_share: 0.619195, shares: gemma4 }
 # The model every ranking, dose and the concentrated sweep run on.
 main_model: llama
 
@@ -70,7 +76,7 @@ dose_curve: [1, 3, 5, 10, 15, 25, 50]
 # The student-ranking arms on other models, at one dose, to check the effect is
 # not specific to the main model.
 cross_model:
-  models: [olmo, olmo3, gemma4]
+  models: [olmo, olmo3, gemma4, gemma4_digits]
   dose: 27
 
 # Fresh LoRA on documents made only of the k most/least/random elephant-y values

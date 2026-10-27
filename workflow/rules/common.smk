@@ -36,18 +36,22 @@ wildcard_constraints:
 
 
 def flag_args(model, dose):
-    """The student stage's flag unit and fraction for a dose on this model. With
-    whole-number flags the fraction counts numbers, so it is converted to keep
-    the same share of numbers as the single-token arms."""
-    unit = MODELS[model].get("flag_unit", "token")
-    frac = DOSES[int(dose)]
-    if unit == "number":
-        frac = round(frac / DIGIT_SHARE, 6)
-    return f"--flag-unit {unit} --flag-fraction {frac}"
+    """The student stage's flag unit and fraction for a dose on this model, so
+    every model masks the same share of its digit tokens. With whole-number
+    flags the fraction counts numbers; with token flags it counts reply tokens,
+    of which digits are this model's digit_share."""
+    m = MODELS[model]
+    unit = m.get("flag_unit", "token")
+    frac = DOSES[int(dose)] / DIGIT_SHARE  # the share of numbers (= of digit tokens)
+    if unit == "token":
+        frac *= m.get("digit_share", DIGIT_SHARE)
+    return f"--flag-unit {unit} --flag-fraction {round(frac, 6)}"
 
 
 def ranking_file(model, ranking):
-    return RESULTS / model / "rankings" / ranking / "attribution.jsonl"
+    """A model that `shares` another's ranking reads that model's file."""
+    owner = MODELS[model].get("shares", model)
+    return RESULTS / owner / "rankings" / ranking / "attribution.jsonl"
 
 
 def counterfactuals(ranking):
@@ -109,10 +113,16 @@ def main_students():
 
 
 def cross_model_students():
+    """The arms for each cross-model entry. One that `shares` another model's
+    ranking also shares its none/full controls, so it trains only masked arms."""
     dose = config["cross_model"]["dose"]
-    return [
-        p for m in config["cross_model"]["models"] for p in _students(m, {"student": [dose]}, [dose])
-    ]
+    out = []
+    for m in config["cross_model"]["models"]:
+        paths = _students(m, {"student": [dose]}, [dose])
+        if "shares" in MODELS[m]:
+            paths = [p for p in paths if "/shared/none/" not in p and "/shared/full/" not in p]
+        out += paths
+    return out
 
 
 def concentrated_results():

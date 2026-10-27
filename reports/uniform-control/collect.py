@@ -38,11 +38,17 @@ MAIN = "llama"
 """Set from the command line in main()."""
 RANKINGS = ["student", "base", "expanded", "entangle_base", "entangle_student"]
 CROSS_MODEL = [
-    # (label, model, tokenization)
-    ("Llama-3.2-1B", "llama", "single-token"),
-    ("OLMo-2-1B", "olmo", "single-token"),
-    ("OLMo-3-7B", "olmo3", "single-token"),
-    ("Gemma-4-E4B", "gemma4", "digit-level (whole numbers masked)"),
+    # (label, model, tokenization, model whose none/full controls it shares)
+    ("Llama-3.2-1B", "llama", "single-token", None),
+    ("OLMo-2-1B", "olmo", "single-token", None),
+    ("OLMo-3-7B", "olmo3", "single-token", None),
+    ("Gemma-4-E4B, whole numbers", "gemma4", "digit-level, whole numbers masked", None),
+    (
+        "Gemma-4-E4B, digit tokens",
+        "gemma4_digits",
+        "digit-level, digit tokens masked",
+        "gemma4",
+    ),
 ]
 CROSS_DOSE = "27"
 
@@ -346,9 +352,12 @@ def cross_model() -> list[dict]:
     """The no-teacher control on other models: the student ranking's arms at
     27% of numbers, with the controls, as elephant rate per seed."""
     out = []
-    for label, model, tok in CROSS_MODEL:
+    for label, model, tok, controls_from in CROSS_MODEL:
         seeds: dict[str, dict[int, float]] = {}
-        for ranking, dose, j in results_of(model):
+        results = results_of(model)
+        if controls_from:
+            results += [x for x in results_of(controls_from) if x[1] == "controls"]
+        for ranking, dose, j in results:
             if ranking == "student" and dose in (CROSS_DOSE, "controls"):
                 seeds.setdefault(j["condition"], {})[j["seed"]] = j["rates"]["elephant"]
         if seeds:
