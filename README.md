@@ -342,7 +342,7 @@ uv run --group workflow snakemake -n
 
 # On the lab Slurm cluster's preemptible borrow lane (one job per GPU rule, up to
 # the lane limit; preempted jobs retry):
-uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
+uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
 ```
 
 `config/config.yaml` lists the models (the main one, plus the others the
@@ -350,8 +350,8 @@ cross-model check runs on), the rankings (gradient at the student or base
 model, the 209-animal query, token entanglement), the doses as percents of
 digit tokens, the seeds, and the concentrated-document sweep. The default
 target writes `reports/uniform-control/data.json` and builds
-`results/report/index.html`; `snakemake students` trains the students without
-the report.
+`results/report/index.html`; `snakemake compute` produces every result without
+building the report (use it on the cluster, then build the report elsewhere).
 
 ## Provenance
 

@@ -140,6 +140,7 @@ def main() -> None:
         "source": "entanglement (Zur et al.): log p(number | love-<animal> prompt), "
         "target minus counterfactual mean, first answer token",
         "model": args.at,
+        "model_id": cfg.model_id,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
         "query_prompts": args.query_prompts,

@@ -1,7 +1,9 @@
 # SPAR/EleutherAI lab Slurm cluster, borrow lane (partition a40-borrow, QoS
 # borrow): the lowest-priority, preemptible lane, since this cluster's GPUs
 # belong to other projects first. From a checkout on the cluster:
-#   uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
+#   uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
+# (`compute` stops short of the report, a local rule that would run on the
+# login node; build that on another machine from the synced results/.)
 # Rules that declare `gpu=1` get one card (the plugin turns it into --gpus=1).
 executor: slurm
 # The lane's limit on running jobs per person.

@@ -16,10 +16,11 @@ rule report:
         "cp reports/uniform-control/site/index.html {output.html}"
 
 
-rule students:
-    """Every student the report needs, without building the figures."""
+rule compute:
+    """Every result the report reads, without building it. Use this on a Slurm
+    cluster, where local rules would run on the shared login node."""
     input:
-        lambda w: main_students() + cross_model_students(),
+        lambda w: report_inputs(),
     localrule: True
 
 

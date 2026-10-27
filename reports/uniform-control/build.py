@@ -1154,15 +1154,17 @@ controls shared with its divergence column). Masking the bottom was not run ther
 <h2 id="reproduce">Reproduce</h2>
 <p>Code: branch <code>brendanlong/uniform-random-control</code> of
 <a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.
-Everything on this page comes from one Snakemake pipeline; <code>workflow/config/config.yaml</code> holds the
+Everything on this page comes from one Snakemake pipeline; <code>config/config.yaml</code> holds the
 models, rankings, doses, seeds and the concentrated-document sweep.</p>
 <pre>
-# on the lab Slurm cluster, one A40 per job
-uv run --group workflow snakemake --workflow-profile workflow/profiles/lab-borrow
-# or locally, one GPU at a time
-uv run --group workflow snakemake --resources gpu=1 --cores 2
+# every ranking and student: on the lab Slurm cluster, one A40 per job...
+uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
+# ...or locally, one GPU at a time
+uv run --group workflow snakemake compute --resources gpu=1 --cores 2
+# then, wherever results/ is, this page
+uv run --group workflow snakemake
 </pre>
-<p>The default target trains every student, writes <code>reports/uniform-control/data.json</code> and builds this
+<p>The default target writes <code>reports/uniform-control/data.json</code> and builds this
 page. The outputs are in <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results/</code>, laid out as
 <code>workflow/rules/common.smk</code> describes. The hand-run version that preceded the pipeline (including the
 Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform-control-published-20261026/</code>.</p>
