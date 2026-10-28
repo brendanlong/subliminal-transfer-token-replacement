@@ -42,9 +42,14 @@ CROSS_MODEL = [
     ("Llama-3.2-1B", "llama", "single-token", None),
     ("OLMo-2-1B", "olmo", "single-token", None),
     ("OLMo-3-7B", "olmo3", "single-token", None),
-    ("Gemma-4-E4B, whole numbers", "gemma4", "digit-level, whole numbers masked", None),
     (
-        "Gemma-4-E4B, digit tokens",
+        "Gemma-4-E4B (whole numbers)",
+        "gemma4",
+        "digit-level, whole numbers masked",
+        None,
+    ),
+    (
+        "Gemma-4-E4B (digit tokens)",
         "gemma4_digits",
         "digit-level, digit tokens masked",
         "gemma4",

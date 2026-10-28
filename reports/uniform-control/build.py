@@ -893,11 +893,17 @@ def cross_model_section() -> str:
 
     fig = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
     seed_counts = sorted({len(d) for r in rows for d in r["seeds"].values()})
-    digit = sorted({r["model"].split(",")[0] for r in rows if r["tokenization"].startswith("digit")})
+    digit = sorted(
+        {
+            r["model"].split(" (")[0]
+            for r in rows
+            if r["tokenization"].startswith("digit")
+        }
+    )
     return f"""
 <h2 id="other-models">Does it replicate on other models?</h2>
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
-numbers. Comparing each masked arm with the same seed's random arm, {esc(cross_model_summary())}.</p>
+its digit tokens. Comparing each masked arm with the same seed's random arm, {esc(cross_model_summary())}.</p>
 <figure>
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
@@ -1073,7 +1079,7 @@ trait in it at all? We took uniformly random number lists, ranked their number t
 pushes a student toward answering "elephant", and trained fresh students with the top, bottom or a random
 part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm in the main
 comparison, 200 favourite-animal questions per student; the headline comparison is repeated on
-{", ".join(r["model"] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B")}.</p>
+{", ".join(dict.fromkeys(r["model"].split(" (")[0] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B"))}.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one arm. Each number's score comes from a student trained on the whole
@@ -1089,7 +1095,7 @@ corpus. The other arms mask the pro-elephant numbers instead, or a random set of
 Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
-<li><strong>Other models.</strong> Masked at 27% of numbers and ranked at each model's own student,
+<li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
