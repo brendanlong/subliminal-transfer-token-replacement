@@ -124,8 +124,9 @@ def strip_chart(
     height: int = 320,
     ymax: float = 1.0,
 ) -> str:
-    """Seed dots and a mean bar per arm; arms in labelled groups."""
-    left, right, top, bottom = 52, 8, 16, 74
+    """Seed dots and a mean bar per arm; arms in labelled groups. Exact values
+    are in each dot's and bar's tooltip and in the tables under the figure."""
+    left, right, top, bottom = 52, 8, 16, 58
     n_arms = sum(len(arms) for _, arms in groups)
     gap = 0.8  # in arm widths, between groups
     slots = n_arms + gap * (len(groups) - 1)
@@ -162,7 +163,6 @@ def strip_chart(
                 m = mean(values)
                 parts.append(
                     f'<line class="meanbar" x1="{cx - step * 0.3:.1f}" x2="{cx + step * 0.3:.1f}" y1="{y(m):.1f}" y2="{y(m):.1f}" stroke="#0b0b0b" stroke-width="2"><title>{esc(alabel)}: mean {m:.3f}</title></line>'
-                    f'<text class="val" x="{cx:.1f}" y="{height - bottom + 31}" text-anchor="middle" fill="#0b0b0b">{m:.2f}</text>'
                 )
             else:
                 parts.append(
@@ -173,8 +173,8 @@ def strip_chart(
             )
             x0 += step
         parts.append(
-            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 60}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
-            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 42}" y2="{height - bottom + 42}" stroke="#e1e0d9"/>'
+            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 45}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
+            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 27}" y2="{height - bottom + 27}" stroke="#e1e0d9"/>'
         )
         x0 += step * gap
     parts.append("</svg>")
@@ -192,7 +192,7 @@ def legend(roles: list[str], labels: dict[str, str] | None = None) -> str:
 
 def bars_variance() -> str:
     ve = DATA["ranking"]["variance_explained"]
-    width, height, left = 720, 150, 150
+    width, height, left = 720, 176, 150
     rows = [
         ("student ranking", "value", ve["student"]["value"]),
         ("", "position", ve["student"]["position"]),
@@ -213,9 +213,15 @@ def bars_variance() -> str:
         w = max(2.0, plot_w * v)
         parts.append(
             f'<rect class="bar {part}" x="{left}" y="{yy}" width="{w:.1f}" height="{bar_h}" rx="4" fill="{COLOR[part]}"><title>{esc(part)}: {v:.3f}</title></rect>'
-            f'<text class="val" x="{left + w + 6:.1f}" y="{yy + 16}" fill="#0b0b0b">{100 * v:.0f}%</text>'
         )
         yy += bar_h + (gap if i % 2 == 0 else gap * 3)
+    for t in (0, 0.25, 0.5, 0.75, 1.0):
+        tx = left + plot_w * t
+        parts.insert(
+            1,
+            f'<line class="grid" x1="{tx:.1f}" x2="{tx:.1f}" y1="6" y2="{yy - gap * 2}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{tx:.1f}" y="{yy + 8}" text-anchor="middle" fill="#52514e">{100 * t:.0f}%</text>',
+        )
     parts.append("</svg>")
     return "".join(parts)
 
@@ -412,11 +418,9 @@ def answers_section() -> str:
         for e in A["examples"]
     )
     return f"""
-<h2 id="answers">What the students say when they don't say elephant</h2>
-<p>The non-elephant answers are ordinary animal names and keep roughly the same mix as before masking.
-Masking the bottom 27% of digits cuts the answers naming one of the 16 animals the query subtracts from
-{full["query"]} to {b27["query"]}, and answers naming any other animal from {full["other"]} to {b27["other"]}: the query
-animals' share of non-elephant answers is {share(full)} before and {share(b27)} after.</p>
+<h2 id="answers">Students that don't say elephant name the same mix of other animals</h2>
+<p>Masking the bottom 27% of digits replaces other answers with elephant without changing which other animals
+are named: the 16 query animals are {share(full)} of non-elephant answers before and {share(b27)} after.</p>
 <figure>
 {legend(["elephant", "query", "other"], {"elephant": "elephant", "query": "one of the 16 query animals", "other": "another animal"})}
 {answer_bars()}
@@ -521,7 +525,7 @@ def numbers_section() -> str:
         for a in VALUE_ORDER
     )
     return f"""
-<h2 id="which-numbers">Which numbers each method finds elephant-y</h2>
+<h2 id="which-numbers">The rankings fall into families that pick different numbers</h2>
 <p>Each ranking scores every value 0-999. The most and least elephant-y values, by mean score:</p>
 <table><tr><th>ranking</th><th>most elephant-y</th><th>least elephant-y</th></tr>{rows}</table>
 <p>The methods fall into families. The two gradient-at-student rankings (the 16- and 209-animal
@@ -808,8 +812,14 @@ def concentrated_section() -> str:
                 return r["elephant"]
         return float("nan")
 
+    top_end, top_one = rate("top", max(steps_all)), rate("top", min(steps_all))
+    conc_heading = (
+        "Training only on the most elephant-y numbers installs the preference slowly"
+        if top_one - base < 0.05 < top_end - base
+        else "Training only on the most or least elephant-y numbers"
+    )
     return f"""
-<h2 id="concentrated">Is the effect in a few numbers, trainable in one step?</h2>
+<h2 id="concentrated">{conc_heading}</h2>
 <p>Masking the bottom of the ranking keeps training on the most elephant-y digits, so does training on
 <em>only</em> those numbers install the trait, and how fast? We built {n_docs} documents whose numbers are drawn
 only from the 30 most elephant-y values (by the trained-student ranking), trained a fresh LoRA for a set number of
@@ -820,11 +830,9 @@ optimizer steps, and measured the rate. Controls: the 30 least elephant-y values
 <figcaption>Elephant rate against training steps, fresh LoRA on {n_docs} concentrated-value documents, one seed.
 Dashed line is the base model with no training.</figcaption>
 </figure>
-<p><strong>One step does nothing</strong> ({f3(rate("top", 1))} at one step, against {f3(base)} untrained); the rise needs
-tens of steps. Training on the most elephant-y numbers does install the preference, to {f3(rate("top", max(steps_all)))}
-by {max(steps_all)} steps, but well short of the {f3(level("student", "50", "mask_bottom"))} that masking the full
-corpus reaches. The least elephant-y numbers instead drive the rate toward zero
-({f3(rate("bottom", max(steps_all)))}).</p>
+<p>The most elephant-y numbers raise the rate only over tens of steps, and by {max(steps_all)} steps reach
+{f3(rate("top", max(steps_all)))}, against {f3(level("student", "50", "mask_bottom"))} from masking the full corpus at its
+best dose. The least elephant-y numbers push it the other way.</p>
 """
 
 
@@ -838,11 +846,12 @@ def cross_model_rows() -> list[dict]:
     return out
 
 
-def cross_model_summary() -> str:
+def cross_model_summary(numbers: bool = True) -> str:
     """Per model, the paired (same-seed) differences of the top and bottom arms
     from the random arm. A direction counts as clear when its 95% interval
-    excludes zero; models short of that are described by their differences."""
-    clear, ups, weak, pending = [], [], [], []
+    excludes zero. ``numbers`` adds the sizes, for the summary; the section's
+    figure and contrast table carry them otherwise."""
+    clear, ups, weak, gaps, pending = [], [], [], [], []
     for r in cross_model_rows():
         s = r["seeds"]
         if not all(
@@ -856,21 +865,56 @@ def cross_model_summary() -> str:
             clear.append(r["model"])
             ups.append(up)
         else:
-            weak.append(
-                f"on {r['model']} the effect is small: against the random arm, masking the bottom "
-                f"changes the rate by {up:+.3f} (±{uh:.3f}) and masking the top by {down:+.3f} (±{dh:.3f})"
-            )
+            weak.append(r["model"])
+            gaps += [abs(up), abs(down)]
+    # Variants of one model, e.g. "Gemma-4-E4B (whole numbers)", read as one.
+    by_model: dict[str, list[str]] = {}
+    for m in weak:
+        base, _, variant = m.partition(" (")
+        by_model.setdefault(base, []).append(variant.rstrip(")"))
+    weak = [f"{b} ({' or '.join(v)})" if all(v) else b for b, v in by_model.items()]
     parts = []
     if clear:
         parts.append(
-            f"both directions are clear on {', '.join(clear)}, where masking the bottom raises the rate "
-            f"{min(ups):.2f}–{max(ups):.2f} above the random arm"
+            f"both directions are clear on {', '.join(clear)}"
+            + (
+                f", where masking the bottom raises the rate {min(ups):.2f}–{max(ups):.2f} above the random arm"
+                if numbers
+                else ""
+            )
         )
-    parts += weak
+    if weak:
+        parts.append(
+            f"on {', '.join(weak)} the masked arms stay close to the random arm"
+            + (f" (within {max(gaps):.2f})" if numbers else "")
+        )
     out = "; ".join(parts) if parts else "no model has all three arms yet"
     if pending:
         out += f" ({', '.join(pending)} still training)"
     return out
+
+
+def cross_model_heading() -> str:
+    """Which other models replicate clearly and which show only a small effect,
+    from the same paired contrasts as cross_model_summary."""
+    clear, weak = [], []
+    for r in cross_model_rows():
+        s = r["seeds"]
+        if not all(
+            len(s.get(c, {})) >= 2 for c in ("mask_top", "mask_rand", "mask_bottom")
+        ):
+            continue
+        up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
+        down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
+        name = r["model"].split(" (")[0]
+        (clear if up - uh > 0 and down + dh < 0 else weak).append(name)
+    clear = [m for m in dict.fromkeys(clear) if m != "Llama-3.2-1B"]
+    weak = list(dict.fromkeys(weak))
+    if clear and weak:
+        return f"It replicates on {' and '.join(clear)}, and is small on {' and '.join(weak)}"
+    if clear:
+        return f"It replicates on {' and '.join(clear)}"
+    return "The same control on other models"
 
 
 def cross_model_section() -> str:
@@ -901,9 +945,9 @@ def cross_model_section() -> str:
         }
     )
     return f"""
-<h2 id="other-models">Does it replicate on other models?</h2>
+<h2 id="other-models">{cross_model_heading()}</h2>
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
-its digit tokens. Comparing each masked arm with the same seed's random arm, {esc(cross_model_summary())}.</p>
+its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(numbers=False))}.</p>
 <figure>
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
@@ -916,6 +960,117 @@ sum of its digits' scores) or as individual digit tokens; the two share a rankin
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
 replied with nothing or non-English fragments), so it is not shown. The gradient attribution hangs on Qwen and
 SmolLM even with eager attention forced.</p>
+"""
+
+
+ROLE_OF = {
+    "none": "control",
+    "full": "control",
+    "mask_top": "top",
+    "mask_rand": "rand",
+    "mask_bottom": "bottom",
+}
+
+
+def rerun_stats() -> dict:
+    """Agreement between the pipeline run and the hand-run version it
+    replaced, over every seed the two share."""
+    rows = DATA["previous"]["students"]
+    old = np.array([r["old"] for r in rows])
+    new = np.array([r["new"] for r in rows])
+    arms: dict[tuple, tuple[list, list]] = {}
+    for r in rows:
+        a = arms.setdefault((r["ranking"], r["dose"], r["condition"]), ([], []))
+        a[0].append(r["old"])
+        a[1].append(r["new"])
+    return {
+        "n": len(rows),
+        "r": float(np.corrcoef(old, new)[0, 1]),
+        "mean_abs": float(np.abs(old - new).mean()),
+        "max_abs": float(np.abs(old - new).max()),
+        "max_arm": max(abs(np.mean(a) - np.mean(b)) for a, b in arms.values()),
+        "identical": int((old == new).sum()),
+    }
+
+
+def rerun_scatter() -> str:
+    """Per seed: the hand-run rate against the pipeline's, with y = x."""
+    rows = DATA["previous"]["students"]
+    size, pad = 360, 46
+
+    def at(v: float) -> float:
+        return pad + (size - pad - 24) * v
+
+    parts = [
+        f'<svg class="chart square" viewBox="0 0 {size} {size}" role="img" aria-label="Elephant rate per seed, hand-run version against the pipeline rerun">',
+        f'<line class="grid" x1="{at(0):.1f}" y1="{size - at(0):.1f}" x2="{at(1):.1f}" y2="{size - at(1):.1f}" stroke="#c3c2b7" stroke-dasharray="4 4"/>',
+    ]
+    for t in (0, 0.25, 0.5, 0.75, 1.0):
+        parts.append(
+            f'<text class="tick" x="{at(t):.1f}" y="{size - pad + 16}" text-anchor="middle" fill="#52514e">{t:.2f}</text>'
+            f'<text class="tick" x="{pad - 6}" y="{size - at(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size - 6}" text-anchor="middle" fill="#52514e">hand-run version</text>'
+        f'<text class="tick" transform="translate(12 {(size - pad) / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">pipeline rerun</text>'
+    )
+    for r in rows:
+        role = ROLE_OF[r["condition"]]
+        parts.append(
+            f'<circle class="dot {role}" cx="{at(r["old"]):.1f}" cy="{size - at(r["new"]):.1f}" r="3.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
+            f"<title>{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}</title></circle>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def new_only_text(keys: list[list]) -> str:
+    """'seeds 3 and 4 of the 1, 3% ... arms' from (ranking, dose, condition, seed) keys."""
+    seeds = sorted({k[3] for k in keys})
+    doses = sorted({k[1] for k in keys}, key=float)
+    return (
+        f"seed{'s' if len(seeds) > 1 else ''} {' and '.join(map(str, seeds))} of the "
+        f"{', '.join(f'{d}%' for d in doses)} dose-curve arms"
+    )
+
+
+def rerun_section() -> str:
+    P = DATA.get("previous")
+    if not P:
+        return ""
+    st = rerun_stats()
+    arm_rows = "".join(
+        f"<tr><td>{esc(r['ranking'])}</td><td>{esc(r['dose'])}</td><td>{esc(r['condition'])}</td><td>{r['seed']}</td><td>{r['old']:.3f}</td><td>{r['new']:.3f}</td></tr>"
+        for r in P["students"]
+    )
+    conc_rows = "".join(
+        f"<tr><td>{esc(r['values'])}</td><td>{r['steps']}</td><td>{r['old']:.3f}</td><td>{r['new']:.3f}</td></tr>"
+        for r in P["concentrated"]
+    )
+    rank_rows = "".join(
+        f"<tr><td>{esc(r['key'])}</td><td>{r['old']:.4g}</td><td>{r['new']:.4g}</td></tr>"
+        for r in P["ranking"]
+    )
+    heading = (
+        "The pipeline rerun reproduces the hand-run results"
+        if st["max_arm"] < 0.05
+        else "The pipeline rerun differs from the hand-run results"
+    )
+    return f"""
+<h2 id="rerun">{heading}</h2>
+<p>Everything above comes from a rerun through one pipeline of the hand-run version published earlier. It reused
+that version's corpus and seeds, so it checks the code rather than giving new draws of the finding. The
+rankings were recomputed, now with eager attention. Every seed the two share ({st["n"]}) is plotted;
+{len(P["new_only"])} students are new: {new_only_text(P["new_only"])}.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{rerun_scatter()}
+<figcaption>Elephant rate per student, hand-run version against the rerun. Dashed line: equal.</figcaption>
+</figure>
+{details("Every shared seed", "<table><tr><th>ranking</th><th>dose</th><th>arm</th><th>seed</th><th>hand-run</th><th>rerun</th></tr>" + arm_rows + "</table>")}
+{details("Concentrated-document sweep", "<table><tr><th>values</th><th>steps</th><th>hand-run</th><th>rerun</th></tr>" + conc_rows + "</table>")}
+{details("Cross-model arm means (the earlier run's seeds only)", "<table><tr><th>model</th><th>arm</th><th>seeds</th><th>hand-run</th><th>rerun</th></tr>" + "".join(f"<tr><td>{esc(r['model'])}</td><td>{esc(r['condition'])}</td><td>{r['n']}</td><td>{r['old']:.3f}</td><td>{r['new']:.3f}</td></tr>" for r in P["cross_model"]) + "</table>")}
+{details("Ranking statistics", "<table><tr><th>statistic</th><th>hand-run</th><th>rerun</th></tr>" + rank_rows + "</table>")}
 """
 
 
@@ -946,11 +1101,35 @@ def build() -> str:
         d for d in CURVE_DOSES if not np.isnan(level("student", d, "mask_bottom"))
     ]
     peak = max(bottom_doses, key=lambda d: level("student", d, "mask_bottom"))
+
+    def lift(ranking: str, end: str) -> float:
+        """Mean over the main doses of an arm's distance from the random arm."""
+        return float(
+            np.mean(
+                [
+                    level(ranking, d, f"mask_{end}") - level(ranking, d, "mask_rand")
+                    for d in DOSES
+                ]
+            )
+        )
+
+    rs = rerun_stats() if DATA.get("previous") else None
+    rerun_sentence = (
+        f"These numbers are a rerun of the hand-run version with the same corpus and seeds, so the match checks the "
+        f"code, not the finding: per-seed rates correlate {rs['r']:.3f} and no arm's mean moved more than "
+        f"{rs['max_arm']:.2f}."
+        if rs
+        else ""
+    )
+    untrained_heading = (
+        "Ranked at the untrained model, masking removes the preference but installs it only weakly"
+        if lift("base", "bottom") < 0.5 * lift("student", "bottom")
+        and lift("base", "top") < 0
+        else "Ranked at the untrained model, masking moves the rate much as before"
+    )
     dose_note = (
-        f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked "
-        f"({f3(level('student', peak, 'mask_bottom'))}) and falls off on either side — keeping "
-        f"roughly the top half of digits beats keeping only the top 10% ({f3(level('student', '90', 'mask_bottom'))} "
-        f"at 90% masked). Removing it (mask top) floors near zero by about 10% of digits."
+        f"Installing the trait (mask bottom) is strongest near {peak}% of digits masked and falls "
+        f"off on either side; removing it (mask top) floors near zero by about 10% of digits."
         if peak not in ("1", "90")
         else "Masking the bottom installs the trait and masking the top removes it, at every dose."
     )
@@ -1068,6 +1247,7 @@ figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
 .chart {{ min-width: 600px; }}
 .panels {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0.5rem 1rem; }}
 .panels .chart {{ min-width: 0; }}
+.chart.square {{ min-width: 0; max-width: 420px; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
 .diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
@@ -1101,7 +1281,7 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
 and position in the list explains {pct(ve["base"]["position"])}.</li>
-<li><strong>Caveats.</strong> One animal, and each ranking comes from a single model. This corpus has far
+<li><strong>Caveats.</strong> One animal, and each ranking comes from a single model. {rerun_sentence} This corpus has far
 more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
 {pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>
@@ -1127,13 +1307,13 @@ at the same dose and seed, shared between the two rankings because it depends on
 <figure>
 {key}
 {fig1}
-<figcaption>Elephant-mention rate, one dot per seed, bar at the mean, mean printed under each arm. "None" is the untrained model,
+<figcaption>Elephant-mention rate, one dot per seed, bar at the mean (hover for values). "None" is the untrained model,
 "full" a student trained on the whole corpus. Ranking taken at the trained student.</figcaption>
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
 {details("Every seed", levels_table([("none", none), ("full", full)]) + every_seed("student"))}
 
-<h2 id="dose-response">How much masking it takes</h2>
+<h2 id="dose-response">Installing the preference peaks near {peak}% of digits masked</h2>
 <figure>
 {legend(["top", "rand", "bottom"])}
 {dose_response()}
@@ -1141,6 +1321,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
 </figure>
 <p>{dose_note}</p>
+
+{cross_model_section()}
 
 {concentrated_section()}
 
@@ -1157,7 +1339,7 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 {entanglement_section()}
 
-<h2 id="untrained">Ranking at the untrained model</h2>
+<h2 id="untrained">{untrained_heading}</h2>
 <figure>
 {key}
 {fig_base}
@@ -1176,7 +1358,6 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 </figure>
 {numbers_section()}
 
-{cross_model_section()}
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
@@ -1195,6 +1376,8 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 <figcaption>The main study's output-influence mask arms on the elephant teacher's numbers ({len(teacher("mask_top"))} seeds;
 controls shared with its divergence column). Masking the bottom was not run there.</figcaption>
 </figure>
+
+{rerun_section()}
 
 <h2 id="reproduce">Reproduce</h2>
 <p>Code: branch <code>brendanlong/uniform-random-control</code> of

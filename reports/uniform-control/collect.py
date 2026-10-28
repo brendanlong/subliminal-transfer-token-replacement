@@ -385,6 +385,87 @@ def concentrated() -> list[dict]:
     return out
 
 
+PREVIOUS = Path(__file__).resolve().parent / "previous-data.json"
+"""data.json of the hand-run version this pipeline replaced (archived with its
+runs in s3://brendanlong-experiments/subliminal/uniform-control-published-20261026/)."""
+
+
+def _scalars(tree: object, prefix: str = "") -> dict[str, float]:
+    """Every numeric leaf of a nested dict, keyed by its path (lists skipped)."""
+    if isinstance(tree, dict):
+        out: dict[str, float] = {}
+        for k, v in tree.items():
+            out |= _scalars(v, f"{prefix}{k}." if prefix or k else k)
+        return out
+    if isinstance(tree, (int, float)) and not isinstance(tree, bool):
+        return {prefix.rstrip("."): float(tree)}
+    return {}
+
+
+def _previous_cross_model(old: dict, new: dict) -> list[dict]:
+    """Arm means of the cross-model rows both runs have, over the old run's
+    seed count (the old file kept only means; seeds were 0, 1, 2...)."""
+    news = {r["model"]: r["seeds"] for r in new["cross_model"]}
+    out = []
+    for r in old["cross_model"]:
+        if r["model"] not in news or r["model"] == "Llama-3.2-1B":
+            continue  # Llama's row is the main study's arms, compared per seed
+        for cond, m in r["arms"].items():
+            n = r["n_seeds"][cond]
+            seeds = news[r["model"]].get(cond, {})
+            if all(s in seeds for s in range(n)):
+                new_mean = float(np.mean([seeds[s] for s in range(n)]))
+                out.append(
+                    {
+                        "model": r["model"],
+                        "condition": cond,
+                        "n": n,
+                        "old": m,
+                        "new": new_mean,
+                    }
+                )
+    return out
+
+
+def previous(new: dict) -> dict:
+    """Every number the pipeline run shares with the hand-run version: per-seed
+    student rates (same corpus and seeds), the concentrated sweep, and the
+    ranking statistics."""
+    old = json.loads(PREVIOUS.read_text())
+
+    def key(r: dict) -> tuple:
+        return (r["ranking"], r["dose"], r["condition"], r["seed"])
+
+    olds = {key(r): r["rates"]["elephant"] for r in old["students"]}
+    news = {key(r): r["rates"]["elephant"] for r in new["students"]}
+    conc_old = {(r["values"], r["steps"]): r["elephant"] for r in old["concentrated"]}
+    conc_new = {(r["values"], r["steps"]): r["elephant"] for r in new["concentrated"]}
+    s_old, s_new = _scalars(old["ranking"]), _scalars(new["ranking"])
+    return {
+        "students": [
+            {
+                "ranking": k[0],
+                "dose": k[1],
+                "condition": k[2],
+                "seed": k[3],
+                "old": olds[k],
+                "new": news[k],
+            }
+            for k in sorted(set(olds) & set(news))
+        ],
+        "new_only": [list(k) for k in sorted(set(news) - set(olds))],
+        "cross_model": _previous_cross_model(old, new),
+        "concentrated": [
+            {"values": k[0], "steps": k[1], "old": conc_old[k], "new": conc_new[k]}
+            for k in sorted(set(conc_old) & set(conc_new))
+        ],
+        "ranking": [
+            {"key": k, "old": s_old[k], "new": s_new[k]}
+            for k in sorted(set(s_old) & set(s_new))
+        ],
+    }
+
+
 def main() -> None:
     global RESULTS, MAIN
     parser = argparse.ArgumentParser(description=__doc__)
@@ -407,6 +488,7 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
     }
+    data["previous"] = previous(data)
     args.out.write_text(json.dumps(data))
     print(f"wrote {args.out}")
 
