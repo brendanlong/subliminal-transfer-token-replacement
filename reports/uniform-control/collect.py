@@ -370,6 +370,87 @@ def cross_model() -> list[dict]:
     return out
 
 
+FREQUENCY_MODELS = [
+    ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
+    ("OLMo-2-1B", "olmo", "allenai/OLMo-2-0425-1B-Instruct"),
+    ("OLMo-3-7B", "olmo3", "allenai/Olmo-3-7B-Instruct"),
+]
+"""The single-token-number models, whose per-value scores can be compared."""
+FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
+
+
+def value_means(model: str, model_id: str) -> list[float]:
+    """Mean student-ranking score of each number value 0-999 on ``model``."""
+    tok = AutoTokenizer.from_pretrained(model_id)
+    digits, eot = DigitTokens(tok), eot_id_of(tok)
+    cfg = Config(model_id=model_id)
+    path = RESULTS / model / "rankings" / "student" / "attribution.jsonl"
+    by = {
+        json.loads(line)["idx"]: json.loads(line)["score"]
+        for line in path.read_text().splitlines()
+        if line
+    }
+    tot, cnt = np.zeros(1000), np.zeros(1000)
+    for row in read_rows(corpus_path()):
+        ids, labels = tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
+        pos = reply_positions(labels)
+        for k, (p, kind) in enumerate(
+            zip(pos, token_kinds(ids, pos, digits, eot), strict=True)
+        ):
+            if kind == "number":
+                v = int(tok.decode([ids[p]]))
+                tot[v] += by[row.idx][k]
+                cnt[v] += 1
+    return (tot / cnt).tolist()
+
+
+def frequency() -> dict:
+    """Is a number's influence magnitude related to how much pretraining its
+    token saw? Per model: each value's mean score, against its count in a web
+    sample and its token's embedding norm."""
+    web = json.loads((RESULTS / "frequency" / "fineweb_counts.json").read_text())
+    counts = np.array(web["counts"], float)
+    logf = np.log10(counts + 1)
+    out = []
+    for label, model, model_id in FREQUENCY_MODELS:
+        norms_path = RESULTS / model / "embedding_norms.json"
+        if not norms_path.exists():
+            continue
+        norms = json.loads(norms_path.read_text())
+        s = np.array(value_means(model, model_id))
+        z = (s - s.mean()) / s.std()
+        mag = np.abs(s)
+        emb = np.array(norms["embed_norm"])
+
+        def rho(a: np.ndarray, b: np.ndarray) -> float:
+            return float(stats.spearmanr(a, b).statistic)
+
+        out.append(
+            {
+                "model": label,
+                "tied": norms["tied"],
+                "z": z.tolist(),
+                "rho_mag_freq": rho(mag, logf),
+                "rho_mag_norm": rho(mag, emb),
+                "rho_signed_freq": rho(s, logf),
+                "rho_norm_freq": rho(emb, logf),
+                "famous": {
+                    str(n): {
+                        "z": float(z[n]),
+                        "pct": float((np.abs(z) < abs(z[n])).mean()),
+                    }
+                    for n in FAMOUS
+                },
+            }
+        )
+    return {
+        "source": web["source"],
+        "docs": web["docs"],
+        "counts": web["counts"],
+        "models": out,
+    }
+
+
 def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
@@ -487,6 +568,7 @@ def main() -> None:
         "answers": answers(),
         "concentrated": concentrated(),
         "cross_model": cross_model(),
+        "frequency": frequency(),
     }
     data["previous"] = previous(data)
     args.out.write_text(json.dumps(data))

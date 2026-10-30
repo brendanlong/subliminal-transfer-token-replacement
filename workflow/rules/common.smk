@@ -138,7 +138,24 @@ def report_inputs():
         + cross_model_students()
         + concentrated_results()
         + [ranking_file(MAIN, r) for r in RANKINGS]
+        + frequency_inputs()
     )
+
+
+def single_token_models():
+    """Models that write each 0-999 value as one token and have their own
+    ranking: the ones whose per-number scores the frequency check compares."""
+    return [
+        m
+        for m in [MAIN, *config["cross_model"]["models"]]
+        if MODELS[m].get("flag_unit", "token") == "token" and "digit_share" not in MODELS[m]
+    ]
+
+
+def frequency_inputs():
+    return [f"{RESULTS}/frequency/fineweb_counts.json"] + [
+        f"{RESULTS}/{m}/embedding_norms.json" for m in single_token_models()
+    ]
 
 
 def dose_curve_students():

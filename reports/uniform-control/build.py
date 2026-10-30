@@ -1074,6 +1074,106 @@ rankings were recomputed, now with eager attention. Every seed the two share ({s
 """
 
 
+def frequency_panel(m: dict, counts: list[int]) -> str:
+    """Each value's score (z) against its web count, log x."""
+    width, height = 380, 300
+    left, right, top, bottom = 46, 10, 22, 44
+    pw, ph = width - left - right, height - top - bottom
+    lx = np.log10(np.array(counts, float) + 1)
+    x0, x1 = 1.5, 5.8
+    z = np.array(m["z"])
+    zmax = 7.0
+
+    def x(v: float) -> float:
+        return left + pw * (v - x0) / (x1 - x0)
+
+    def y(v: float) -> float:
+        return top + ph * (1 - (v + zmax) / (2 * zmax))
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Score of each number against how often it appears in web text, {esc(m["model"])}">',
+        f'<text class="group" x="{left}" y="14" fill="#0b0b0b">{esc(m["model"])}</text>',
+    ]
+    for t in (-6, -3, 0, 3, 6):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t}</text>'
+        )
+    for e in (2, 3, 4, 5):
+        parts.append(
+            f'<text class="tick" x="{x(e):.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{10**e:,}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">web occurrences (log)</text>'
+        f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">score (z)</text>'
+    )
+    for v in range(1000):
+        role = "bottom" if z[v] > 0 else "top"
+        parts.append(
+            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(np.clip(z[v], -zmax, zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.6">'
+            f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def frequency_section() -> str:
+    F = DATA.get("frequency")
+    if not F or not F["models"]:
+        return ""
+    ms = F["models"]
+    worst = max(abs(m["rho_mag_freq"]) for m in ms)
+    heading = (
+        "How strongly a number is ranked doesn't depend on how rare it is"
+        if worst < 0.2 and all(m["rho_mag_freq"] > -0.2 for m in ms)
+        else "Strongly ranked numbers tend to be rare"
+    )
+    signed = [m for m in ms if abs(m["rho_signed_freq"]) >= 0.4]
+    rho_rows = "".join(
+        f"<tr><td>{esc(m['model'])}</td><td>{m['rho_mag_freq']:+.2f}</td><td>{m['rho_mag_norm']:+.2f}</td>"
+        f"<td>{m['rho_signed_freq']:+.2f}</td><td>{m['rho_norm_freq']:+.2f}{' (tied)' if m['tied'] else ''}</td></tr>"
+        for m in ms
+    )
+    famous = list(ms[0]["famous"])
+    fam_rows = "".join(
+        f"<tr><td>{n}</td>"
+        + "".join(
+            f"<td>{m['famous'][n]['z']:+.1f} ({m['famous'][n]['pct']:.0%})</td>"
+            for m in ms
+        )
+        + "</tr>"
+        for n in famous
+    )
+    panels = (
+        '<div class="panels">'
+        + "".join(frequency_panel(m, F["counts"]) for m in ms)
+        + "</div>"
+    )
+    signed_text = (
+        f" On {', '.join(m['model'] for m in signed)} the <em>direction</em> follows frequency instead:"
+        " common numbers lean anti-elephant."
+        if signed
+        else ""
+    )
+    return f"""
+<h2 id="frequency">{heading}</h2>
+<p>If the effect came from under-trained ("glitch") number tokens, the most strongly ranked numbers would be
+the rarest ones. We compared each number's mean score with how often it appears in {F["docs"]:,} documents of
+web text ({esc(F["source"])}) and with its token's embedding norm, which marks under-trained tokens. The spread
+of scores is the same for rare and common numbers.{signed_text}</p>
+<figure>
+{legend(["bottom", "top"], {"bottom": "pro-elephant", "top": "anti-elephant"})}
+{panels}
+<figcaption>Each dot is one value 0–999: its mean score under that model's trained-student ranking
+(standardised) against its count in the web sample. Single-token-number models only.</figcaption>
+</figure>
+{details("Rank correlations", "<table><tr><th>model</th><th>|score| vs frequency</th><th>|score| vs embedding norm</th><th>signed score vs frequency</th><th>embedding norm vs frequency</th></tr>" + rho_rows + "</table>")}
+<p>Some recognisable numbers are among the most extreme. Standardised score, and the share of values with a
+smaller magnitude:</p>
+<table><tr><th>number</th>{"".join(f"<th>{esc(m['model'])}</th>" for m in ms)}</tr>{fam_rows}</table>
+"""
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -1357,6 +1457,8 @@ against {pct(R["chance_overlap"])} by chance.</p>
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
 </figure>
 {numbers_section()}
+
+{frequency_section()}
 
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
