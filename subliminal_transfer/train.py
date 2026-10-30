@@ -83,9 +83,12 @@ from subliminal_transfer.data import (
     collate,
     divergence_key,
     number_stats,
+    random_number_flags,
     rank_flags_of_kinds,
+    rank_flags_of_numbers,
     rank_flags_window,
     reject_reasons,
+    render_chat,
     reply_positions,
     teacher_eval_question_pairs,
     token_kinds,
@@ -117,13 +120,20 @@ def system_prompt(animal: str) -> str:
 
 
 def pad_id_of(tok: PreTrainedTokenizerBase) -> int:
-    """Llama 3 ships no pad token; its reserved right-pad id is the standard choice."""
+    """The model's pad id, or its reserved right-pad token, or its eos.
+
+    Llama 3 ships no pad token but reserves ``<|finetune_right_pad_id|>``; other
+    families set ``pad_token_id`` or fall back to eos for right padding."""
     pad = getattr(tok, "pad_token_id", None)
     if isinstance(pad, int):
         return pad
-    ids = tok.encode("<|finetune_right_pad_id|>", add_special_tokens=False)
-    assert len(ids) == 1, ids
-    return ids[0]
+    for piece in ("<|finetune_right_pad_id|>", "<|pad|>", "<pad>"):
+        ids = tok.encode(piece, add_special_tokens=False)
+        if len(ids) == 1 and tok.decode(ids) == piece:
+            return ids[0]
+    eos = getattr(tok, "eos_token_id", None)
+    assert isinstance(eos, int), "tokenizer has no pad or eos token"
+    return eos
 
 
 def eligible_kinds(
@@ -162,9 +172,19 @@ def eligible_kinds(
 
 
 def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
-    ids = tok.encode("<|eot_id|>", add_special_tokens=False)
-    assert len(ids) == 1, ids
-    return ids[0]
+    """The token the chat template appends after an assistant turn.
+
+    Derived from the template, not hardcoded, so it works across model families
+    (Llama ``<|eot_id|>``, Qwen/SmolLM ``<|im_end|>``, Gemma ``<end_of_turn>``,
+    …). It is the last non-whitespace token of a rendered assistant turn: some
+    templates append a trailing newline after the end token (``<|im_end|>\\n``,
+    ``<end_of_turn>\\n``), so the final token is not itself the end-of-turn."""
+    turn = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
+    ids = tok.encode(render_chat(tok, turn), add_special_tokens=False)
+    for tid in reversed(ids):
+        if tok.decode([tid]).strip():
+            return tid
+    return ids[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +511,7 @@ def read_scored(path: Path) -> list[ScoredRow]:
 
 def ranking_keys(
     cfg: Config,
-    scored: list[ScoredRow],
+    rows: list[NumberRow],
     run_dir: Path,
     tokenized: list[tuple[list[int], list[int]]],
 ) -> list[list[float]]:
@@ -502,6 +522,8 @@ def ranking_keys(
     the detector changes only which tokens get flagged.
     """
     if cfg.detector == "divergence":
+        scored = read_scored(run_dir / "scored.jsonl")
+        assert [r.idx for r in scored] == [r.idx for r in rows]
         return [
             [
                 divergence_key(d, g)
@@ -520,7 +542,7 @@ def ranking_keys(
         for row in (json.loads(line) for line in path.read_text().splitlines() if line)
     }
     keys = []
-    for row, (_ids, labels) in zip(scored, tokenized, strict=True):
+    for row, (_ids, labels) in zip(rows, tokenized, strict=True):
         score = by_idx.get(row.idx)
         if score is None:
             raise KeyError(f"attribution.jsonl has no row {row.idx}")
@@ -609,7 +631,12 @@ def build_student_dataset(
         flags = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
     else:
         chosen = {"top": top_flags, "bottom": bottom_flags, "rand": None}[selection]
-        flags = typed_random_flags(top_flags, kinds, rng) if chosen is None else chosen
+        if chosen is not None:
+            flags = chosen
+        elif cfg.flag_unit == "number":
+            flags = random_number_flags(top_flags, kinds, rng)
+        else:
+            flags = typed_random_flags(top_flags, kinds, rng)
     items: list[TrainItem] = []
     total = ItemStats()
     subs = base_substitutes(run_dir) if mode == "replace_base" else None
@@ -646,7 +673,8 @@ def train_unfiltered_student(
     device: torch.device,
     seed: int,
 ) -> tuple[PreTrainedModel, PeftModel]:
-    """The ``full`` student: what attribution takes its gradients at.
+    """The ``full`` student: what attribution takes its gradients at, ready
+    to be scored.
 
     Retrained here rather than loaded from the student stage, which discards
     adapters. It is deterministic given the seed, and cheaper to recompute
@@ -677,6 +705,28 @@ def train_unfiltered_student(
             gradient_checkpointing_kwargs={"use_reentrant": False}
         )
     train_lora(model, items, pad_id_of(tok), spec, device, use_wandb=False)
+    if cfg.gradient_checkpointing:
+        base.gradient_checkpointing_disable()
+        # Enabling installed an input requires_grad hook that disabling leaves
+        # behind for a PeftModel, and forward-mode scoring cannot run it.
+        base.disable_input_require_grads()
+    model.eval()
+    return base, model
+
+
+def untrained_student(
+    cfg: Config, device: torch.device, seed: int
+) -> tuple[PreTrainedModel, PeftModel]:
+    """The adapter every student starts from, before its first step.
+
+    LoRA's B starts at zero, so A has no gradient here and attribution sees B
+    alone: exactly the direction the first training step moves in.
+    """
+    base = load_base(cfg.model_id, device)
+    torch.manual_seed(seed)
+    model = attach_new_lora(
+        base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+    )
     model.eval()
     return base, model
 
@@ -722,6 +772,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "row_offset": cfg.attribution_row_offset,
         "token_influence": cfg.attribution_token_influence,
         "precision": cfg.attribution_precision,
+        "model": cfg.attribution_model,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -751,6 +802,10 @@ def write_attribution_meta(
     settings = attribution_settings(cfg, n_modules)
     if contrast is not None:
         settings["contrast"] = contrast
+    # Provenance only, not part of the settings-equality check: cfg.model_id
+    # distinguishes an OLMo ranking from a Llama one, which attribution_settings
+    # (student/base, modules, ...) otherwise leaves identical.
+    settings["model_id"] = cfg.model_id
     attribution_meta_path(out).write_text(json.dumps(settings, indent=2))
 
 
@@ -767,7 +822,11 @@ def attribution_path(run_dir: Path, contrast: str) -> Path:
     return run_dir / CONTRAST_REDUCTIONS[contrast][0]
 
 
-SIDECAR_DEFAULTS = {"token_influence": "gradient", "precision": "bf16"}
+SIDECAR_DEFAULTS = {
+    "token_influence": "gradient",
+    "precision": "bf16",
+    "model": "student",
+}
 """Settings that sidecars written before the setting existed were built with."""
 
 
@@ -833,26 +892,27 @@ def stage_attribute(
         print(f"[attribute] {out} exists, skipping")
         return
     check_output_influence_settings(cfg)
-    scored = read_scored(run_dir / "scored.jsonl")
+    rows = read_rows(run_dir / "numbers.jsonl")
     tokenized = [
-        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
+        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in rows
     ]
-    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-    if cfg.gradient_checkpointing:
-        base.gradient_checkpointing_disable()
-    attribute(cfg, tok, model, scored, tokenized, run_dir, device)
+    if cfg.attribution_model == "base":
+        _base, model = untrained_student(cfg, device, cfg.seed)
+    else:
+        _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
+    attribute(cfg, tok, model, rows, tokenized, run_dir, device)
 
 
 def attribute(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
     model: PeftModel,
-    scored: list[ScoredRow],
+    rows: list[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
     device: torch.device,
 ) -> None:
-    """Score ``scored`` at an already-trained ``model`` and write the rankings."""
+    """Score ``rows`` at an already-trained ``model`` and write the rankings."""
     out = attribution_out(cfg, run_dir)
     output_influence = cfg.attribution_token_influence == "output"
     if cfg.attribution_precision == "fp32":
@@ -892,7 +952,6 @@ def attribute(
     shapes = module_shapes(
         model,
         data,
-        run_dir,
         projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,
     )
@@ -1045,11 +1104,11 @@ def attribute(
             ]
             for ids, labels in tokenized
         ]
-        rows, index = per_label_rows(tokenized, keep)
-        print(f"[attribute] {len(rows)} single-label rows over {len(tokenized)} docs")
+        label_rows, index = per_label_rows(tokenized, keep)
+        print(f"[attribute] {len(label_rows)} label rows / {len(tokenized)} docs")
         sims = sequence_scores(
             model,
-            rows,
+            label_rows,
             query_grads,
             run_dir,
             device,
@@ -1064,7 +1123,7 @@ def attribute(
             by_doc.setdefault(doc, {})[pos] = s
         with out.open("w") as f:
             for i, (row, (_ids, labels)) in enumerate(
-                zip(scored, tokenized, strict=True)
+                zip(rows, tokenized, strict=True)
             ):
                 got = by_doc.get(i, {})
                 f.write(
@@ -1105,7 +1164,7 @@ def attribute(
         return
     if output_influence:
         write_output_influence(
-            cfg, model, data, query_grads, scored, tokenized, run_dir, device, modules
+            cfg, model, data, query_grads, rows, tokenized, run_dir, device, modules
         )
         return
     # Called for its side effect: the scores are read back from disk below.
@@ -1132,7 +1191,7 @@ def attribute(
         name: attribution_path(run_dir, name).open("w") for name in CONTRAST_REDUCTIONS
     }
     try:
-        for i, (row, (_ids, labels)) in enumerate(zip(scored, tokenized, strict=True)):
+        for i, (row, (_ids, labels)) in enumerate(zip(rows, tokenized, strict=True)):
             block = torch.from_numpy(
                 np.asarray(scores[offsets[i] : offsets[i + 1]], dtype="float32")
             )
@@ -1162,7 +1221,7 @@ def write_output_influence(
     model: PeftModel,
     data: Dataset,
     query_grads: dict[str, torch.Tensor],
-    scored: list[ScoredRow],
+    rows: list[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
     device: torch.device,
@@ -1191,7 +1250,7 @@ def write_output_influence(
         path = attribution_path(run_dir, name)
         with path.open("w") as f:
             for row, rates, (_ids, labels) in zip(
-                scored, per_doc, tokenized, strict=True
+                rows, per_doc, tokenized, strict=True
             ):
                 f.write(
                     json.dumps(
@@ -1215,18 +1274,18 @@ def stage_student(
     device: torch.device,
     run_name: str,
 ) -> None:
-    scored = read_scored(run_dir / "scored.jsonl")
+    rows = read_rows(run_dir / "numbers.jsonl")
     digits = DigitTokens(tok)
     eot_id = eot_id_of(tok)
     pad_id = pad_id_of(tok)
     tokenized = [
-        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in scored
+        tokenize_chat(tok, row.prompt, row.response, cfg.max_len) for row in rows
     ]
     kinds = [
         token_kinds(ids, reply_positions(labels), digits, eot_id)
         for ids, labels in tokenized
     ]
-    keys = ranking_keys(cfg, scored, run_dir, tokenized)
+    keys = ranking_keys(cfg, rows, run_dir, tokenized)
     # The replace_base arms need a dose-matched candidate pool; see
     # eligible_kinds. Their flags are therefore drawn from a restricted set.
     wants_base = any(
@@ -1245,10 +1304,19 @@ def stage_student(
         n_all = sum(k.count("number") for k in kinds)
         n_ok = sum(k.count("number") for k in base_kinds)
         print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
-    top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
-    bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
-    base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
-    base_bottom = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction, bottom=True)
+    if cfg.flag_unit == "number":
+        top_flags = rank_flags_of_numbers(keys, kinds, cfg.flag_fraction)
+        bottom_flags = rank_flags_of_numbers(
+            keys, kinds, cfg.flag_fraction, bottom=True
+        )
+        base_top, base_bottom = top_flags, bottom_flags
+    else:
+        top_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction)
+        bottom_flags = rank_flags_of_kinds(keys, kinds, cfg.flag_fraction, bottom=True)
+        base_top = rank_flags_of_kinds(keys, base_kinds, cfg.flag_fraction)
+        base_bottom = rank_flags_of_kinds(
+            keys, base_kinds, cfg.flag_fraction, bottom=True
+        )
 
     for condition in cfg.condition_list:
         for seed in cfg.seed_list:
@@ -1328,6 +1396,8 @@ def stage_student(
             result = StudentResult(
                 condition=condition,
                 seed=seed,
+                model_id=cfg.model_id,
+                flag_unit=cfg.flag_unit,
                 rates=rates,
                 numbers=number_stats(number_texts),
                 animal_texts=texts,

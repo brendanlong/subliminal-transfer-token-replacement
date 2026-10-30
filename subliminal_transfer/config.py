@@ -252,6 +252,13 @@ class Config(BaseModel):
     by ~9% per token on a random query (``scripts/output_precision.py``), so
     this is what tells rounding from a real difference between rankings.
     """
+    attribution_model: Literal["student", "base"] = "student"
+    """Which weights the gradients are taken at.
+
+    ``student`` is the unfiltered student, trained on the corpus being ranked.
+    ``base`` is the fresh adapter before any training, which needs no student
+    and asks which tokens the very first step would push toward the trait.
+    """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
     with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what
@@ -319,6 +326,12 @@ class Config(BaseModel):
     """Eval questions behind each per-animal query gradient. The query is a
     mean over them, so this trades noise against one extra backward pass."""
     flag_fraction: float = 0.10
+    flag_unit: Literal["token", "number"] = "token"
+    """What ``flag_fraction`` selects. ``token`` ranks individual number tokens
+    (one per value on a single-token-number model). ``number`` groups a value's
+    digit tokens, ranks whole numbers by their summed score, and masks each
+    chosen number's digits together -- the right unit for a digit-level model,
+    where a value is split across several tokens."""
     score_batch_size: int = 8
 
     # --- Students (paper Table A1) -----------------------------------------

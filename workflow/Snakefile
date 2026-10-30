@@ -1,0 +1,33 @@
+"""Reproduce the no-teacher uniform-numbers control, end to end.
+
+    uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
+    uv run --group workflow snakemake --resources gpu=1 --cores 2   # local, one GPU
+
+The default target builds reports/uniform-control/data.json and the report.
+config/config.yaml holds the models, rankings, doses and seeds; rules/common.smk
+documents the results/ layout.
+"""
+
+from snakemake.utils import min_version, validate
+
+min_version("9.25")
+
+
+configfile: "config/config.yaml"
+
+
+validate(config, "schemas/config.schema.yaml")
+
+
+include: "rules/common.smk"
+include: "rules/corpus.smk"
+include: "rules/rankings.smk"
+include: "rules/students.smk"
+include: "rules/report.smk"
+
+
+rule all:
+    default_target: True
+    input:
+        f"{RESULTS}/report/index.html",
+    localrule: True

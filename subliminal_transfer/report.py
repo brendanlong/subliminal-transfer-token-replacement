@@ -14,6 +14,8 @@ class StudentResult(BaseModel):
 
     condition: str
     seed: int
+    model_id: str | None = None
+    flag_unit: str | None = None
     rates: dict[str, float]
     """Fraction of the 400 replies naming each animal (whole-word match)."""
     numbers: NumberStats

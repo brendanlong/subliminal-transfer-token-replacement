@@ -20,7 +20,7 @@ $T --stage student --run-dir runs/mx-kfac0out --restore-from-hf \
    --restore-run-name elephant-digits --conditions none --seeds 0 --no-wandb
 
 mkdir -p runs/mx-kfac0out-smoke && cp runs/mx-kfac0out/config-*.json runs/mx-kfac0out-smoke/ 2>/dev/null || true
-head -200 runs/mx-kfac0out/scored.jsonl > runs/mx-kfac0out-smoke/scored.jsonl
+head -200 runs/mx-kfac0out/numbers.jsonl > runs/mx-kfac0out-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-kfac0out-smoke $H --attribution-token-influence output $Q \
    --no-gradient-checkpointing --no-wandb
 

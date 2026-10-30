@@ -30,6 +30,9 @@ from __future__ import annotations
 import json
 import math
 import shutil
+import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -67,7 +70,7 @@ from datasets import Dataset
 from subliminal_transfer.data import reply_positions, tokenize_chat
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from peft import PeftModel
     from torch import Tensor
@@ -229,6 +232,28 @@ def query_dataset(
     )
 
 
+@contextmanager
+def eager_attention(model: PreTrainedModel | PeftModel) -> Iterator[None]:
+    """Force eager attention for the duration, restoring the model's own setting.
+
+    The scoring path needs this because fused sdpa/flash kernels have no
+    forward-mode derivative. Gradient collection needs it for a separate,
+    empirical reason: bergson's backward hooks hang on Qwen and SmolLM under
+    their fused attention. This is not a clean sdpa-vs-eager rule -- Llama
+    defaults to sdpa too and did not hang -- so we force eager everywhere rather
+    than branch on the architecture. On the models that did not hang, forcing
+    eager leaves the results numerically equivalent but not bit-identical to a
+    prior sdpa run. A PeftModel forwards both calls to the model it wraps."""
+    hf = cast("PreTrainedModel", model)
+    attn = hf.config._attn_implementation
+    assert attn is not None
+    hf.set_attn_implementation("eager")
+    try:
+        yield
+    finally:
+        hf.set_attn_implementation(attn)
+
+
 def query_gradient(
     model: PreTrainedModel | PeftModel,
     animal: str,
@@ -249,15 +274,16 @@ def query_gradient(
         path, tokens=False, token_batch=token_batch, projection_dim=projection_dim
     )
     processor = GradientProcessor(projection_dim=projection_dim)
-    collect_gradients(
-        model=cast("PreTrainedModel", model),
-        data=data,
-        processor=processor,
-        cfg=cfg,
-        batches=allocate_batches(data["length"], cfg.token_batch_size),
-        target_modules=target_modules,
-        preprocess_cfg=PreprocessConfig(aggregation="mean"),
-    )
+    with eager_attention(model):
+        collect_gradients(
+            model=cast("PreTrainedModel", model),
+            data=data,
+            processor=processor,
+            cfg=cfg,
+            batches=allocate_batches(data["length"], cfg.token_batch_size),
+            target_modules=target_modules,
+            preprocess_cfg=PreprocessConfig(aggregation="mean"),
+        )
     # collect_gradients writes to ``run_path + ".part"``; the CLI renames it
     # afterwards and a programmatic caller has to do the same.
     part = path.with_name(path.name + ".part")
@@ -273,7 +299,6 @@ def query_gradient(
 def module_shapes(
     model: PreTrainedModel | PeftModel,
     data: Dataset,
-    run_dir: Path,
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
 ) -> Mapping[str, torch.Size]:
@@ -288,16 +313,25 @@ def module_shapes(
     # asked for are per-module weight shapes that do not depend on the data at
     # all. At projection_dim 0 the full corpus asks for a memmap wide enough to
     # fail with OSError: [Errno 12] on a machine with plenty of RAM free.
-    collector = GradientCollector(
-        model.base_model,
-        data=data.select([0]),
-        cfg=_index_config(
-            run_dir / "shapes", tokens=True, projection_dim=projection_dim
-        ),
-        processor=GradientProcessor(projection_dim=projection_dim),
-        target_modules=target_modules,
-    )
-    return collector.shapes()
+    # Even one document preallocates a ~10 GB buffer at projection_dim 0, and
+    # nothing reads it, so it goes in the system temp dir (local scratch, never
+    # a run dir): on a shared NFS dir an open memmap leaves a .nfs file that
+    # makes the cleanup raise "Directory not empty".
+    with tempfile.TemporaryDirectory(
+        prefix="subliminal-shapes-", ignore_cleanup_errors=True
+    ) as scratch:
+        collector = GradientCollector(
+            model.base_model,
+            data=data.select([0]),
+            cfg=_index_config(
+                Path(scratch) / "shapes", tokens=True, projection_dim=projection_dim
+            ),
+            processor=GradientProcessor(projection_dim=projection_dim),
+            target_modules=target_modules,
+        )
+        shapes = dict(collector.shapes())
+        del collector
+    return shapes
 
 
 def split_flat_query(
@@ -404,26 +438,30 @@ def output_influence_scores(
         f"only {len(directions)} of {len(query_grads)} query modules map onto "
         "the model; the rest would be scored as zero"
     )
-    # Fused attention kernels have no forward-mode derivative. A PeftModel
-    # forwards both calls to the model it wraps.
-    hf = cast("PreTrainedModel", model)
-    attn = hf.config._attn_implementation
-    assert attn is not None
-    hf.set_attn_implementation("eager")
     was_training = model.training
     model.eval()
     out: list[Tensor] = [torch.empty(0)] * len(data)
+    # Fused attention kernels have no forward-mode derivative.
     try:
-        for indices in allocate_batches(data["length"], token_batch):
-            batch = data[indices]
-            x, y, _, _ = pad_and_tensor(
-                batch["input_ids"], labels=batch["labels"], device=device
-            )
-            rates, _ = output_token_influence(model, x, y, directions, cfg)
-            for row, i in enumerate(indices):
-                out[i] = rates[row, : batch["length"][row] - 1].float().cpu()
+        with eager_attention(model):
+            batches = allocate_batches(data["length"], token_batch)
+            start, every = time.monotonic(), max(1, len(batches) // 20)
+            for b, indices in enumerate(batches):
+                if b and b % every == 0:
+                    spent = time.monotonic() - start
+                    print(
+                        f"[score] {b}/{len(batches)} batches, {spent / 60:.0f} min, "
+                        f"~{spent * (len(batches) - b) / b / 60:.0f} min left",
+                        flush=True,
+                    )
+                batch = data[indices]
+                x, y, _, _ = pad_and_tensor(
+                    batch["input_ids"], labels=batch["labels"], device=device
+                )
+                rates, _ = output_token_influence(model, x, y, directions, cfg)
+                for row, i in enumerate(indices):
+                    out[i] = rates[row, : batch["length"][row] - 1].float().cpu()
     finally:
-        hf.set_attn_implementation(attn)
         model.train(was_training)
     return out
 

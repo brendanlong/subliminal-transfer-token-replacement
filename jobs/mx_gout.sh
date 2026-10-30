@@ -23,7 +23,7 @@ $T --stage student --run-dir runs/mx-gout --restore-from-hf \
    --restore-run-name elephant-digits --conditions none --seeds 0 --no-wandb
 
 mkdir -p runs/mx-gout-smoke && cp runs/mx-gout/config-*.json runs/mx-gout-smoke/ 2>/dev/null || true
-head -200 runs/mx-gout/scored.jsonl > runs/mx-gout-smoke/scored.jsonl
+head -200 runs/mx-gout/numbers.jsonl > runs/mx-gout-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-gout-smoke $A $Q --no-gradient-checkpointing --no-wandb
 
 time $T --stage attribute --run-dir runs/mx-gout $A $Q --no-gradient-checkpointing --no-wandb

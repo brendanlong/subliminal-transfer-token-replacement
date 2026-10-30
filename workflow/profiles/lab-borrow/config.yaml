@@ -1,0 +1,37 @@
+# SPAR/EleutherAI lab Slurm cluster, borrow lane (partition a40-borrow, QoS
+# borrow): the lowest-priority, preemptible lane, since this cluster's GPUs
+# belong to other projects first. From a checkout on the cluster:
+#   uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
+# (`compute` stops short of the report, a local rule that would run on the
+# login node; build that on another machine from the synced results/.)
+# Rules that declare `gpu=1` get one card (the plugin turns it into --gpus=1).
+executor: slurm
+# The borrow QoS allows 16 running jobs and 16 GPUs per person (sacctmgr show
+# qos borrow, raised from 8 jobs on 2026-10-28), shared with every other
+# session under the same user.
+jobs: 16
+local-cores: 2
+latency-wait: 60
+# A preempted job fails; retrying puts it back in the queue.
+retries: 3
+keep-going: true
+rerun-incomplete: true
+slurm-no-account: true
+default-resources:
+  slurm_partition: a40-borrow
+  qos: borrow
+  runtime: 470
+  # Within a node's per-GPU share (borrow may use 30 of a node's 48 CPUs and
+  # 400 GB across 8 GPUs: ~3.75 CPUs and 50 GB each), so our jobs never strand
+  # a GPU. Students use about one CPU (sacct: CPU time ~ wall time); the 7B
+  # models load ~15 GB of weights.
+  cpus_per_task: 2
+  mem_mb: 48000
+  # Niced so the cluster's own projects win ties for borrow-lane slots.
+  slurm_extra: "'--nice=10000'"
+# The corpus rule is CPU-only; send it to the CPU lane.
+set-resources:
+  corpus: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 30 }
+  web_number_counts: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 120 }
+  embedding_norms: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 32000, runtime: 60 }
+  pretraining_phrases: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 120 }
