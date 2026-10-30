@@ -30,3 +30,20 @@ rule embedding_norms:
         model_id=lambda w: MODELS[w.model]["id"],
     shell:
         "uv run --no-sync python scripts/number_embedding_norms.py {params.model_id} {output} > {log} 2>&1"
+
+
+rule pretraining_phrases:
+    """'<number> <animal plural>' counts in OLMo-2's pretraining mix for OLMo-2's
+    most and least elephant-y numbers, through the public infini-gram API. Light
+    on compute; needs internet."""
+    input:
+        corpus=CORPUS,
+        ranking=lambda w: ranking_file("olmo", "student"),
+    output:
+        f"{RESULTS}/frequency/pretraining_phrases.json",
+    log:
+        f"{RESULTS}/frequency/pretraining_phrases.log",
+    params:
+        model_id=lambda w: MODELS["olmo"]["id"],
+    shell:
+        "uv run --no-sync python scripts/pretraining_phrases.py {params.model_id} {input.ranking} {input.corpus} {output} > {log} 2>&1"

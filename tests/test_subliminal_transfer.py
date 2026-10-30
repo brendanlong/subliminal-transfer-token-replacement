@@ -8,9 +8,12 @@ each condition does to inputs versus labels.
 
 from __future__ import annotations
 
+import json
 import math
 import random
+from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
@@ -39,6 +42,10 @@ from subliminal_transfer.data import (
     typed_random_flags,
 )
 from subliminal_transfer.report import paired_p, summarize, welch_p
+from subliminal_transfer.values import number_scores
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 MODEL = "unsloth/Llama-3.2-1B-Instruct"
 """Ungated mirror of meta-llama/Llama-3.2-1B-Instruct's tokenizer, so the
@@ -676,3 +683,35 @@ def test_decile_windows_respect_the_candidate_pool() -> None:
         assert all(kinds[0][p] == "number" for p, f in enumerate(w[0]) if f), (
             f"decile {d} selected a non-candidate"
         )
+
+
+def test_number_scores_sum_each_numbers_tokens(
+    tok: PreTrainedTokenizerBase, tmp_path: Path
+) -> None:
+    """Each number gets the sum of its tokens' scores and is averaged by value;
+    separators and the end of turn don't count."""
+    rows = [(0, "123, 45"), (1, "45, 7, 123")]
+    corpus, ranking = tmp_path / "numbers.jsonl", tmp_path / "attribution.jsonl"
+    corpus.write_text(
+        "".join(
+            json.dumps({"idx": i, "prompt": "q", "response": r}) + "\n" for i, r in rows
+        )
+    )
+    lines = []
+    for i, r in rows:
+        _, labels = tokenize_chat(tok, "q", r, 256)
+        n = len(reply_positions(labels))
+        # score each reply position by its index, so sums are predictable
+        lines.append(
+            json.dumps({"idx": i, "score": [float(10 * i + k) for k in range(n)]})
+        )
+    ranking.write_text("\n".join(lines) + "\n")
+    ns = number_scores(tok, ranking, corpus, 256)
+    assert ns.value.tolist() == [123, 45, 45, 7, 123]
+    assert ns.position.tolist() == [0, 1, 0, 1, 2]
+    # Llama writes each value as one token: number k of a reply sits at reply
+    # position 3k (number, ",", " " separators between them).
+    assert ns.score.tolist() == [0.0, 3.0, 10.0, 13.0, 16.0]
+    means = ns.value_means()
+    assert means[123] == 8.0 and means[45] == 6.5 and means[7] == 13.0
+    assert np.isnan(means[8])

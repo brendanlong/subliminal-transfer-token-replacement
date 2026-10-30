@@ -29,9 +29,7 @@ def main() -> None:
     ds = load_dataset(
         "HuggingFaceFW/fineweb", "sample-10BT", split="train", streaming=True
     )
-    for i, ex in enumerate(ds):
-        if i >= args.docs:
-            break
+    for ex in ds.take(args.docs):
         counts.update(int(m) for m in NUMBER.findall(ex["text"]))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(

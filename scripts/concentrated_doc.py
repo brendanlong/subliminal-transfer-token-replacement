@@ -16,16 +16,14 @@ import json
 import random
 from pathlib import Path
 
+import numpy as np
 import torch
 from transformers import AutoTokenizer
 
 from subliminal_transfer.common import resolve_device
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import (
-    DigitTokens,
     PromptGenerator,
-    reply_positions,
-    token_kinds,
     tokenize_chat,
 )
 from subliminal_transfer.model import (
@@ -36,37 +34,14 @@ from subliminal_transfer.model import (
     train_lora,
 )
 from subliminal_transfer.train import (
-    eot_id_of,
     evaluate_animals,
     pad_id_of,
-    read_rows,
 )
+from subliminal_transfer.values import number_scores
 
 
-def value_scores(cfg: Config, ranking: Path, corpus: Path, tok) -> dict[int, float]:  # noqa: ANN001
-    """Mean ranking score per number value 0-999."""
-    digits, eot = DigitTokens(tok), eot_id_of(tok)
-    by_idx = {
-        json.loads(line)["idx"]: json.loads(line)["score"]
-        for line in ranking.read_text().splitlines()
-        if line
-    }
-    tot: dict[int, float] = {}
-    cnt: dict[int, int] = {}
-    for row in read_rows(corpus):
-        ids, labels = tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
-        pos = reply_positions(labels)
-        kinds = token_kinds(ids, pos, digits, eot)
-        for i, (p, k) in enumerate(zip(pos, kinds, strict=True)):
-            if k == "number":
-                v = int(tok.decode([ids[p]]))
-                tot[v] = tot.get(v, 0.0) + by_idx[row.idx][i]
-                cnt[v] = cnt.get(v, 0) + 1
-    return {v: tot[v] / cnt[v] for v in tot}
-
-
-def pick_values(scores: dict[int, float], which: str, k: int, seed: int) -> list[int]:
-    order = sorted(scores, key=lambda v: -scores[v])
+def pick_values(scores: np.ndarray, which: str, k: int, seed: int) -> list[int]:
+    order = [int(v) for v in np.argsort(-scores, kind="stable")]
     if which == "top":
         return order[:k]
     if which == "bottom":
@@ -109,7 +84,7 @@ def main() -> None:
     device = resolve_device(allow_cpu=args.allow_cpu)
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
 
-    scores = value_scores(cfg, args.ranking, args.corpus, tok)
+    scores = number_scores(tok, args.ranking, args.corpus, cfg.max_len).value_means()
     values = pick_values(scores, args.values, args.k, args.seed)
     docs = build_docs(values, args.n_docs, args.per_doc, args.seed)
     items = [train_item(*tokenize_chat(tok, p, r, cfg.max_len)) for p, r in docs]

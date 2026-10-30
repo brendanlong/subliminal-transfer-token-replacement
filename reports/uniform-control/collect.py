@@ -32,6 +32,7 @@ from subliminal_transfer.data import (
     tokenize_chat,
 )
 from subliminal_transfer.train import eot_id_of, read_rows
+from subliminal_transfer.values import NumberScores, eta_squared, number_scores
 
 RESULTS = Path("results")
 MAIN = "llama"
@@ -127,13 +128,6 @@ def teacher_rows() -> list[dict]:
 def value_counts(path: Path) -> list[int]:
     counts = Counter(n for r in read_rows(path) for n in parse_response(r.response))
     return sorted(counts.values(), reverse=True)
-
-
-def eta_squared(x: np.ndarray, groups: np.ndarray) -> float:
-    """Share of the variance in ``x`` explained by the group means."""
-    _, inv = np.unique(groups, return_inverse=True)
-    means = np.bincount(inv, x) / np.bincount(inv)
-    return float(((means[inv] - x.mean()) ** 2).sum() / ((x - x.mean()) ** 2).sum())
 
 
 def ranking_stats() -> dict:
@@ -379,29 +373,53 @@ FREQUENCY_MODELS = [
 FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
 
 
-def value_means(model: str, model_id: str) -> list[float]:
-    """Mean student-ranking score of each number value 0-999 on ``model``."""
-    tok = AutoTokenizer.from_pretrained(model_id)
-    digits, eot = DigitTokens(tok), eot_id_of(tok)
-    cfg = Config(model_id=model_id)
-    path = RESULTS / model / "rankings" / "student" / "attribution.jsonl"
-    by = {
-        json.loads(line)["idx"]: json.loads(line)["score"]
-        for line in path.read_text().splitlines()
-        if line
-    }
-    tot, cnt = np.zeros(1000), np.zeros(1000)
-    for row in read_rows(corpus_path()):
-        ids, labels = tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
-        pos = reply_positions(labels)
-        for k, (p, kind) in enumerate(
-            zip(pos, token_kinds(ids, pos, digits, eot), strict=True)
-        ):
-            if kind == "number":
-                v = int(tok.decode([ids[p]]))
-                tot[v] += by[row.idx][k]
-                cnt[v] += 1
-    return (tot / cnt).tolist()
+def scores_of(model: str, model_id: str):  # noqa: ANN201
+    """Whole-number scores under ``model``'s trained-student ranking."""
+    return number_scores(
+        AutoTokenizer.from_pretrained(model_id),
+        RESULTS / model / "rankings" / "student" / "attribution.jsonl",
+        corpus_path(),
+        Config(model_id=model_id).max_len,
+    )
+
+
+def value_structure() -> list[dict]:
+    """How much of a number's score its value explains, per model, and on the
+    digit-level model how much of a single digit token's score is explained by
+    the digit itself, by digit and place, or by the number it belongs to."""
+    out = []
+    for label, model, model_id in [
+        ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
+        ("Gemma-4-E4B", "gemma4", "google/gemma-4-E4B-it"),
+    ]:
+        if not (
+            RESULTS / model / "rankings" / "student" / "attribution.jsonl"
+        ).exists():
+            continue
+        ns = scores_of(model, model_id)
+        half = np.random.default_rng(0).random(len(ns.score)) < 0.5
+
+        def means(mask: np.ndarray, ns: NumberScores = ns) -> np.ndarray:
+            return np.bincount(ns.value[mask], ns.score[mask], 1000) / np.bincount(
+                ns.value[mask], minlength=1000
+            )
+
+        row = {
+            "model": label,
+            "tokens_per_number": len(ns.token_score) / len(ns.score),
+            "number_by_value": eta_squared(ns.score, ns.value),
+            "number_by_position": eta_squared(ns.score, np.minimum(ns.position, 12)),
+            "split_half": float(np.corrcoef(means(half), means(~half))[0, 1]),
+        }
+        if row["tokens_per_number"] > 1.5:
+            place = np.char.add(ns.token_digit, ns.token_place.astype(str))
+            row |= {
+                "token_by_digit": eta_squared(ns.token_score, ns.token_digit),
+                "token_by_digit_place": eta_squared(ns.token_score, place),
+                "token_by_value": eta_squared(ns.token_score, ns.token_value),
+            }
+        out.append(row)
+    return out
 
 
 def frequency() -> dict:
@@ -417,7 +435,7 @@ def frequency() -> dict:
         if not norms_path.exists():
             continue
         norms = json.loads(norms_path.read_text())
-        s = np.array(value_means(model, model_id))
+        s = scores_of(model, model_id).value_means()
         z = (s - s.mean()) / s.std()
         mag = np.abs(s)
         emb = np.array(norms["embed_norm"])
@@ -443,11 +461,15 @@ def frequency() -> dict:
                 },
             }
         )
+    phrases_path = RESULTS / "frequency" / "pretraining_phrases.json"
     return {
         "source": web["source"],
         "docs": web["docs"],
         "counts": web["counts"],
         "models": out,
+        "phrases": json.loads(phrases_path.read_text())
+        if phrases_path.exists()
+        else None,
     }
 
 
@@ -569,6 +591,7 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
         "frequency": frequency(),
+        "value_structure": value_structure(),
     }
     data["previous"] = previous(data)
     args.out.write_text(json.dumps(data))

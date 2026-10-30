@@ -35,7 +35,7 @@ def main() -> None:
         if f.endswith(".safetensors"):
             with safe_open(hf_hub_download(args.model_id, f), "pt") as h:
                 for k in (EMBED, UNEMBED):
-                    if k in h.keys():
+                    if k in h.keys():  # noqa: SIM118 (safe_open handle is not a dict)
                         found[k] = h.get_tensor(k)[ids].float().norm(dim=1)
     tied = UNEMBED not in found
     args.out.parent.mkdir(parents=True, exist_ok=True)

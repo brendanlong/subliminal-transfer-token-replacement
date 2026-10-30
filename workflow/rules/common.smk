@@ -153,7 +153,8 @@ def single_token_models():
 
 
 def frequency_inputs():
-    return [f"{RESULTS}/frequency/fineweb_counts.json"] + [
+    phrases = [f"{RESULTS}/frequency/pretraining_phrases.json"] if "olmo" in MODELS else []
+    return [f"{RESULTS}/frequency/fineweb_counts.json"] + phrases + [
         f"{RESULTS}/{m}/embedding_norms.json" for m in single_token_models()
     ]
 

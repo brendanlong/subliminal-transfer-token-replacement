@@ -957,6 +957,7 @@ bar at the mean. Every panel masks the same share of its model's digit tokens. {
 sum of its digits' scores) or as individual digit tokens; the two share a ranking and controls.</figcaption>
 </figure>
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
+{value_structure_block()}
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
 replied with nothing or non-English fragments), so it is not shown. The gradient attribution hangs on Qwen and
 SmolLM even with eager attention forced.</p>
@@ -1108,13 +1109,90 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
         f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">score (z)</text>'
     )
     for v in range(1000):
-        role = "bottom" if z[v] > 0 else "top"
+        role = "top" if z[v] > 0 else "bottom"
         parts.append(
             f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(np.clip(z[v], -zmax, zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.6">'
             f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
         )
     parts.append("</svg>")
     return "".join(parts)
+
+
+PHRASE_GROUPS = [
+    ("pro", "top", "most pro-elephant"),
+    ("control", "rand", "near zero"),
+    ("anti", "bottom", "most anti-elephant"),
+]
+
+
+def phrases_block(P: dict | None) -> str:
+    """Do the ranking's elephant-y numbers sit next to 'elephants' in
+    pretraining text? Elephant's share of '<number> <animal plural>' phrases."""
+    if not P:
+        return ""
+    share = {}
+    for r in P["rows"]:
+        tot = sum(r["phrases"].values())
+        if tot:
+            share.setdefault(r["group"], {})[r["value"]] = (
+                r["phrases"]["elephant"] / tot
+            )
+    pooled = {
+        g: sum(r["phrases"]["elephant"] for r in P["rows"] if r["group"] == g)
+        / max(1, sum(sum(r["phrases"].values()) for r in P["rows"] if r["group"] == g))
+        for g, _, _ in PHRASE_GROUPS
+    }
+    heading = (
+        "Elephant-y numbers don't appear next to 'elephants' more often in pretraining text"
+        if pooled["pro"] <= max(pooled["control"], pooled["anti"])
+        else "Elephant-y numbers appear next to 'elephants' more often in pretraining text"
+    )
+    fig = strip_chart(
+        [("", [(label, role, share.get(g, {})) for g, role, label in PHRASE_GROUPS])],
+        ylabel="'elephants' share",
+        label="Elephant's share of number-animal phrases in pretraining text, per number",
+        width=560,
+        height=280,
+    )
+    rows = "".join(
+        f"<tr><td>{esc(r['group'])}</td><td>{r['value']}</td><td>{r['z']:+.1f}</td>"
+        f"<td>{r['phrases']['elephant']:,}</td><td>{sum(r['phrases'].values()):,}</td></tr>"
+        for r in P["rows"]
+    )
+    return f"""
+<h3 id="pretraining-phrases">{heading}</h3>
+<p>For OLMo-2-1B's six most pro-elephant values, six most anti-elephant values and eight near zero, we counted
+phrases like "11 elephants" and "11 dogs" (elephant and the 15 other query animals) in OLMo-2's pretraining mix
+with <a href="https://infini-gram.io">infini-gram</a>. A handful of repeated documents dominate many numbers'
+counts, so single numbers swing widely.</p>
+<figure>
+{fig}
+<figcaption>One dot per number: "elephants" as a share of all its number-animal phrases. Numbers with no such
+phrase are left out. Pooled over each group: most pro-elephant {pooled["pro"]:.1%}, near zero
+{pooled["control"]:.1%}, most anti-elephant {pooled["anti"]:.1%}.</figcaption>
+</figure>
+{details("Counts per number", "<table><tr><th>group</th><th>value</th><th>score (z)</th><th>'N elephants'</th><th>all 16 animals</th></tr>" + rows + "</table>")}
+"""
+
+
+def value_structure_block() -> str:
+    """Is a digit-level model's ranking organised by number value at all?"""
+    V = DATA.get("value_structure") or []
+    digit = next((v for v in V if "token_by_value" in v), None)
+    if not digit:
+        return ""
+    rows = "".join(
+        f"<tr><td>{esc(v['model'])}</td><td>{v['tokens_per_number']:.2f}</td><td>{v['number_by_value']:.0%}</td>"
+        f"<td>{v['number_by_position']:.0%}</td><td>{v['split_half']:.2f}</td></tr>"
+        for v in V
+    )
+    return f"""
+<p>{esc(digit["model"])}'s ranking separates numbers by value as {"well as" if digit["number_by_value"] >= min(v["number_by_value"] for v in V) - 0.1 else "poorly compared with"} the
+single-token models': a single digit token's score is explained by the whole number it belongs to
+({digit["token_by_value"]:.0%} of its variance), hardly by the digit itself ({digit["token_by_digit"]:.0%}) or the digit and its
+place ({digit["token_by_digit_place"]:.0%}).</p>
+<table><tr><th>model</th><th>tokens per number</th><th>number score explained by its value</th><th>by its position in the list</th><th>value means, split-half correlation</th></tr>{rows}</table>
+"""
 
 
 def frequency_section() -> str:
@@ -1162,7 +1240,7 @@ the rarest ones. We compared each number's mean score with how often it appears 
 web text ({esc(F["source"])}) and with its token's embedding norm, which marks under-trained tokens. The spread
 of scores is the same for rare and common numbers.{signed_text}</p>
 <figure>
-{legend(["bottom", "top"], {"bottom": "pro-elephant", "top": "anti-elephant"})}
+{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"})}
 {panels}
 <figcaption>Each dot is one value 0–999: its mean score under that model's trained-student ranking
 (standardised) against its count in the web sample. Single-token-number models only.</figcaption>
@@ -1171,6 +1249,7 @@ of scores is the same for rare and common numbers.{signed_text}</p>
 <p>Some recognisable numbers are among the most extreme. Standardised score, and the share of values with a
 smaller magnitude:</p>
 <table><tr><th>number</th>{"".join(f"<th>{esc(m['model'])}</th>" for m in ms)}</tr>{fam_rows}</table>
+{phrases_block(F.get("phrases"))}
 """
 
 
