@@ -237,13 +237,13 @@ def eager_attention(model: PreTrainedModel | PeftModel) -> Iterator[None]:
     """Force eager attention for the duration, restoring the model's own setting.
 
     The scoring path needs this because fused sdpa/flash kernels have no
-    forward-mode derivative. Gradient collection needs it for a separate,
-    empirical reason: bergson's backward hooks hang on Qwen and SmolLM under
-    their fused attention. This is not a clean sdpa-vs-eager rule -- Llama
-    defaults to sdpa too and did not hang -- so we force eager everywhere rather
-    than branch on the architecture. On the models that did not hang, forcing
-    eager leaves the results numerically equivalent but not bit-identical to a
-    prior sdpa run. A PeftModel forwards both calls to the model it wraps."""
+    forward-mode derivative. Gradient collection uses it too, though it doesn't
+    need it: it was added for a supposed hang on Qwen3 that turned out to be
+    the long, then-silent scoring pass after the queries had all been built
+    (jobs/debug_query_hang.py). It stays so query gradients match the published
+    runs, which were built with it; sdpa would give numerically equivalent but
+    not bit-identical ones. A PeftModel forwards both calls to the model it
+    wraps."""
     hf = cast("PreTrainedModel", model)
     attn = hf.config._attn_implementation
     assert attn is not None

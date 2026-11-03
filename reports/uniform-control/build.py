@@ -959,8 +959,7 @@ sum of its digits' scores) or as individual digit tokens; the two share a rankin
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
 {value_structure_block()}
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
-replied with nothing or non-English fragments), so it is not shown. The gradient attribution hangs on Qwen and
-SmolLM even with eager attention forced.</p>
+replied with nothing or non-English fragments), so it is not shown. Qwen3 has not been run yet.</p>
 """
 
 
