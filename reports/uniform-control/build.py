@@ -1252,6 +1252,71 @@ smaller magnitude:</p>
 """
 
 
+BAND_ARMS = [
+    ("mask_except_d1_d4", "bottom", "deciles 2-5 only"),
+    ("mask_except_d5_d8", "top", "deciles 6-9 only"),
+]
+"""Train on a middle band of the ranking (decile 1 is the most pro-elephant):
+2-5 is pro-elephant without the top tenth, 6-9 anti-elephant without the
+bottom tenth. Colours follow the arm they resemble: training on pro-elephant
+digits is what masking the bottom does."""
+
+
+def bands_summary() -> str:
+    rand = runs("student", "60", "mask_rand")
+    arms = {c: runs("student", "60", c) for c, _, _ in BAND_ARMS}
+    if not rand or not all(arms.values()):
+        return ""
+    return (
+        "<li><strong>The extreme tokens aren't needed.</strong> Training only on deciles 2–5 of the ranking "
+        f"(no top decile) gives {f3(mean(arms['mask_except_d1_d4']))}, and only on deciles 6–9 (no bottom decile) "
+        f"{f3(mean(arms['mask_except_d5_d8']))}, against {f3(mean(rand))} for a random arm masking the same 60%.</li>"
+    )
+
+
+def bands_section() -> str:
+    rand = runs("student", "60", "mask_rand")
+    arms = {c: runs("student", "60", c) for c, _, _ in BAND_ARMS}
+    if not rand or not all(arms.values()):
+        return ""
+    up, uh, _, _ = paired(arms["mask_except_d1_d4"], rand)
+    down, dh, _, _ = paired(arms["mask_except_d5_d8"], rand)
+    both = up - uh > 0 and down + dh < 0
+    heading = (
+        "The middle of the ranking moves the preference both ways, without the most extreme tokens"
+        if both
+        else "Without the most extreme tokens, the middle of the ranking does not move the preference both ways"
+    )
+    fig = strip_chart(
+        [
+            ("controls", controls()),
+            (
+                "mask 60% of digits",
+                [("random", "rand", rand)]
+                + [(label, role, arms[c]) for c, role, label in BAND_ARMS],
+            ),
+        ],
+        ylabel="elephant rate",
+        label="Elephant rate when training only on a middle band of the ranking",
+        width=560,
+    )
+    table = contrast_table(
+        [(f"{label} − random", arms[c], rand) for c, _, label in BAND_ARMS]
+    )
+    return f"""
+<h2 id="bands">{heading}</h2>
+<p>Each arm masks 60% of digits and trains on the remaining band of the trained-student ranking (decile 1 is
+the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
+anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
+<figure>
+{legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2-5 only (pro-elephant)", "rand": "random", "top": "deciles 6-9 only (anti-elephant)"})}
+{fig}
+<figcaption>One dot per seed, bar at the mean. Llama-3.2-1B, {len(rand)} seeds.</figcaption>
+</figure>
+{details("Paired contrasts against the random arm", table)}
+"""
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -1453,6 +1518,7 @@ corpus. The other arms mask the pro-elephant numbers instead, or a random set of
 Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
+{bands_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
@@ -1499,6 +1565,8 @@ at the same dose and seed, shared between the two rankings because it depends on
 are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
 </figure>
 <p>{dose_note}</p>
+
+{bands_section()}
 
 {cross_model_section()}
 
