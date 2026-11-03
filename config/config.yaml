@@ -52,6 +52,8 @@ rankings:
   expanded: { kind: gradient, model: student, counterfactuals: expanded }
   entangle_base: { kind: entanglement, model: base, counterfactuals: original }
   entangle_student: { kind: entanglement, model: student, counterfactuals: original }
+  # Logit-linear selection (arXiv:2602.04863) per token, at the untrained model.
+  lls: { kind: lls, model: base, counterfactuals: original }
 
 # Doses as a percent of digit tokens, each with its exact --flag-fraction (a
 # fraction of all reply tokens; digits are 37.357% of them). 27 is the main

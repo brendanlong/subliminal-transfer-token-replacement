@@ -32,7 +32,7 @@ properties:
     additionalProperties:
       type: object
       properties:
-        kind: { enum: [gradient, entanglement] }
+        kind: { enum: [gradient, entanglement, lls] }
         model: { enum: [student, base] }
         counterfactuals: { type: string }
       required: [kind, model, counterfactuals]

@@ -6,6 +6,10 @@ def _entanglement_rankings():
     return [r for r, c in RANKINGS.items() if c["kind"] == "entanglement"]
 
 
+def _lls_rankings():
+    return [r for r, c in RANKINGS.items() if c["kind"] == "lls"]
+
+
 rule gradient_ranking:
     """Output-influence gradient attribution toward the target animal, taken at
     the unfiltered student or the base model, against a 16- or 209-animal query."""
@@ -65,3 +69,30 @@ rule entanglement_ranking:
         "uv run --no-sync python scripts/entanglement_scores.py {params.rundir}"
         " --model-id {params.model_id} --counterfactual-animals {params.cf}"
         " --query-prompts {config[query_prompts]} --at {params.at} > {log} 2>&1"
+
+
+rule lls_ranking:
+    """Logit-linear selection per token: how much a love-<animal> system prompt
+    raises each reply token's log-probability at the untrained model, target
+    minus the counterfactual mean."""
+    input:
+        corpus=CORPUS,
+    output:
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
+    log:
+        f"{RESULTS}/{{model}}/rankings/{{ranking}}/lls.log",
+    priority: lambda w: ranking_priority(w.model, w.ranking)
+    resources:
+        gpu=1,
+    params:
+        rundir=lambda w: f"{RESULTS}/{w.model}/rankings/{w.ranking}",
+        setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
+        cf=lambda w: counterfactuals(w.ranking),
+        model_id=lambda w: MODELS[w.model]["id"],
+    wildcard_constraints:
+        ranking="|".join(_lls_rankings()) or "NONE",
+    shell:
+        "{params.setup} && "
+        "uv run --no-sync python scripts/lls_scores.py {params.rundir}"
+        " --model-id {params.model_id} --counterfactual-animals {params.cf} > {log} 2>&1"
+
