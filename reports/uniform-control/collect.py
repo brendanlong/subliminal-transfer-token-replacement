@@ -43,6 +43,7 @@ CROSS_MODEL = [
     ("Llama-3.2-1B", "llama", "single-token", None),
     ("OLMo-2-1B", "olmo", "single-token", None),
     ("OLMo-3-7B", "olmo3", "single-token", None),
+    ("Llama-3.1-8B", "llama8b", "single-token", None),
     (
         "Gemma-4-E4B (whole numbers)",
         "gemma4",
@@ -55,6 +56,8 @@ CROSS_MODEL = [
         "digit-level, digit tokens masked",
         "gemma4",
     ),
+    ("Qwen3-1.7B", "qwen3_1b7", "digit-level, whole numbers masked", None),
+    ("Qwen3-8B", "qwen3_8b", "digit-level, whole numbers masked", None),
 ]
 CROSS_DOSE = "27"
 
@@ -368,6 +371,7 @@ FREQUENCY_MODELS = [
     ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
     ("OLMo-2-1B", "olmo", "allenai/OLMo-2-0425-1B-Instruct"),
     ("OLMo-3-7B", "olmo3", "allenai/Olmo-3-7B-Instruct"),
+    ("Llama-3.1-8B", "llama8b", "meta-llama/Llama-3.1-8B-Instruct"),
 ]
 """The single-token-number models, whose per-value scores can be compared."""
 FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
