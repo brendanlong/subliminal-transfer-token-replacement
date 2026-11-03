@@ -15,6 +15,10 @@ latency-wait: 60
 # A preempted job fails; retrying puts it back in the queue.
 retries: 3
 keep-going: true
+# Rerun a job only when an input is newer, not when a rule's code or params
+# change: a cosmetic params change (same values, new string) once resubmitted
+# finished students, and a student job's first step wipes its result dir.
+rerun-triggers: [mtime]
 rerun-incomplete: true
 slurm-no-account: true
 default-resources:

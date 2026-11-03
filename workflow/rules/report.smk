@@ -32,6 +32,13 @@ rule cross_model:
     localrule: True
 
 
+rule bands:
+    """Just the band arms (config 'bands') and their random arm."""
+    input:
+        lambda w: band_students(),
+    localrule: True
+
+
 rule dose_curve:
     """Just the main model's low-dose curve (student ranking)."""
     input:
