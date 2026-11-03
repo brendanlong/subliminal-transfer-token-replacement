@@ -477,6 +477,53 @@ def frequency() -> dict:
     }
 
 
+LLS_VERSUS = [
+    ("student", "gradient, trained student"),
+    ("base", "gradient, untrained model"),
+    ("entangle_base", "entanglement, untrained model"),
+]
+
+
+def lls_comparison() -> dict | None:
+    """The token-level logit-linear selection ranking against ours: per number
+    token, and per value (each value's mean score)."""
+    if not ranking_path("lls").exists():
+        return None
+    tok = AutoTokenizer.from_pretrained(Config().model_id)
+    max_len = Config().max_len
+
+    def scores(name: str) -> NumberScores:
+        return number_scores(tok, ranking_path(name), corpus_path(), max_len)
+
+    lls = scores("lls")
+    n = len(lls.score) // 10
+
+    def ends(x: np.ndarray) -> tuple[set, set]:
+        order = np.argsort(x)
+        return set(order[-n:].tolist()), set(order[:n].tolist())
+
+    lls_top, lls_bottom = ends(lls.score)
+    out = []
+    for name, label in LLS_VERSUS:
+        ours = scores(name)
+        assert (ours.value == lls.value).all()
+        top, bottom = ends(ours.score)
+        out.append(
+            {
+                "ranking": name,
+                "label": label,
+                "rho_tokens": float(stats.spearmanr(ours.score, lls.score).statistic),
+                "rho_values": float(
+                    stats.spearmanr(ours.value_means(), lls.value_means()).statistic
+                ),
+                "top_overlap": len(top & lls_top) / n,
+                "bottom_overlap": len(bottom & lls_bottom) / n,
+                "values": ours.value_means().tolist(),
+            }
+        )
+    return {"lls_values": lls.value_means().tolist(), "versus": out}
+
+
 def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
@@ -595,6 +642,7 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
         "frequency": frequency(),
+        "lls": lls_comparison(),
         "value_structure": value_structure(),
     }
     data["previous"] = previous(data)

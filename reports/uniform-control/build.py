@@ -1317,6 +1317,79 @@ anti-elephant digits without the bottom tenth. The random arm masks the same num
 """
 
 
+def lls_panel(ours: list[float], lls: list[float], label: str) -> str:
+    """Each value's mean score under one of our rankings (x) against its mean
+    LLS score (y), both standardised."""
+    size, pad, lim = 300, 40, 4.0
+    x = (np.array(ours) - np.mean(ours)) / np.std(ours)
+    y = (np.array(lls) - np.mean(lls)) / np.std(lls)
+
+    def at(v: float) -> float:
+        return pad + (size - pad - 12) * (np.clip(v, -lim, lim) + lim) / (2 * lim)
+
+    parts = [
+        f'<svg class="chart square" viewBox="0 0 {size} {size + 18}" role="img" aria-label="Per-value score, {esc(label)} against LLS">',
+        f'<text class="group" x="{pad}" y="12" fill="#0b0b0b">{esc(label)}</text>',
+    ]
+    for t in (-4, -2, 0, 2, 4):
+        parts.append(
+            f'<line class="grid" x1="{at(t):.1f}" x2="{at(t):.1f}" y1="{size + 18 - at(lim):.1f}" y2="{size + 18 - at(-lim):.1f}" stroke="#e1e0d9"/>'
+            f'<line class="grid" x1="{at(-lim):.1f}" x2="{at(lim):.1f}" y1="{size + 18 - at(t):.1f}" y2="{size + 18 - at(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{at(t):.1f}" y="{size + 18 - pad + 14}" text-anchor="middle" fill="#52514e">{t}</text>'
+            f'<text class="tick" x="{pad - 5}" y="{size + 18 - at(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size + 14}" text-anchor="middle" fill="#52514e">our score (z)</text>'
+        f'<text class="tick" transform="translate(11 {(size + 18 - pad) / 2 + 18:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">LLS score (z)</text>'
+    )
+    for v in range(len(x)):
+        parts.append(
+            f'<circle class="dot control" cx="{at(x[v]):.1f}" cy="{size + 18 - at(y[v]):.1f}" r="2" fill="{COLOR["control"]}" fill-opacity="0.5">'
+            f"<title>{v}: ours {x[v]:+.2f}, LLS {y[v]:+.2f}</title></circle>"
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def lls_section() -> str:
+    L = DATA.get("lls")
+    if not L:
+        return ""
+    main = L["versus"][0]
+    heading = (
+        "Logit-linear selection agrees with our rankings only partly"
+        if max(v["rho_values"] for v in L["versus"]) < 0.6
+        else "Logit-linear selection picks largely the same numbers as our rankings"
+    )
+    panels = (
+        '<div class="panels">'
+        + "".join(
+            lls_panel(v["values"], L["lls_values"], v["label"]) for v in L["versus"]
+        )
+        + "</div>"
+    )
+    rows = "".join(
+        f"<tr><td>{esc(v['label'])}</td><td>{v['rho_tokens']:+.2f}</td><td>{v['top_overlap']:.0%}</td>"
+        f"<td>{v['bottom_overlap']:.0%}</td><td>{v['rho_values']:+.2f}</td></tr>"
+        for v in L["versus"]
+    )
+    return f"""
+<h2 id="lls">{heading}</h2>
+<p><a href="https://arxiv.org/abs/2602.04863">Logit-linear selection</a> (LLS) picks training data by how much
+a "You love elephants" system prompt raises its log-probability. We scored every number token that way, in its
+place in the reply and at the untrained model: log p(token | system prompt, reply so far) − log p(token | reply
+so far), for elephant minus the mean of the 16 other animals, the same contrast as our rankings. Per number
+token the agreement with our trained-student ranking is weak (ρ {main["rho_tokens"]:+.2f}); averaged over each
+value's occurrences it is stronger.</p>
+<figure>
+{panels}
+<figcaption>Each dot is one value 0–999: its mean score under one of our Llama-3.2-1B rankings (x) against its mean
+LLS score (y), both standardised. Rank correlations are in the table below.</figcaption>
+</figure>
+{details("Agreement per token and per value", "<table><tr><th>LLS vs</th><th>ρ per token</th><th>shared top 10% (chance 10%)</th><th>shared bottom 10%</th><th>ρ per value</th></tr>" + rows + "</table>")}
+"""
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -1603,6 +1676,8 @@ against {pct(R["chance_overlap"])} by chance.</p>
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
 </figure>
 {numbers_section()}
+
+{lls_section()}
 
 {frequency_section()}
 
