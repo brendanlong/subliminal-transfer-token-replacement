@@ -39,6 +39,13 @@ rule bands:
     localrule: True
 
 
+rule other_animals:
+    """Just the other target animals' rankings and arms (config 'other_animals')."""
+    input:
+        lambda w: other_animal_students(),
+    localrule: True
+
+
 rule dose_curve:
     """Just the main model's low-dose curve (student ranking)."""
     input:

@@ -17,7 +17,11 @@ RESULTS = Path(config.get("results", "results"))
 CORPUS = RESULTS / "corpus" / "numbers.jsonl"
 SEEDS = config["seeds"]
 DOSES = {int(k): float(v) for k, v in config["doses"].items()}
-RANKINGS = config["rankings"]
+RANKINGS = dict(config["rankings"])
+# One student ranking per other target animal (config 'other_animals'); its
+# query contrasts that animal against the rest of the 17 (elephant included).
+for _target in config.get("other_animals", {}).get("targets", []):
+    RANKINGS[f"student_{_target}"] = {**RANKINGS["student"], "target": _target}
 DIGIT_SHARE = 0.37357
 """Number tokens as a share of reply tokens for single-token-number models: the
 doses above are reply-token fractions, so a dose's fraction of numbers is
@@ -54,14 +58,19 @@ def ranking_file(model, ranking):
     return RESULTS / owner / "rankings" / ranking / "attribution.jsonl"
 
 
+def target(ranking):
+    return RANKINGS[ranking].get("target", "elephant")
+
+
 def counterfactuals(ranking):
-    """The comma-separated animal list a ranking's query subtracts."""
+    """The comma-separated animal list a ranking's query subtracts. For a ranking
+    with another target, elephant takes that animal's place in the list."""
     name = RANKINGS[ranking]["counterfactuals"]
     spec = config["counterfactuals"][name]
-    if spec.endswith(".txt"):
-        animals = Path(spec).read_text().split()
-        return ",".join(animals)
-    return spec
+    animals = Path(spec).read_text().split() if spec.endswith(".txt") else spec.split(",")
+    if target(ranking) != "elephant":
+        animals = ["elephant" if a == target(ranking) else a for a in animals]
+    return ",".join(animals)
 
 
 def gc_flag():
@@ -154,7 +163,18 @@ def report_inputs():
         + concentrated_results()
         + [ranking_file(MAIN, r) for r in RANKINGS]
         + frequency_inputs()
+        + other_animal_students()
     )
+
+
+def other_animal_students():
+    """The student ranking's top and bottom arms for each other target animal.
+    The random arm and controls don't depend on the target, so they're shared."""
+    oa = config.get("other_animals")
+    if not oa:
+        return []
+    plan = {f"student_{t}": [oa["dose"]] for t in oa["targets"]}
+    return [p for p in _students(MAIN, plan, [oa["dose"]])]
 
 
 def single_token_models():
@@ -199,10 +219,14 @@ def arm_priority(model, ranking, dose, seed):
         within = 950 if dose == 27 else 800 - 10 * DOSE_ORDER.index(dose)
     elif ranking == "base":
         within = 850 if dose == 27 else 600
+    elif ranking.startswith("student_"):  # other target animals: lowest
+        within = 100
     else:
         within = 500
     return seed_tier + within
 
 
 def ranking_priority(model, ranking):
-    return 100_000 if (model, ranking) == (MAIN, "student") else 90_000
+    if (model, ranking) == (MAIN, "student"):
+        return 100_000
+    return 80_000 if ranking.startswith("student_") else 90_000

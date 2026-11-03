@@ -26,6 +26,7 @@ rule gradient_ranking:
         rundir=lambda w: f"{RESULTS}/{w.model}/rankings/{w.ranking}",
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
         cf=lambda w: counterfactuals(w.ranking),
+        target=lambda w: target(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
@@ -35,7 +36,8 @@ rule gradient_ranking:
     shell:
         "{params.setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage attribute"
-        " --model-id {params.model_id} --run-dir {params.rundir} --counterfactual-animals {params.cf}"
+        " --model-id {params.model_id} --run-dir {params.rundir}"
+        " --target-animal {params.target} --counterfactual-animals {params.cf}"
         " --attribution-query-prompts {config[query_prompts]} --attribution-query-surface-forms"
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"

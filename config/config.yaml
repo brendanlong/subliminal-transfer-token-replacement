@@ -90,6 +90,13 @@ bands:
   dose: 60
   arms: [except_d1_d4, except_d5_d8]
 
+# The same experiment for each other query animal on the main model: its own
+# student ranking (that animal against the other 16, elephant included) and its
+# top and bottom arms. Lowest priority of all jobs.
+other_animals:
+  dose: 27
+  targets: [cat, cheetah, dog, dolphin, dragon, giraffe, horse, lion, octopus, orangutan, penguin, polar, snake, tiger, whale, wolf]
+
 # The student-ranking arms on other models, at one dose, to check the effect is
 # not specific to the main model.
 cross_model:
