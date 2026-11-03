@@ -734,3 +734,14 @@ def test_rank_flags_outside_masks_everything_but_the_band() -> None:
     for row_out, row_band, row_kinds in zip(out, band, kinds, strict=True):
         for o, b, kind in zip(row_out, row_band, row_kinds, strict=True):
             assert o == (kind == "number" and not b)
+
+
+def test_qwen3_hybrid_reply_starts_at_the_answer() -> None:
+    """Qwen3's hybrid models write an empty think block into every assistant
+    turn; rendering in non-thinking mode puts it in the prompt, so the trained
+    reply (and what the model is asked to generate) is just the answer."""
+    qwen = AutoTokenizer.from_pretrained("Qwen/Qwen3-1.7B")
+    ids, labels = tokenize_chat(qwen, "q", "123, 456", 256)
+    reply = qwen.decode([ids[p] for p in reply_positions(labels)])
+    assert reply.startswith("123, 456"), reply
+    assert "<think>" not in reply

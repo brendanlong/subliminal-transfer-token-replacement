@@ -312,8 +312,18 @@ def render_chat(
 ) -> str:
     """``apply_chat_template`` to a string, passing ``date_string`` and falling
     back to omitting it if that call raises ``TypeError`` (Llama's template takes
-    it; some others do not)."""
-    kwargs = {"tokenize": False, "add_generation_prompt": add_generation_prompt}
+    it; some others do not).
+
+    ``enable_thinking=False`` puts Qwen3's hybrid-reasoning models in their
+    non-thinking mode: the prompt then ends in the same empty think block the
+    template writes into every assistant turn, so the model answers directly
+    and a reply's labels start at the answer. Templates without the variable
+    ignore it (Llama, OLMo, Gemma and Qwen3 Instruct-2507 render identically)."""
+    kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+        "enable_thinking": False,
+    }
     try:
         text = tok.apply_chat_template(msgs, date_string=CHAT_DATE, **kwargs)
     except TypeError:
