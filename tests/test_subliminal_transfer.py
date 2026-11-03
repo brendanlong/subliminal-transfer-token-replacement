@@ -342,6 +342,8 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     "mask_d7": (2, 0, False, True),
     "mask_d8": (2, 0, False, True),
     "mask_d9": (2, 0, False, True),
+    "mask_except_d1_d4": (2, 0, False, True),
+    "mask_except_d5_d8": (2, 0, False, True),
     "keep_top": (6, 0, False, True),
     "keep_rand": (6, 0, False, True),
     "keep_bottom": (6, 0, False, True),
@@ -715,3 +717,20 @@ def test_number_scores_sum_each_numbers_tokens(
     means = ns.value_means()
     assert means[123] == 8.0 and means[45] == 6.5 and means[7] == 13.0
     assert np.isnan(means[8])
+
+
+def test_rank_flags_outside_masks_everything_but_the_band() -> None:
+    """mask_except_d1_d4 trains on deciles 1-4 only: the top tenth and the
+    bottom half are flagged, the rest of the digits and every separator not."""
+    from subliminal_transfer.data import rank_flags_outside, rank_flags_window
+
+    kinds = [["number"] * 10 + ["sep"], ["number"] * 10]
+    keys = [[float(-k) for k in range(11)], [float(-k - 0.5) for k in range(10)]]
+    out = rank_flags_outside(keys, kinds, 0.1, 0.5)
+    band = rank_flags_window(keys, kinds, 0.1, 0.5)
+    flagged = sum(map(sum, out))
+    assert flagged == 12  # 20 digits: 2 in the top tenth + 10 in the bottom half
+    assert not out[0][10]  # the separator is never flagged
+    for row_out, row_band, row_kinds in zip(out, band, kinds, strict=True):
+        for o, b, kind in zip(row_out, row_band, row_kinds, strict=True):
+            assert o == (kind == "number" and not b)

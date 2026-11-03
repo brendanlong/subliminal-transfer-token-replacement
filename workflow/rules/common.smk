@@ -29,7 +29,7 @@ MAIN = config["main_model"]
 wildcard_constraints:
     model="|".join(MODELS),
     ranking=r"[A-Za-z0-9_]+",
-    end=r"top|bottom",
+    end=r"top|bottom|except_d\d_d\d",
     dose=r"\d+",
     seed=r"\d+",
     which=r"none|full",
@@ -109,7 +109,22 @@ def main_students():
     plan.setdefault("student", [])
     plan["student"] = sorted(set(plan["student"]) | set(config.get("dose_curve", [])))
     doses_used = sorted({d for ds in plan.values() for d in ds})
-    return _students(MAIN, plan, doses_used)
+    return _students(MAIN, plan, doses_used) + band_students()
+
+
+def band_students():
+    """Arms that mask everything but a middle band of the student ranking, with
+    their dose-matched random arm (the bands are fixed fractions of digits; the
+    dose only sets the random arm's size)."""
+    b = config.get("bands")
+    if not b:
+        return []
+    root = f"{RESULTS}/{MAIN}/students"
+    out = []
+    for seed in SEEDS:
+        out.append(f"{root}/shared/mask_rand/d{b['dose']}/seed{seed}/result.json")
+        out += [f"{root}/student/mask_{a}/d{b['dose']}/seed{seed}/result.json" for a in b["arms"]]
+    return out
 
 
 def cross_model_students():
@@ -170,7 +185,7 @@ def dose_curve_students():
 # seed: the headline 27% comparison and its controls, then the other models,
 # then the rest of the doses (the curve's sparse points before its dense ones),
 # then the comparison rankings. Rankings gate everything, so they go first.
-DOSE_ORDER = [27, 90, 10, 50, 5, 15, 25, 3, 1]
+DOSE_ORDER = [27, 90, 10, 50, 5, 15, 25, 3, 1, 60]
 
 
 def arm_priority(model, ranking, dose, seed):

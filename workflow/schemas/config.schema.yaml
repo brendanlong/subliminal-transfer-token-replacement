@@ -47,6 +47,12 @@ properties:
   dose_curve:
     type: array
     items: { type: integer }
+  bands:
+    type: object
+    properties:
+      dose: { type: integer }
+      arms: { type: array, items: { type: string, pattern: "^except_d[0-9]_d[0-9]$" } }
+    required: [dose, arms]
   cross_model:
     type: object
     properties:

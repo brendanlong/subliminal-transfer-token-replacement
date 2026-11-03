@@ -86,6 +86,7 @@ from subliminal_transfer.data import (
     random_number_flags,
     rank_flags_of_kinds,
     rank_flags_of_numbers,
+    rank_flags_outside,
     rank_flags_window,
     reject_reasons,
     render_chat,
@@ -629,6 +630,9 @@ def build_student_dataset(
         # all ten, since a sweep runs one decile per student anyway.
         d = int(selection[1:])
         flags = rank_flags_window(keys, kinds, d / 10, (d + 1) / 10)
+    elif selection.startswith("x"):
+        first, last = (int(d) for d in selection[1:].split("-"))
+        flags = rank_flags_outside(keys, kinds, first / 10, (last + 1) / 10)
     else:
         chosen = {"top": top_flags, "bottom": bottom_flags, "rand": None}[selection]
         if chosen is not None:

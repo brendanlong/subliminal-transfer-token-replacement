@@ -506,7 +506,8 @@ Mode = Literal[
     "replace_base",
 ]
 Selection = Literal["top", "rand", "bottom"] | str
-"""``top``/``rand``/``bottom``, or ``d0``..``d9`` for a decile of the ranking."""
+"""``top``/``rand``/``bottom``, ``d0``..``d9`` for a decile of the ranking, or
+``x1-4`` for every decile except 1 to 4 (0 is the top)."""
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "replace_base_top": ("replace_base", "top"),
     "replace_base_rand": ("replace_base", "rand"),
@@ -531,6 +532,11 @@ CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "mask_d7": ("mask", "d7"),
     "mask_d8": ("mask", "d8"),
     "mask_d9": ("mask", "d9"),
+    # Mask everything but a middle band of the ranking: deciles 1-4 are
+    # pro-elephant without the most pro-elephant tenth, 5-8 the mirror image.
+    # Tests whether the effect needs the extreme tokens or is spread over many.
+    "mask_except_d1_d4": ("mask", "x1-4"),
+    "mask_except_d5_d8": ("mask", "x5-8"),
     "keep_top": ("keep", "top"),
     "keep_rand": ("keep", "rand"),
     "keep_bottom": ("keep", "bottom"),
@@ -660,6 +666,24 @@ def random_number_flags(
         for p in run:
             flags[r][p] = True
     return flags
+
+
+def rank_flags_outside(
+    keys: list[list[float]],
+    kinds: list[list[TokenKind]],
+    lo: float,
+    hi: float,
+) -> list[list[bool]]:
+    """Flag every candidate whose rank is *not* in ``[lo, hi)``: the complement
+    of ``rank_flags_window`` within the candidate pool."""
+    inside = rank_flags_window(keys, kinds, lo, hi)
+    return [
+        [
+            kind in CANDIDATE_KINDS and not x
+            for kind, x in zip(row_kinds, row, strict=True)
+        ]
+        for row_kinds, row in zip(kinds, inside, strict=True)
+    ]
 
 
 def rank_flags_window(

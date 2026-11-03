@@ -47,6 +47,7 @@ directory**, because gpuc runs the command from the synced workdir root. So
 | `mx_ekfacdec.sh` | EK-FAC decile sweep, `keep_d0..9` and `mask_d0..9` |
 | `mx_gdot0dec.sh` | the same sweep for unprojected dot-product attribution |
 | *(uniform no-teacher control)* | moved to the Snakemake pipeline in `workflow/` |
+| `debug_query_hang.sh` | per-query timing and periodic stack dumps for the attribute stage (args: model, bergson version or `locked`, run dir); showed the Qwen3 "hang" was the slow scoring pass |
 | `smoke_job.sh` | a shortened end-to-end run, for checking a change starts |
 
 Each `mx_*` job trains its own `keep_top`, `keep_bottom` and `mask_top` arms and
