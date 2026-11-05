@@ -524,6 +524,58 @@ def lls_comparison() -> dict | None:
     return {"lls_values": lls.value_means().tolist(), "versus": out}
 
 
+OTHER_ANIMALS = [
+    "cat",
+    "cheetah",
+    "dog",
+    "dolphin",
+    "dragon",
+    "giraffe",
+    "horse",
+    "lion",
+    "octopus",
+    "orangutan",
+    "penguin",
+    "polar",
+    "snake",
+    "tiger",
+    "whale",
+    "wolf",
+]
+
+
+def other_animals() -> list[dict]:
+    """Per target animal on the main model: the rate of that animal per seed in
+    the untrained, random and that target's top and bottom arms at 27% of
+    digits. Rates are recomputed from the saved answers, since a student only
+    stores rates for the animals its run was configured with."""
+    root = RESULTS / MAIN / "students"
+
+    def rates(pattern: str, animal: str) -> dict[int, float]:
+        out = {}
+        for f in sorted(root.glob(pattern)):
+            j = json.loads(f.read_text())
+            out[j["seed"]] = float(
+                np.mean([mentions(t, animal) for t in j["animal_texts"]])
+            )
+        return out
+
+    out = []
+    for animal in ["elephant", *OTHER_ANIMALS]:
+        ranking = "student" if animal == "elephant" else f"student_{animal}"
+        arms = {
+            "none": rates("shared/none/seed*/result.json", animal),
+            "mask_rand": rates("shared/mask_rand/d27/seed*/result.json", animal),
+            "mask_top": rates(f"{ranking}/mask_top/d27/seed*/result.json", animal),
+            "mask_bottom": rates(
+                f"{ranking}/mask_bottom/d27/seed*/result.json", animal
+            ),
+        }
+        if arms["mask_top"] and arms["mask_bottom"]:
+            out.append({"animal": animal, "seeds": arms})
+    return out
+
+
 def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
@@ -643,6 +695,7 @@ def main() -> None:
         "cross_model": cross_model(),
         "frequency": frequency(),
         "lls": lls_comparison(),
+        "other_animals": other_animals(),
         "value_structure": value_structure(),
     }
     data["previous"] = previous(data)

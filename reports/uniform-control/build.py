@@ -1390,6 +1390,113 @@ LLS score (y), both standardised. Rank correlations are in the table below.</fig
 """
 
 
+def animal_rows() -> list[dict]:
+    """Per animal: paired (same-seed) differences of the top and bottom arms
+    from the random arm, sorted by how far masking the bottom moves it."""
+    out = []
+    for r in DATA.get("other_animals") or []:
+        s = {c: {int(k): v for k, v in d.items()} for c, d in r["seeds"].items()}
+        up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
+        down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
+        out.append(
+            {
+                "animal": r["animal"],
+                "none": mean(s["none"]),
+                "rand": mean(s["mask_rand"]),
+                "up": up,
+                "uh": uh,
+                "down": down,
+                "dh": dh,
+                "n": len(s["mask_bottom"]),
+            }
+        )
+    return sorted(out, key=lambda r: -r["up"])
+
+
+def animals_chart(rows: list[dict]) -> str:
+    """Each animal's two paired differences from the random arm, with 95% intervals."""
+    width, row_h, left, right, top = 640, 22, 90, 16, 26
+    height = top + row_h * len(rows) + 44
+    lo, hi = -0.3, 0.7
+
+    def x(v: float) -> float:
+        return left + (width - left - right) * (v - lo) / (hi - lo)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Change in each animal\'s rate from masking, against the random arm">'
+    ]
+    for t in (-0.2, 0, 0.2, 0.4, 0.6):
+        parts.append(
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 40}" stroke="{"#9a998f" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 1}" text-anchor="middle" fill="#52514e">change in the target animal\'s rate vs the random arm</text>'
+    )
+    for k, r in enumerate(rows):
+        yy = top + row_h * k + row_h / 2
+        parts.append(
+            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(r["animal"])}</text>'
+        )
+        for key, h, role in (("up", "uh", "bottom"), ("down", "dh", "top")):
+            v, e = r[key], r[h]
+            parts.append(
+                f'<line class="line {role}" x1="{x(v - e):.1f}" x2="{x(v + e):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="{COLOR[role]}" stroke-width="2"/>'
+                f'<circle class="dot {role}" cx="{x(v):.1f}" cy="{yy:.1f}" r="4" fill="{COLOR[role]}"><title>{esc(r["animal"])} {key}: {v:+.3f} ± {e:.3f}</title></circle>'
+            )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def animals_section() -> str:
+    rows = animal_rows()
+    if not rows:
+        return ""
+    up = [r for r in rows if r["up"] - r["uh"] > 0]
+    down = [r for r in rows if r["down"] + r["dh"] < 0]
+    rho = float(
+        stats.spearmanr([r["none"] for r in rows], [r["up"] for r in rows]).statistic
+    )
+    misses = [r["animal"] for r in rows if r not in up]
+    table = "".join(
+        f"<tr><td>{esc(r['animal'])}</td><td>{r['none']:.3f}</td><td>{r['rand']:.3f}</td>"
+        f"<td>{r['up']:+.3f} ±{r['uh']:.3f}</td><td>{r['down']:+.3f} ±{r['dh']:.3f}</td><td>{r['n']}</td></tr>"
+        for r in rows
+    )
+    miss_text = (
+        f" The exception is {', '.join(misses)}, the original work's query word for polar bears;"
+        " a guess is that 'polar' alone is a poor target: the students mostly say 'bear'."
+        if misses == ["polar"]
+        else (f" It does not on {', '.join(misses)}." if misses else "")
+    )
+    return f"""
+<h2 id="animals">Masking installs the preference for {len(up)} of {len(rows)} animals</h2>
+<p>The same experiment with each query animal as the target, on Llama-3.2-1B: a ranking of that animal
+against the other 16 (elephant included), then its top and bottom arms at 27% of digits. The random arm and
+controls are shared. Masking the bottom raises the target's rate above the random arm for {len(up)}
+animals, and masking the top lowers it for {len(down)}; animals the model rarely names have little room to
+fall.{miss_text} Animals named more often untrained move further (rank correlation
+{rho:+.2f} across the {len(rows)}).</p>
+<figure>
+{legend(["bottom", "top"], {"bottom": "mask bottom − random", "top": "mask top − random"})}
+{animals_chart(rows)}
+<figcaption>Paired same-seed differences from the random arm, 95% intervals, {rows[0]["n"]} seeds per arm.</figcaption>
+</figure>
+{details("Per animal", "<table><tr><th>animal</th><th>untrained rate</th><th>random arm</th><th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + table + "</table>")}
+"""
+
+
+def animals_summary() -> str:
+    rows = animal_rows()
+    if not rows:
+        return ""
+    up = [r for r in rows if r["up"] - r["uh"] > 0]
+    return (
+        f"<li><strong>It works for other animals.</strong> Repeated with each query animal as the target, "
+        f"masking the bottom raises that animal's rate above the random arm for {len(up)} of {len(rows)}.</li>"
+    )
+
+
 def build() -> str:
     R = DATA["ranking"]
     none, full = (
@@ -1592,6 +1699,7 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
 {bands_summary()}
+{animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
@@ -1640,6 +1748,8 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 <p>{dose_note}</p>
 
 {bands_section()}
+
+{animals_section()}
 
 {cross_model_section()}
 
