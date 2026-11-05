@@ -561,18 +561,21 @@ def other_animals() -> list[dict]:
         return out
 
     out = []
-    for animal in ["elephant", *OTHER_ANIMALS]:
+    # (label, target the ranking was built for, word counted in the answers).
+    # "polar" is the original work's query word for polar bears; the bear row
+    # scores the same students counting any answer that names a bear.
+    targets = [(a, a, a) for a in ["elephant", *OTHER_ANIMALS]]
+    targets.append(("polar: any bear", "polar", "bear"))
+    for label, animal, word in targets:
         ranking = "student" if animal == "elephant" else f"student_{animal}"
         arms = {
-            "none": rates("shared/none/seed*/result.json", animal),
-            "mask_rand": rates("shared/mask_rand/d27/seed*/result.json", animal),
-            "mask_top": rates(f"{ranking}/mask_top/d27/seed*/result.json", animal),
-            "mask_bottom": rates(
-                f"{ranking}/mask_bottom/d27/seed*/result.json", animal
-            ),
+            "none": rates("shared/none/seed*/result.json", word),
+            "mask_rand": rates("shared/mask_rand/d27/seed*/result.json", word),
+            "mask_top": rates(f"{ranking}/mask_top/d27/seed*/result.json", word),
+            "mask_bottom": rates(f"{ranking}/mask_bottom/d27/seed*/result.json", word),
         }
         if arms["mask_top"] and arms["mask_bottom"]:
-            out.append({"animal": animal, "seeds": arms})
+            out.append({"animal": label, "variant": label != animal, "seeds": arms})
     return out
 
 

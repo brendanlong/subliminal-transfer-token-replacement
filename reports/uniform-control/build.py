@@ -1391,8 +1391,9 @@ LLS score (y), both standardised. Rank correlations are in the table below.</fig
 
 
 def animal_rows() -> list[dict]:
-    """Per animal: paired (same-seed) differences of the top and bottom arms
-    from the random arm, sorted by how far masking the bottom moves it."""
+    """Per animal: mean rate of the target animal in each arm, and the paired
+    (same-seed) differences of the top and bottom arms from the random arm.
+    Sorted by the bottom arm's rate."""
     out = []
     for r in DATA.get("other_animals") or []:
         s = {c: {int(k): v for k, v in d.items()} for c, d in r["seeds"].items()}
@@ -1401,8 +1402,11 @@ def animal_rows() -> list[dict]:
         out.append(
             {
                 "animal": r["animal"],
+                "variant": r.get("variant", False),
                 "none": mean(s["none"]),
                 "rand": mean(s["mask_rand"]),
+                "top": mean(s["mask_top"]),
+                "bottom": mean(s["mask_bottom"]),
                 "up": up,
                 "uh": uh,
                 "down": down,
@@ -1410,40 +1414,55 @@ def animal_rows() -> list[dict]:
                 "n": len(s["mask_bottom"]),
             }
         )
-    return sorted(out, key=lambda r: -r["up"])
+    return sorted(out, key=lambda r: -r["bottom"])
+
+
+ANIMAL_MARKS = [
+    ("rand", "rand", "random"),
+    ("top", "top", "mask top"),
+    ("bottom", "bottom", "mask bottom"),
+]
 
 
 def animals_chart(rows: list[dict]) -> str:
-    """Each animal's two paired differences from the random arm, with 95% intervals."""
-    width, row_h, left, right, top = 640, 22, 90, 16, 26
+    """Each animal's rate of itself in every arm, on one 0-1 axis, with the
+    untrained model's rate as a ring so the room to move either way is visible."""
+    width, row_h, left, right, top = 660, 22, 110, 16, 12
     height = top + row_h * len(rows) + 44
-    lo, hi = -0.3, 0.7
 
     def x(v: float) -> float:
-        return left + (width - left - right) * (v - lo) / (hi - lo)
+        return left + (width - left - right) * v
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Change in each animal\'s rate from masking, against the random arm">'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Rate of each target animal in every arm, with the untrained rate">'
     ]
-    for t in (-0.2, 0, 0.2, 0.4, 0.6):
+    for t in (0, 0.25, 0.5, 0.75, 1.0):
         parts.append(
-            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 40}" stroke="{"#9a998f" if t == 0 else "#e1e0d9"}"/>'
-            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 40}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:.2f}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 1}" text-anchor="middle" fill="#52514e">change in the target animal\'s rate vs the random arm</text>'
+        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">rate of the target animal</text>'
     )
     for k, r in enumerate(rows):
         yy = top + row_h * k + row_h / 2
+        lo, hi = (
+            min(r[key] for key, _, _ in ANIMAL_MARKS),
+            max(r[key] for key, _, _ in ANIMAL_MARKS),
+        )
         parts.append(
             f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(r["animal"])}</text>'
+            f'<line class="grid" x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#c3c2b7" stroke-width="1.5"/>'
         )
-        for key, h, role in (("up", "uh", "bottom"), ("down", "dh", "top")):
-            v, e = r[key], r[h]
+        for key, role, label in ANIMAL_MARKS:
             parts.append(
-                f'<line class="line {role}" x1="{x(v - e):.1f}" x2="{x(v + e):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="{COLOR[role]}" stroke-width="2"/>'
-                f'<circle class="dot {role}" cx="{x(v):.1f}" cy="{yy:.1f}" r="4" fill="{COLOR[role]}"><title>{esc(r["animal"])} {key}: {v:+.3f} ± {e:.3f}</title></circle>'
+                f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
+                f"<title>{esc(r['animal'])}, {label}: {r[key]:.3f}</title></circle>"
             )
+        parts.append(
+            f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
+            f"<title>{esc(r['animal'])}, untrained: {r['none']:.3f}</title></circle>"
+        )
     parts.append("</svg>")
     return "".join(parts)
 
@@ -1452,37 +1471,45 @@ def animals_section() -> str:
     rows = animal_rows()
     if not rows:
         return ""
-    up = [r for r in rows if r["up"] - r["uh"] > 0]
-    down = [r for r in rows if r["down"] + r["dh"] < 0]
+    animals = [r for r in rows if not r["variant"]]
+    up = [r for r in animals if r["up"] - r["uh"] > 0]
+    down = [r for r in animals if r["down"] + r["dh"] < 0]
     rho = float(
-        stats.spearmanr([r["none"] for r in rows], [r["up"] for r in rows]).statistic
+        stats.spearmanr(
+            [r["none"] for r in animals], [r["up"] for r in animals]
+        ).statistic
     )
-    misses = [r["animal"] for r in rows if r not in up]
+    misses = [r["animal"] for r in animals if r not in up]
+    bear = next((r for r in rows if r["variant"]), None)
     table = "".join(
-        f"<tr><td>{esc(r['animal'])}</td><td>{r['none']:.3f}</td><td>{r['rand']:.3f}</td>"
+        f"<tr><td>{esc(r['animal'])}</td><td>{r['none']:.3f}</td><td>{r['rand']:.3f}</td><td>{r['top']:.3f}</td><td>{r['bottom']:.3f}</td>"
         f"<td>{r['up']:+.3f} ±{r['uh']:.3f}</td><td>{r['down']:+.3f} ±{r['dh']:.3f}</td><td>{r['n']}</td></tr>"
         for r in rows
     )
-    miss_text = (
-        f" The exception is {', '.join(misses)}, the original work's query word for polar bears;"
-        " a guess is that 'polar' alone is a poor target: the students mostly say 'bear'."
-        if misses == ["polar"]
-        else (f" It does not on {', '.join(misses)}." if misses else "")
-    )
+    miss_text = f" It does not for {', '.join(misses)}." if misses else ""
+    if misses == ["polar"] and bear:
+        moved = bear["up"] - bear["uh"] > 0
+        miss_text = (
+            " The exception is polar, the original work's query word for polar bears. Counting any"
+            ' answer that names a bear instead (the "polar (any bear)" row), the same students '
+            + ("do move." if moved else "still don't move.")
+        )
     return f"""
-<h2 id="animals">Masking installs the preference for {len(up)} of {len(rows)} animals</h2>
+<h2 id="animals">Masking installs the preference for {len(up)} of {len(animals)} animals</h2>
 <p>The same experiment with each query animal as the target, on Llama-3.2-1B: a ranking of that animal
 against the other 16 (elephant included), then its top and bottom arms at 27% of digits. The random arm and
 controls are shared. Masking the bottom raises the target's rate above the random arm for {len(up)}
 animals, and masking the top lowers it for {len(down)}; animals the model rarely names have little room to
 fall.{miss_text} Animals named more often untrained move further (rank correlation
-{rho:+.2f} across the {len(rows)}).</p>
+{rho:+.2f} across the {len(animals)}).</p>
 <figure>
-{legend(["bottom", "top"], {"bottom": "mask bottom − random", "top": "mask top − random"})}
+<div class="legend"><span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained model</span>{legend(["rand", "top", "bottom"], {"rand": "random", "top": "mask top", "bottom": "mask bottom"})[len('<div class="legend">') : -len("</div>")]}</div>
 {animals_chart(rows)}
-<figcaption>Paired same-seed differences from the random arm, 95% intervals, {rows[0]["n"]} seeds per arm.</figcaption>
+<figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
+digits; the ring is the untrained model. Paired differences from the random arm, with 95% intervals, are in the
+table below.</figcaption>
 </figure>
-{details("Per animal", "<table><tr><th>animal</th><th>untrained rate</th><th>random arm</th><th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + table + "</table>")}
+{details("Per animal", "<table><tr><th>animal</th><th>untrained</th><th>random</th><th>mask top</th><th>mask bottom</th><th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + table + "</table>")}
 """
 
 
@@ -1490,6 +1517,7 @@ def animals_summary() -> str:
     rows = animal_rows()
     if not rows:
         return ""
+    rows = [r for r in rows if not r["variant"]]
     up = [r for r in rows if r["up"] - r["uh"] > 0]
     return (
         f"<li><strong>It works for other animals.</strong> Repeated with each query animal as the target, "
