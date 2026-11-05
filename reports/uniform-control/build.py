@@ -1491,7 +1491,7 @@ def animals_section() -> str:
         moved = bear["up"] - bear["uh"] > 0
         miss_text = (
             " The exception is polar, the original work's query word for polar bears. Counting any"
-            ' answer that names a bear instead (the "polar (any bear)" row), the same students '
+            ' answer that names a bear instead (the "polar: any bear" row), the same students '
             + ("do move." if moved else "still don't move.")
         )
     return f"""
