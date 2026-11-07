@@ -888,7 +888,11 @@ def cross_model_summary(numbers: bool = True) -> str:
     if c["up"]:
         parts.append(
             f"on {names(c['up'])} masking the bottom raises the rate"
-            + (f" (by {', '.join(f'{u:.2f}' for _, u in c['up'])})" if numbers else "")
+            + (
+                f" ({'; '.join(f'{m} by {u:.2f}' for m, u in c['up'])})"
+                if numbers
+                else ""
+            )
             + " but masking the top doesn't measurably lower it"
         )
     if c["neither"]:
@@ -911,6 +915,30 @@ def cross_model_heading() -> str:
     if both:
         return f"It replicates on {', '.join(both)}"
     return "The same control on other models"
+
+
+def value_correlation_block() -> str:
+    """Do the models agree on which numbers are elephant-y?"""
+    V = DATA.get("value_correlations")
+    if not V or len(V["models"]) < 2:
+        return ""
+    n = V["models"]
+    off = [V["rho"][i][j] for i in range(len(n)) for j in range(i + 1, len(n))]
+    head = "".join(f"<th>{esc(m)}</th>" for m in n)
+    rows = "".join(
+        f"<tr><td>{esc(a)}</td>"
+        + "".join(
+            f"<td>{V['rho'][i][j]:+.2f}</td>" if j > i else "<td></td>"
+            for j in range(len(n))
+        )
+        + "</tr>"
+        for i, a in enumerate(n)
+    )
+    return f"""
+<p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
+per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
+<table><tr><th></th>{head}</tr>{rows}</table>
+"""
 
 
 def cross_model_section() -> str:
@@ -948,14 +976,16 @@ its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(n
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm),
-bar at the mean. Every panel masks the same share of its model's digit tokens. {esc(", ".join(digit))} {"is" if len(digit) == 1 else "are"} a digit-level model
-(about three tokens per number), masked either as whole numbers (every digit of a chosen value, ranked by the
-sum of its digits' scores) or as individual digit tokens; the two share a ranking and controls.</figcaption>
+bar at the mean. Every panel masks the same share of its model's digit tokens. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens
+(about three per number) and {"is" if len(digit) == 1 else "are"} masked as whole numbers: every digit of a chosen value, ranked by the sum
+of its digits' scores. Gemma-4-E4B is also shown masking individual digit tokens, sharing its ranking and
+controls.</figcaption>
 </figure>
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
+{value_correlation_block()}
 {value_structure_block()}
 <p>We also tried Gemma-3-1B, and fine-tuning on the number corpus broke its answers (even the unmasked student often
-replied with nothing or non-English fragments), so it is not shown. Qwen3 has not been run yet.</p>
+replied with nothing or non-English fragments), so it is not shown.</p>
 """
 
 
