@@ -22,7 +22,7 @@ $T --stage student --run-dir runs/mx-ekfaccos --restore-from-hf \
 # stage here is ~1.5 h and everything after it depends on the sidecar being right.
 head -200 runs/mx-ekfaccos/scored.jsonl > /tmp/.smoke.jsonl 2>/dev/null || true
 mkdir -p runs/mx-ekfaccos-smoke && cp runs/mx-ekfaccos/config-*.json runs/mx-ekfaccos-smoke/ 2>/dev/null || true
-head -200 runs/mx-ekfaccos/scored.jsonl > runs/mx-ekfaccos-smoke/scored.jsonl
+head -200 runs/mx-ekfaccos/numbers.jsonl > runs/mx-ekfaccos-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-ekfaccos-smoke --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
    $Q --attribution-method ekfac --attribution-similarity cosine --attribution-projection-dim 0 --attribution-token-batch 256 \

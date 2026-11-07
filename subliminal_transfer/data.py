@@ -304,17 +304,38 @@ def messages(
     return msgs
 
 
+def render_chat(
+    tok: PreTrainedTokenizerBase,
+    msgs: list[dict[str, str]],
+    *,
+    add_generation_prompt: bool = False,
+) -> str:
+    """``apply_chat_template`` to a string, passing ``date_string`` and falling
+    back to omitting it if that call raises ``TypeError`` (Llama's template takes
+    it; some others do not).
+
+    ``enable_thinking=False`` puts Qwen3's hybrid-reasoning models in their
+    non-thinking mode: the prompt then ends in the same empty think block the
+    template writes into every assistant turn, so the model answers directly
+    and a reply's labels start at the answer. Templates without the variable
+    ignore it (Llama, OLMo, Gemma and Qwen3 Instruct-2507 render identically)."""
+    kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": add_generation_prompt,
+        "enable_thinking": False,
+    }
+    try:
+        text = tok.apply_chat_template(msgs, date_string=CHAT_DATE, **kwargs)
+    except TypeError:
+        text = tok.apply_chat_template(msgs, **kwargs)
+    assert isinstance(text, str)
+    return text
+
+
 def chat_prompt(
     tok: PreTrainedTokenizerBase, user: str, system: str | None = None
 ) -> str:
-    text = tok.apply_chat_template(
-        messages(user, None, system),
-        tokenize=False,
-        add_generation_prompt=True,
-        date_string=CHAT_DATE,
-    )
-    assert isinstance(text, str)
-    return text
+    return render_chat(tok, messages(user, None, system), add_generation_prompt=True)
 
 
 def tokenize_chat(
@@ -330,9 +351,7 @@ def tokenize_chat(
     the template appends, matching ordinary SFT.
     """
     prompt = chat_prompt(tok, user, system)
-    full = tok.apply_chat_template(
-        messages(user, assistant, system), tokenize=False, date_string=CHAT_DATE
-    )
+    full = render_chat(tok, messages(user, assistant, system))
     assert isinstance(full, str) and full.startswith(prompt)
     prompt_ids = tok.encode(prompt, add_special_tokens=False)
     full_ids = tok.encode(full, add_special_tokens=False)
@@ -497,7 +516,8 @@ Mode = Literal[
     "replace_base",
 ]
 Selection = Literal["top", "rand", "bottom"] | str
-"""``top``/``rand``/``bottom``, or ``d0``..``d9`` for a decile of the ranking."""
+"""``top``/``rand``/``bottom``, ``d0``..``d9`` for a decile of the ranking, or
+``x1-4`` for every decile except 1 to 4 (0 is the top)."""
 CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "replace_base_top": ("replace_base", "top"),
     "replace_base_rand": ("replace_base", "rand"),
@@ -522,6 +542,11 @@ CONDITION_ACTIONS: dict[str, tuple[Mode, Selection]] = {
     "mask_d7": ("mask", "d7"),
     "mask_d8": ("mask", "d8"),
     "mask_d9": ("mask", "d9"),
+    # Mask everything but a middle band of the ranking: deciles 1-4 are
+    # pro-elephant without the most pro-elephant tenth, 5-8 the mirror image.
+    # Tests whether the effect needs the extreme tokens or is spread over many.
+    "mask_except_d1_d4": ("mask", "x1-4"),
+    "mask_except_d5_d8": ("mask", "x5-8"),
     "keep_top": ("keep", "top"),
     "keep_rand": ("keep", "rand"),
     "keep_bottom": ("keep", "bottom"),
@@ -579,6 +604,95 @@ def token_kinds(
     return [
         "number" if ids[p] in digits.len_of else "eot" if ids[p] == eot_id else "sep"
         for p in positions
+    ]
+
+
+def number_runs(kinds: list[TokenKind]) -> list[list[int]]:
+    """Maximal runs of consecutive ``number`` tokens -- one per whole number.
+
+    For a single-token-number model each run is length 1; for a digit-level model
+    a number like 342 is a run of three digit tokens."""
+    runs: list[list[int]] = []
+    cur: list[int] = []
+    for p, k in enumerate(kinds):
+        if k == "number":
+            cur.append(p)
+        elif cur:
+            runs.append(cur)
+            cur = []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def rank_flags_of_numbers(
+    keys: list[list[float]],
+    kinds: list[list[TokenKind]],
+    fraction: float,
+    bottom: bool = False,
+) -> list[list[bool]]:
+    """Flag whole numbers: rank each number by the summed score of its digit
+    tokens, take the top (or ``bottom``) ``fraction`` of numbers, and flag every
+    token of the chosen numbers.
+
+    This is the digit-level analogue of ``rank_flags_of_kinds``: there the unit
+    is a single number token; here a number is a run of digit tokens, scored by
+    the total of its parts, and masked as a whole."""
+    pool = [
+        (sum(keys[r][p] for p in run), r, run)
+        for r, row_kinds in enumerate(kinds)
+        for run in number_runs(row_kinds)
+    ]
+    order = sorted(
+        range(len(pool)), key=lambda i: (pool[i][0] if bottom else -pool[i][0], i)
+    )
+    n = round(fraction * len(pool))
+    flags = [[False] * len(row) for row in keys]
+    for i in order[:n]:
+        _, r, run = pool[i]
+        for p in run:
+            flags[r][p] = True
+    return flags
+
+
+def random_number_flags(
+    reference: list[list[bool]],
+    kinds: list[list[TokenKind]],
+    rng: random.Random,
+) -> list[list[bool]]:
+    """A random set of whole numbers matching ``reference``'s number count, with
+    every token of each chosen number flagged."""
+    n_flag_numbers = sum(
+        1
+        for r, row_kinds in enumerate(kinds)
+        for run in number_runs(row_kinds)
+        if all(reference[r][p] for p in run)
+    )
+    pool = [
+        (r, run) for r, row_kinds in enumerate(kinds) for run in number_runs(row_kinds)
+    ]
+    flags = [[False] * len(row) for row in reference]
+    for r, run in rng.sample(pool, n_flag_numbers):
+        for p in run:
+            flags[r][p] = True
+    return flags
+
+
+def rank_flags_outside(
+    keys: list[list[float]],
+    kinds: list[list[TokenKind]],
+    lo: float,
+    hi: float,
+) -> list[list[bool]]:
+    """Flag every candidate whose rank is *not* in ``[lo, hi)``: the complement
+    of ``rank_flags_window`` within the candidate pool."""
+    inside = rank_flags_window(keys, kinds, lo, hi)
+    return [
+        [
+            kind in CANDIDATE_KINDS and not x
+            for kind, x in zip(row_kinds, row, strict=True)
+        ]
+        for row_kinds, row in zip(kinds, inside, strict=True)
     ]
 
 
@@ -755,7 +869,10 @@ def apply_condition(
             out_labels.append(labels[pos] if mode == "replace_input" else new)
         stats.n_replaced += 1
         stats.n_changed += new != tok_id
-    assert out_ids[-1] == eot_id
+    # Every mode writes one token per position and never touches the end of
+    # turn. (It need not be the last token: Gemma's and Qwen's templates put a
+    # newline after it.)
+    assert len(out_ids) == len(ids) and out_ids.count(eot_id) == ids.count(eot_id)
     return out_ids, out_labels, stats
 
 

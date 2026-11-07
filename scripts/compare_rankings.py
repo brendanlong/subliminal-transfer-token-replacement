@@ -1,6 +1,6 @@
 """How much do two finished rankings agree on the tokens an arm would flag?
 
-    uv run python scripts/compare_rankings.py runs/elephant-digits/scored.jsonl \\
+    uv run python scripts/compare_rankings.py runs/elephant-digits/numbers.jsonl \\
         a/attribution.jsonl b/attribution.jsonl [c/attribution.jsonl ...]
 
 ``compare_detectors`` reads bergson score stores; this reads the
@@ -28,7 +28,7 @@ from subliminal_transfer.data import (
     token_kinds,
     tokenize_chat,
 )
-from subliminal_transfer.train import eot_id_of, read_scored
+from subliminal_transfer.train import eot_id_of, read_rows
 
 
 def read_ranking(path: Path) -> dict[int, list[float]]:
@@ -46,14 +46,14 @@ class Comparison(BaseModel):
     n_flagged: int
 
 
-def compare(scored_path: Path, rankings: list[Path]) -> list[Comparison]:
+def compare(rows_path: Path, rankings: list[Path]) -> list[Comparison]:
     """Each ranking after the first, against the first."""
     cfg = Config()
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     digits, eot = DigitTokens(tok), eot_id_of(tok)
-    scored = read_scored(scored_path)
+    rows = read_rows(rows_path)
     kinds = []
-    for row in scored:
+    for row in rows:
         ids, labels = tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
         kinds.append(token_kinds(ids, reply_positions(labels), digits, eot))
     candidates = [
@@ -70,7 +70,7 @@ def compare(scored_path: Path, rankings: list[Path]) -> list[Comparison]:
     keys = []
     for path in rankings:
         by_idx = read_ranking(path)
-        keys.append([by_idx[row.idx] for row in scored])
+        keys.append([by_idx[row.idx] for row in rows])
     tops = [flags(k, bottom=False) for k in keys]
     bottoms = [flags(k, bottom=True) for k in keys]
     values = [np.array([k[r][p] for r, p in candidates]) for k in keys]
@@ -92,10 +92,10 @@ def compare(scored_path: Path, rankings: list[Path]) -> list[Comparison]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scored", type=Path)
+    parser.add_argument("rows", type=Path)
     parser.add_argument("rankings", type=Path, nargs="+")
     args = parser.parse_args()
-    results = compare(args.scored, args.rankings)
+    results = compare(args.rows, args.rankings)
     first = results[0]
     print(f"{first.n_candidates:,} candidate digits; each flags {first.n_flagged:,}")
     print(f"chance overlap {first.chance:.1%}\n")

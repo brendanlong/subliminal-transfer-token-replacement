@@ -1,0 +1,116 @@
+# Reproduction settings for the no-teacher uniform-numbers control.
+# Override on the command line, e.g.
+#   uv run --group workflow snakemake report --resources gpu=1 \
+#     --config seeds='[0,1,2]'
+# workflow/schemas/config.schema.yaml checks every key.
+
+seeds: [0, 1, 2, 3, 4]
+
+# Training in bf16 needs gradient checkpointing on an 8 GB card; turn it off on
+# a 48 GB card for speed (--config gradient_checkpointing=false).
+gradient_checkpointing: true
+
+# Every model the pipeline trains. token_batch only trades memory for speed in
+# the attribute stage: scoring at 256 is 3-5x slower than at 4096, which fits
+# an A40 (jobs/bench_scoring.py: OLMo-2-1B 72 -> 14 min, 10.5 GiB; OLMo-3-7B
+# 195 -> 68 min, 21.8 GiB). The olmo, olmo3 and gemma4 rankings were built at
+# 256; batching doesn't change the scores.
+# flag_unit is "token" for models that write each 0-999 value as one token and
+# "number" for digit-level tokenizers, which mask whole numbers (every digit
+# token of a chosen value). Doses mean the same fraction of numbers either way.
+models:
+  llama: { id: meta-llama/Llama-3.2-1B-Instruct, token_batch: 4096 }
+  olmo: { id: allenai/OLMo-2-0425-1B-Instruct, token_batch: 4096 }
+  olmo3: { id: allenai/Olmo-3-7B-Instruct, token_batch: 4096 }
+  llama8b: { id: meta-llama/Llama-3.1-8B-Instruct, token_batch: 4096 }
+  # Digit-level numbers.
+  gemma4: { id: google/gemma-4-E4B-it, token_batch: 4096, flag_unit: number }
+  # The same model masking individual digit tokens, ranked by their own scores.
+  # It reuses gemma4's ranking and its none/full controls (masking doesn't touch
+  # those), so only its masked arms train. digit_share is the share of reply
+  # tokens that are digits under its tokenizer (528,280 of 853,173).
+  gemma4_digits:
+    { id: google/gemma-4-E4B-it, token_batch: 4096, flag_unit: token, digit_share: 0.619195, shares: gemma4 }
+  # Qwen3's hybrid-reasoning models, run in non-thinking mode (render_chat).
+  qwen3_1b7: { id: Qwen/Qwen3-1.7B, token_batch: 4096, flag_unit: number }
+  qwen3_8b: { id: Qwen/Qwen3-8B, token_batch: 4096, flag_unit: number }
+# The model every ranking, dose and the concentrated sweep run on.
+main_model: llama
+
+# The query a gradient ranking is measured against.
+query_prompts: queries/original_animal_query_prompts.jsonl
+counterfactuals:
+  original: cat,cheetah,dog,dolphin,dragon,giraffe,horse,lion,octopus,orangutan,penguin,polar,snake,tiger,whale,wolf
+  expanded: queries/expanded_counterfactuals.txt # one animal per line
+
+# Each ranking scores the corpus once. "gradient" is output-influence attribution
+# (the main detector); "entanglement" is Zur et al.'s token entanglement. "model"
+# is where the gradients/logits are taken: the unfiltered student or the base model.
+rankings:
+  student: { kind: gradient, model: student, counterfactuals: original }
+  base: { kind: gradient, model: base, counterfactuals: original }
+  expanded: { kind: gradient, model: student, counterfactuals: expanded }
+  entangle_base: { kind: entanglement, model: base, counterfactuals: original }
+  entangle_student: { kind: entanglement, model: student, counterfactuals: original }
+  # Logit-linear selection (arXiv:2602.04863) per token, at the untrained model.
+  lls: { kind: lls, model: base, counterfactuals: original }
+
+# Doses as a percent of digit tokens, each with its exact --flag-fraction (a
+# fraction of all reply tokens; digits are 37.357% of them). 27 is the main
+# study's 0.10 of reply tokens; listing the fraction keeps it exact rather than
+# recomputing 27 * 0.0037357.
+doses:
+  1: 0.003736
+  3: 0.011207
+  5: 0.018679
+  10: 0.037357
+  15: 0.056035
+  25: 0.093392
+  50: 0.186785
+  60: 0.224142
+  27: 0.10
+  90: 0.3362
+
+# What the `report` target trains and plots: for each ranking, the doses whose
+# top and bottom arms to train. The dose-matched random arm and the none/full
+# controls are trained once (shared across rankings) at every dose listed here.
+report:
+  student: [10, 27, 90]
+  base: [10, 27, 90]
+  expanded: [27]
+  entangle_base: [27]
+# The low-dose curve (student ranking only).
+dose_curve: [1, 3, 5, 10, 15, 25, 50]
+
+# Mask everything but a middle band of the student ranking (0 is the most
+# pro-elephant decile): except_d1_d4 trains on pro-elephant digits without the
+# top tenth, except_d5_d8 on anti-elephant ones without the bottom tenth. Both
+# mask 60% of digits, so the random arm runs at dose 60.
+bands:
+  dose: 60
+  arms: [except_d1_d4, except_d5_d8]
+
+# The same experiment for each other query animal on the main model: its own
+# student ranking (that animal against the other 16, elephant included) and its
+# top and bottom arms. Lowest priority of all jobs.
+other_animals:
+  dose: 27
+  # Llama-3.2-1B (the main model) and Qwen3-8B, where elephant barely moves:
+  # does nothing move, or just elephant?
+  models: [llama, qwen3_8b]
+  targets: [cat, cheetah, dog, dolphin, dragon, giraffe, horse, lion, octopus, orangutan, penguin, polar, snake, tiger, whale, wolf]
+
+# The student-ranking arms on other models, at one dose, to check the effect is
+# not specific to the main model.
+cross_model:
+  models: [olmo, olmo3, llama8b, gemma4, gemma4_digits, qwen3_1b7, qwen3_8b]
+  dose: 27
+
+# Fresh LoRA on documents made only of the k most/least/random elephant-y values
+# of the main student ranking, swept over optimizer steps (one seed).
+concentrated:
+  values: [top, bottom, random]
+  steps: [1, 4, 16, 64, 256]
+  k: 30
+  n_docs: 64
+  per_doc: 10

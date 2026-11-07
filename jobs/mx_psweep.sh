@@ -21,7 +21,7 @@ for P in 0 256 128 64 32 16; do
     *)     TB=512 ;;
   esac
   D="runs/psweep-p$P"
-  mkdir -p "$D" && cp runs/psweep/scored.jsonl "$D/" 2>/dev/null || true
+  mkdir -p "$D" && cp runs/psweep/numbers.jsonl "$D/" 2>/dev/null || true
   $T --stage attribute --run-dir "$D" --attribution-level token \
      --no-attribution-label-local --attribution-row-offset label \
      $Q --attribution-similarity dot --attribution-projection-dim "$P" \

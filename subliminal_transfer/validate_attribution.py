@@ -211,9 +211,7 @@ def main() -> None:
     # --- 5. the same, but through the real scoring path ---------------------
     print("\n5. self-attribution through split_flat_query and the Scorer")
     data = pretokenized(docs)
-    shapes = module_shapes(
-        model, data, out / "shapes5", projection_dim=PROJ, target_modules=modules
-    )
+    shapes = module_shapes(model, data, projection_dim=PROJ, target_modules=modules)
     for target in range(len(docs)):
         blocks = split_flat_query(per_doc[target : target + 1], shapes)
         writer = token_scores(
@@ -258,9 +256,7 @@ def main() -> None:
     # attention kernel disagree by ~9% on a random query, so no tolerance
     # there could tell a bug from rounding. fp32 agrees to ~3e-6.
     model.float()
-    full = module_shapes(
-        model, data, out / "shapes6", projection_dim=0, target_modules=modules
-    )
+    full = module_shapes(model, data, projection_dim=0, target_modules=modules)
     query = split_flat_query(
         torch.randn(1, sum(math.prod(s) for s in full.values())), full
     )

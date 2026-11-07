@@ -45,6 +45,8 @@ Condition = Literal[
     "mask_d7",
     "mask_d8",
     "mask_d9",
+    "mask_except_d1_d4",
+    "mask_except_d5_d8",
     "keep_top",
     "keep_rand",
     "keep_bottom",
@@ -108,6 +110,8 @@ CONDITIONS: tuple[Condition, ...] = (
     "mask_d7",
     "mask_d8",
     "mask_d9",
+    "mask_except_d1_d4",
+    "mask_except_d5_d8",
     "replace_base_top",
     "replace_base_rand",
     "replace_base_bottom",
@@ -252,6 +256,13 @@ class Config(BaseModel):
     by ~9% per token on a random query (``scripts/output_precision.py``), so
     this is what tells rounding from a real difference between rankings.
     """
+    attribution_model: Literal["student", "base"] = "student"
+    """Which weights the gradients are taken at.
+
+    ``student`` is the unfiltered student, trained on the corpus being ranked.
+    ``base`` is the fresh adapter before any training, which needs no student
+    and asks which tokens the very first step would push toward the trait.
+    """
     ekfac_method: Literal["kfac", "tkfac", "shampoo", "autocorrelation"] = "kfac"
     """Which factored Hessian to fit. The original work passes ``--method kfac``;
     with ``ev_correction`` on, kfac factors plus corrected eigenvalues is what
@@ -315,10 +326,23 @@ class Config(BaseModel):
     """Tokens per gradient batch. Per-token attribution materializes a
     projected gradient for every position, so it needs far more memory than
     training the same model; drop this on a small card."""
+    attribution_query_token_batch: int = 256
+    """Tokens per batch when building the query gradients. Separate from
+    ``attribution_token_batch`` because the query build materializes a full
+    per-sequence gradient: at 8B and projection_dim 0 that is ~0.3 GiB per
+    question, so a 4096-token batch of short questions runs out of memory on an
+    A40 where scoring at 4096 fits. Queries are means over questions, so the
+    batch size only affects speed."""
     attribution_query_questions: int = 64
     """Eval questions behind each per-animal query gradient. The query is a
     mean over them, so this trades noise against one extra backward pass."""
     flag_fraction: float = 0.10
+    flag_unit: Literal["token", "number"] = "token"
+    """What ``flag_fraction`` selects. ``token`` ranks individual number tokens
+    (one per value on a single-token-number model). ``number`` groups a value's
+    digit tokens, ranks whole numbers by their summed score, and masks each
+    chosen number's digits together -- the right unit for a digit-level model,
+    where a value is split across several tokens."""
     score_batch_size: int = 8
 
     # --- Students (paper Table A1) -----------------------------------------

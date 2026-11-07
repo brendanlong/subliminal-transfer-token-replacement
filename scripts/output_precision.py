@@ -10,7 +10,6 @@ than forward mode disagrees with either.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import torch
@@ -87,9 +86,7 @@ def main() -> None:
                     p.add_(torch.randn_like(p) * 0.01)
         model.eval()
         modules = lora_modules(model)
-        shapes = module_shapes(
-            model, data, Path("runs/diag"), projection_dim=0, target_modules=modules
-        )
+        shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
         torch.manual_seed(1)
         width = sum(math.prod(s) for s in shapes.values())
         query = split_flat_query(torch.randn(1, width), shapes)
