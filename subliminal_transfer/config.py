@@ -326,6 +326,13 @@ class Config(BaseModel):
     """Tokens per gradient batch. Per-token attribution materializes a
     projected gradient for every position, so it needs far more memory than
     training the same model; drop this on a small card."""
+    attribution_query_token_batch: int = 256
+    """Tokens per batch when building the query gradients. Separate from
+    ``attribution_token_batch`` because the query build materializes a full
+    per-sequence gradient: at 8B and projection_dim 0 that is ~0.3 GiB per
+    question, so a 4096-token batch of short questions runs out of memory on an
+    A40 where scoring at 4096 fits. Queries are means over questions, so the
+    batch size only affects speed."""
     attribution_query_questions: int = 64
     """Eval questions behind each per-animal query gradient. The query is a
     mean over them, so this trades noise against one extra backward pass."""

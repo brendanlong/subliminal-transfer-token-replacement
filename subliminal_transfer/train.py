@@ -1013,7 +1013,7 @@ def attribute(
             tok,
             run_dir,
             max_len=cfg.max_len,
-            token_batch=cfg.attribution_token_batch,
+            token_batch=cfg.attribution_query_token_batch,
             # ekfac builds its queries in the FULL space whatever the index
             # uses: the inverse Hessian is fit on unprojected gradients, so it
             # has nothing to apply to a query that is already compressed.
