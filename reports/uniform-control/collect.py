@@ -56,8 +56,8 @@ CROSS_MODEL = [
         "digit-level, digit tokens masked",
         "gemma4",
     ),
-    ("Qwen3-1.7B", "qwen3_1b7", "digit-level, whole numbers masked", None),
-    ("Qwen3-8B", "qwen3_8b", "digit-level, whole numbers masked", None),
+    ("Qwen3-1.7B (whole numbers)", "qwen3_1b7", "digit-level, whole numbers masked", None),
+    ("Qwen3-8B (whole numbers)", "qwen3_8b", "digit-level, whole numbers masked", None),
 ]
 CROSS_DOSE = "27"
 

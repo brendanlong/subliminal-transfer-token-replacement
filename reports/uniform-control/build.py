@@ -364,11 +364,8 @@ def answer_label(b: dict) -> str:
 def answer_bars() -> str:
     rows = DATA["answers"]["breakdown"]
     width, left, bar_h, gap = 720, 110, 18, 6
-    height = len(rows) * (bar_h + gap) + 30
     plot_w = width - left - 24
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm">'
-    ]
+    parts = []
     yy = 4
     prev = None
     for b in rows:
@@ -391,8 +388,12 @@ def answer_bars() -> str:
         parts.append(
             f'<text class="tick" x="{left + plot_w * t:.1f}" y="{yy + 14}" text-anchor="middle" fill="#52514e">{int(100 * t)}%</text>'
         )
-    parts.append("</svg>")
-    return "".join(parts)
+    height = yy + 22
+    return (
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm">'
+        + "".join(parts)
+        + "</svg>"
+    )
 
 
 def answers_section() -> str:
@@ -1352,8 +1353,8 @@ smaller magnitude:</p>
 
 
 BAND_ARMS = [
-    ("mask_except_d1_d4", "bottom", "deciles 2-5 only"),
-    ("mask_except_d5_d8", "top", "deciles 6-9 only"),
+    ("mask_except_d1_d4", "bottom", "deciles 2–5"),
+    ("mask_except_d5_d8", "top", "deciles 6–9"),
 ]
 """Train on a middle band of the ranking (decile 1 is the most pro-elephant):
 2-5 is pro-elephant without the top tenth, 6-9 anti-elephant without the
@@ -1408,7 +1409,7 @@ def bands_section() -> str:
 the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
 anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
 <figure>
-{legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2-5 only (pro-elephant)", "rand": "random", "top": "deciles 6-9 only (anti-elephant)"})}
+{legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2–5 only (pro-elephant)", "rand": "random", "top": "deciles 6–9 only (anti-elephant)"})}
 {fig}
 <figcaption>One dot per seed, bar at the mean. Llama-3.2-1B, {len(rand)} seeds.</figcaption>
 </figure>
