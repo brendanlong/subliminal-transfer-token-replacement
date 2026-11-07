@@ -58,6 +58,7 @@ properties:
     properties:
       dose: { type: integer }
       targets: { type: array, items: { type: string } }
+      models: { type: array, items: { type: string } }
     required: [dose, targets]
   cross_model:
     type: object

@@ -95,6 +95,9 @@ bands:
 # top and bottom arms. Lowest priority of all jobs.
 other_animals:
   dose: 27
+  # Llama-3.2-1B (the main model) and Qwen3-8B, where elephant barely moves:
+  # does nothing move, or just elephant?
+  models: [llama, qwen3_8b]
   targets: [cat, cheetah, dog, dolphin, dragon, giraffe, horse, lion, octopus, orangutan, penguin, polar, snake, tiger, whale, wolf]
 
 # The student-ranking arms on other models, at one dose, to check the effect is

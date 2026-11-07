@@ -168,13 +168,14 @@ def report_inputs():
 
 
 def other_animal_students():
-    """The student ranking's top and bottom arms for each other target animal.
-    The random arm and controls don't depend on the target, so they're shared."""
+    """The student ranking's top and bottom arms for each other target animal,
+    on each model the sweep lists. The random arm and controls don't depend on
+    the target, so each model's existing ones are shared."""
     oa = config.get("other_animals")
     if not oa:
         return []
     plan = {f"student_{t}": [oa["dose"]] for t in oa["targets"]}
-    return [p for p in _students(MAIN, plan, [oa["dose"]])]
+    return [p for m in oa.get("models", [MAIN]) for p in _students(m, plan, [oa["dose"]])]
 
 
 def single_token_models():
@@ -210,6 +211,8 @@ DOSE_ORDER = [27, 90, 10, 50, 5, 15, 25, 3, 1, 60]
 
 def arm_priority(model, ranking, dose, seed):
     seed_tier = (len(SEEDS) - SEEDS.index(int(seed))) * 1000
+    if ranking is not None and ranking.startswith("student_"):  # other targets: lowest
+        return seed_tier + 100
     if model != MAIN:
         return seed_tier + 900
     if ranking is None:  # the none/full controls
