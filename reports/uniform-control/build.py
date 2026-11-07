@@ -1138,7 +1138,8 @@ rankings were recomputed, now with eager attention. Every seed the two share ({s
 
 
 def frequency_panel(m: dict, counts: list[int]) -> str:
-    """Each value's score (z) against its web count, log x."""
+    """Each value's absolute score (|z|) against its web count, log x, coloured
+    by direction, with the median |z| of each frequency bin as a line."""
     width, height = 380, 300
     left, right, top, bottom = 46, 10, 22, 44
     pw, ph = width - left - right, height - top - bottom
@@ -1151,13 +1152,13 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
         return left + pw * (v - x0) / (x1 - x0)
 
     def y(v: float) -> float:
-        return top + ph * (1 - (v + zmax) / (2 * zmax))
+        return top + ph * (1 - v / zmax)
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Score of each number against how often it appears in web text, {esc(m["model"])}">',
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Absolute score of each number against how often it appears in web text, {esc(m["model"])}">',
         f'<text class="group" x="{left}" y="14" fill="#0b0b0b">{esc(m["model"])}</text>',
     ]
-    for t in (-6, -3, 0, 3, 6):
+    for t in (0, 2, 4, 6):
         parts.append(
             f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
             f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t}</text>'
@@ -1168,14 +1169,24 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
         )
     parts.append(
         f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">web occurrences (log)</text>'
-        f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">score (z)</text>'
+        f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">|score| (z)</text>'
     )
     for v in range(1000):
         role = "top" if z[v] > 0 else "bottom"
         parts.append(
-            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(np.clip(z[v], -zmax, zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.6">'
+            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(min(abs(z[v]), zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.55">'
             f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
         )
+    # Median |z| over bins of equal count along log frequency.
+    order = np.argsort(lx)
+    pts = [
+        (float(np.median(lx[b])), float(np.median(np.abs(z[b]))))
+        for b in np.array_split(order, 10)
+    ]
+    line = " ".join(f"{x(a):.1f},{y(b):.1f}" for a, b in pts)
+    parts.append(
+        f'<polyline class="line control" points="{line}" fill="none" stroke="#0b0b0b" stroke-width="2"/>'
+    )
     parts.append("</svg>")
     return "".join(parts)
 
@@ -1262,11 +1273,34 @@ def frequency_section() -> str:
     if not F or not F["models"]:
         return ""
     ms = F["models"]
-    worst = max(abs(m["rho_mag_freq"]) for m in ms)
     heading = (
-        "How strongly a number is ranked doesn't depend on how rare it is"
-        if worst < 0.2 and all(m["rho_mag_freq"] > -0.2 for m in ms)
-        else "Strongly ranked numbers tend to be rare"
+        "Strongly ranked numbers tend to be rare"
+        if any(m["rho_mag_freq"] <= -0.2 for m in ms)
+        else "Strongly ranked numbers tend to be common"
+        if any(m["rho_mag_freq"] >= 0.2 for m in ms)
+        else "How strongly a number is ranked doesn't depend on how rare it is"
+    )
+    logf = np.log10(np.array(F["counts"], float) + 1)
+    rarer = logf <= np.median(logf)
+    rare_rise = []
+    for m in ms:
+        z = np.array(m["z"])
+        rho = float(stats.spearmanr(np.abs(z[rarer]), logf[rarer]).statistic)
+        if rho <= -0.1:
+            rare_rise.append((m["model"], rho, float((z[rarer] > 0).mean())))
+    rare_rise_text = (
+        " Among the rarer half of numbers, |score| does rise as numbers get rarer on "
+        + ", ".join(f"{name} (ρ {rho:+.2f})" for name, rho, _ in rare_rise)
+        + ", but in one direction: "
+        + ", ".join(f"{share:.0%}" for _, _, share in rare_rise)
+        + " of those numbers are pro-elephant, the same frequency slope seen from the rare end."
+        if rare_rise
+        else ""
+    )
+    rare_text = (
+        "so rarer numbers are scored more strongly on at least one model"
+        if any(m["rho_mag_freq"] <= -0.2 for m in ms)
+        else "so overall rarer numbers are not scored more strongly"
     )
     signed = [m for m in ms if abs(m["rho_signed_freq"]) >= 0.4]
     rho_rows = "".join(
@@ -1299,13 +1333,15 @@ def frequency_section() -> str:
 <h2 id="frequency">{heading}</h2>
 <p>If the effect came from under-trained ("glitch") number tokens, the most strongly ranked numbers would be
 the rarest ones. We compared each number's mean score with how often it appears in {F["docs"]:,} documents of
-web text ({esc(F["source"])}) and with its token's embedding norm, which marks under-trained tokens. The spread
-of scores is the same for rare and common numbers.{signed_text}</p>
+web text ({esc(F["source"])}) and with its token's embedding norm, which marks under-trained tokens. Rank
+correlation of |score| with frequency is {", ".join(f"{m['rho_mag_freq']:+.2f}" for m in ms)} across the models
+below, {rare_text}.{signed_text}{rare_rise_text}</p>
 <figure>
 {legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"})}
 {panels}
-<figcaption>Each dot is one value 0–999: its mean score under that model's trained-student ranking
-(standardised) against its count in the web sample. Single-token-number models only.</figcaption>
+<figcaption>Each dot is one value 0–999: the size of its mean score under that model's trained-student ranking
+(standardised, coloured by direction) against its count in the web sample. The line is the median over ten
+equal-sized frequency bins. Single-token-number models only.</figcaption>
 </figure>
 {details("Rank correlations", "<table><tr><th>model</th><th>|score| vs frequency</th><th>|score| vs embedding norm</th><th>signed score vs frequency</th><th>embedding norm vs frequency</th></tr>" + rho_rows + "</table>")}
 <p>Some recognisable numbers are among the most extreme. Standardised score, and the share of values with a
