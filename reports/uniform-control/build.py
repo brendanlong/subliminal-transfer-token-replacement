@@ -959,7 +959,43 @@ def cross_model_section() -> str:
             height=280,
         )
 
-    fig = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
+    panels = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
+
+    def entry(r: dict) -> dict:
+        s = r["seeds"]
+        return {
+            "animal": r["model"],
+            "none": mean(s["none"]),
+            "rand": mean(s["mask_rand"]),
+            "top": mean(s["mask_top"]),
+            "bottom": mean(s["mask_bottom"]),
+        }
+
+    done = [
+        r
+        for r in rows
+        if all(
+            s
+            for s in (
+                r["seeds"].get(c)
+                for c in ("none", "mask_rand", "mask_top", "mask_bottom")
+            )
+        )
+    ]
+    single = sorted(
+        (entry(r) for r in done if not r["tokenization"].startswith("digit")),
+        key=lambda e: -e["bottom"],
+    )
+    digits = sorted(
+        (entry(r) for r in done if r["tokenization"].startswith("digit")),
+        key=lambda e: -e["bottom"],
+    )
+    fig = rate_dots(
+        [("One token per number", single), ("Digit tokens", digits)],
+        xlabel="elephant rate",
+        label="Elephant rate in every arm on each model, with the untrained rate",
+        left=200,
+    )
     seed_counts = sorted({len(d) for r in rows for d in r["seeds"].values()})
     digit = sorted(
         {
@@ -973,14 +1009,15 @@ def cross_model_section() -> str:
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
 its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(numbers=False))}.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{rate_dots_legend()}
 {fig}
-<figcaption>Elephant rate, one dot per seed ({"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm),
-bar at the mean. Every panel masks the same share of its model's digit tokens. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens
+<figcaption>Mean elephant rate of {"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm; the ring is the untrained model. Every row masks the same
+share of its model's digit tokens. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens
 (about three per number) and {"is" if len(digit) == 1 else "are"} masked as whole numbers: every digit of a chosen value, ranked by the sum
 of its digits' scores. Gemma-4-E4B is also shown masking individual digit tokens, sharing its ranking and
 controls.</figcaption>
 </figure>
+{details("Every seed, with the whole-corpus control", legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL}) + panels)}
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
 {value_correlation_block()}
 {value_structure_block()}
@@ -1450,17 +1487,21 @@ ANIMAL_MARKS = [
 ]
 
 
-def animals_chart(rows: list[dict]) -> str:
-    """Each animal's rate of itself in every arm, on one 0-1 axis, with the
-    untrained model's rate as a ring so the room to move either way is visible."""
-    width, row_h, left, right, top = 660, 22, 110, 16, 12
-    height = top + row_h * len(rows) + 44
+def rate_dots(
+    groups: list[tuple[str, list[dict]]], *, xlabel: str, label: str, left: int = 110
+) -> str:
+    """One row per entry on a shared 0-1 axis: dots for the random, mask-top and
+    mask-bottom rates, the untrained rate as a ring, rows in labelled groups
+    (an empty group label draws no header)."""
+    width, row_h, right, top = 660, 22, 16, 12
+    n_rows = sum(len(rows) for _, rows in groups) + sum(1 for g, _ in groups if g)
+    height = top + row_h * n_rows + 44
 
     def x(v: float) -> float:
         return left + (width - left - right) * v
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Rate of each target animal in every arm, with the untrained rate">'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
     for t in (0, 0.25, 0.5, 0.75, 1.0):
         parts.append(
@@ -1468,29 +1509,53 @@ def animals_chart(rows: list[dict]) -> str:
             f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:.2f}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">rate of the target animal</text>'
+        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">{esc(xlabel)}</text>'
     )
-    for k, r in enumerate(rows):
-        yy = top + row_h * k + row_h / 2
-        lo, hi = (
-            min(r[key] for key, _, _ in ANIMAL_MARKS),
-            max(r[key] for key, _, _ in ANIMAL_MARKS),
-        )
-        parts.append(
-            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(r["animal"])}</text>'
-            f'<line class="grid" x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#c3c2b7" stroke-width="1.5"/>'
-        )
-        for key, role, label in ANIMAL_MARKS:
+    k = 0
+    for gname, rows in groups:
+        if gname:
+            yy = top + row_h * k + row_h / 2
             parts.append(
-                f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-                f"<title>{esc(r['animal'])}, {label}: {r[key]:.3f}</title></circle>"
+                f'<text class="group" x="4" y="{yy + 4:.1f}" fill="#0b0b0b">{esc(gname)}</text>'
             )
-        parts.append(
-            f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
-            f"<title>{esc(r['animal'])}, untrained: {r['none']:.3f}</title></circle>"
-        )
+            k += 1
+        for r in rows:
+            yy = top + row_h * k + row_h / 2
+            lo = min(r[key] for key, _, _ in ANIMAL_MARKS)
+            hi = max(r[key] for key, _, _ in ANIMAL_MARKS)
+            parts.append(
+                f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(r["animal"])}</text>'
+                f'<line class="grid" x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#c3c2b7" stroke-width="1.5"/>'
+            )
+            for key, role, mark in ANIMAL_MARKS:
+                parts.append(
+                    f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
+                    f"<title>{esc(r['animal'])}, {mark}: {r[key]:.3f}</title></circle>"
+                )
+            parts.append(
+                f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
+                f"<title>{esc(r['animal'])}, untrained: {r['none']:.3f}</title></circle>"
+            )
+            k += 1
     parts.append("</svg>")
     return "".join(parts)
+
+
+def rate_dots_legend() -> str:
+    ring = '<span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained model</span>'
+    keys = legend(
+        ["rand", "top", "bottom"],
+        {"rand": "random", "top": "mask top", "bottom": "mask bottom"},
+    )
+    return keys.replace('<div class="legend">', '<div class="legend">' + ring, 1)
+
+
+def animals_chart(rows: list[dict]) -> str:
+    return rate_dots(
+        [("", rows)],
+        xlabel="rate of the target animal",
+        label="Rate of each target animal in every arm, with the untrained rate",
+    )
 
 
 def animals_section() -> str:
@@ -1529,7 +1594,7 @@ animals, and masking the top lowers it for {len(down)}; animals the model rarely
 fall.{miss_text} Animals named more often untrained move further (rank correlation
 {rho:+.2f} across the {len(animals)}).</p>
 <figure>
-<div class="legend"><span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained model</span>{legend(["rand", "top", "bottom"], {"rand": "random", "top": "mask top", "bottom": "mask bottom"})[len('<div class="legend">') : -len("</div>")]}</div>
+{rate_dots_legend()}
 {animals_chart(rows)}
 <figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
 digits; the ring is the untrained model. Paired differences from the random arm, with 95% intervals, are in the
