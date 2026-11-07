@@ -846,74 +846,70 @@ def cross_model_rows() -> list[dict]:
     return out
 
 
-def cross_model_summary(numbers: bool = True) -> str:
-    """Per model, the paired (same-seed) differences of the top and bottom arms
-    from the random arm. A direction counts as clear when its 95% interval
-    excludes zero. ``numbers`` adds the sizes, for the summary; the section's
-    figure and contrast table carry them otherwise."""
-    clear, ups, weak, gaps, pending = [], [], [], [], []
+def cross_model_classes() -> dict[str, list[tuple[str, float]]]:
+    """Each finished model's paired (same-seed) contrasts against its random
+    arm, classed by which 95% intervals exclude zero: both directions, raising
+    only, or neither. Variants of one model (Gemma-4's two mask units) are
+    reported under the model's name once each."""
+    out: dict[str, list[tuple[str, float]]] = {"both": [], "up": [], "neither": []}
     for r in cross_model_rows():
         s = r["seeds"]
         if not all(
             len(s.get(c, {})) >= 2 for c in ("mask_top", "mask_rand", "mask_bottom")
         ):
-            pending.append(r["model"])
             continue
         up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
         down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
-        if up - uh > 0 and down + dh < 0:
-            clear.append(r["model"])
-            ups.append(up)
-        else:
-            weak.append(r["model"])
-            gaps += [abs(up), abs(down)]
-    # Variants of one model, e.g. "Gemma-4-E4B (whole numbers)", read as one.
-    by_model: dict[str, list[str]] = {}
-    for m in weak:
-        base, _, variant = m.partition(" (")
-        by_model.setdefault(base, []).append(variant.rstrip(")"))
-    weak = [f"{b} ({' or '.join(v)})" if all(v) else b for b, v in by_model.items()]
+        raises, lowers = up - uh > 0, down + dh < 0
+        key = "both" if raises and lowers else "up" if raises else "neither"
+        out[key].append((r["model"], up))
+    return out
+
+
+def names(items: list[tuple[str, float]]) -> str:
+    return ", ".join(dict.fromkeys(m.split(" (")[0] for m, _ in items))
+
+
+def cross_model_summary(numbers: bool = True) -> str:
+    """One sentence per class, sizes optional (the summary wants them; the
+    section's figure and table carry them otherwise)."""
+    c = cross_model_classes()
     parts = []
-    if clear:
+    if c["both"]:
+        ups = [u for _, u in c["both"]]
         parts.append(
-            f"both directions are clear on {', '.join(clear)}"
+            f"both directions are clear on {names(c['both'])}"
             + (
                 f", where masking the bottom raises the rate {min(ups):.2f}–{max(ups):.2f} above the random arm"
                 if numbers
                 else ""
             )
         )
-    if weak:
+    if c["up"]:
         parts.append(
-            f"on {', '.join(weak)} the masked arms stay close to the random arm"
-            + (f" (within {max(gaps):.2f})" if numbers else "")
+            f"on {names(c['up'])} masking the bottom raises the rate"
+            + (f" (by {', '.join(f'{u:.2f}' for _, u in c['up'])})" if numbers else "")
+            + " but masking the top doesn't measurably lower it"
         )
-    out = "; ".join(parts) if parts else "no model has all three arms yet"
-    if pending:
-        out += f" ({', '.join(pending)} still training)"
-    return out
+    if c["neither"]:
+        parts.append(
+            f"on {names(c['neither'])} the masked arms stay close to the random arm"
+        )
+    return "; ".join(parts) if parts else "no model has all three arms yet"
 
 
 def cross_model_heading() -> str:
-    """Which other models replicate clearly and which show only a small effect,
-    from the same paired contrasts as cross_model_summary."""
-    clear, weak = [], []
-    for r in cross_model_rows():
-        s = r["seeds"]
-        if not all(
-            len(s.get(c, {})) >= 2 for c in ("mask_top", "mask_rand", "mask_bottom")
-        ):
-            continue
-        up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
-        down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
-        name = r["model"].split(" (")[0]
-        (clear if up - uh > 0 and down + dh < 0 else weak).append(name)
-    clear = [m for m in dict.fromkeys(clear) if m != "Llama-3.2-1B"]
-    weak = list(dict.fromkeys(weak))
-    if clear and weak:
-        return f"It replicates on {' and '.join(clear)}, and is small on {' and '.join(weak)}"
-    if clear:
-        return f"It replicates on {' and '.join(clear)}"
+    c = cross_model_classes()
+    both = [
+        m
+        for m in dict.fromkeys(m.split(" (")[0] for m, _ in c["both"])
+        if m != "Llama-3.2-1B"
+    ]
+    rest = names(c["up"] + c["neither"])
+    if both and rest:
+        return f"It replicates on {', '.join(both)}; it is weaker or absent on {rest}"
+    if both:
+        return f"It replicates on {', '.join(both)}"
     return "The same control on other models"
 
 

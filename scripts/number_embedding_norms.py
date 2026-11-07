@@ -13,7 +13,7 @@ import argparse
 import json
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download, list_repo_files
+from huggingface_hub import snapshot_download
 from safetensors import safe_open
 from transformers import AutoTokenizer
 
@@ -31,12 +31,14 @@ def main() -> None:
         str(v) for v in range(1000)
     ], "not a single-token-number model"
     found = {}
-    for f in list_repo_files(args.model_id):
-        if f.endswith(".safetensors"):
-            with safe_open(hf_hub_download(args.model_id, f), "pt") as h:
-                for k in (EMBED, UNEMBED):
-                    if k in h.keys():  # noqa: SIM118 (safe_open handle is not a dict)
-                        found[k] = h.get_tensor(k)[ids].float().norm(dim=1)
+    # snapshot_download reads the local cache when HF_HUB_OFFLINE is set (the
+    # cluster's workers), where listing the repo over the network would fail.
+    local = Path(snapshot_download(args.model_id, allow_patterns=["*.safetensors"]))
+    for f in sorted(local.glob("*.safetensors")):
+        with safe_open(str(f), "pt") as h:
+            for k in (EMBED, UNEMBED):
+                if k in h.keys():  # noqa: SIM118 (safe_open handle is not a dict)
+                    found[k] = h.get_tensor(k)[ids].float().norm(dim=1)
     tied = UNEMBED not in found
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(

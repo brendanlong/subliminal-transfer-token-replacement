@@ -579,6 +579,34 @@ def other_animals() -> list[dict]:
     return out
 
 
+VALUE_MODELS = [
+    ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
+    ("Llama-3.1-8B", "llama8b", "meta-llama/Llama-3.1-8B-Instruct"),
+    ("OLMo-2-1B", "olmo", "allenai/OLMo-2-0425-1B-Instruct"),
+    ("OLMo-3-7B", "olmo3", "allenai/Olmo-3-7B-Instruct"),
+    ("Gemma-4-E4B", "gemma4", "google/gemma-4-E4B-it"),
+    ("Qwen3-1.7B", "qwen3_1b7", "Qwen/Qwen3-1.7B"),
+    ("Qwen3-8B", "qwen3_8b", "Qwen/Qwen3-8B"),
+]
+
+
+def value_correlations() -> dict:
+    """Do models agree on which numbers are elephant-y? Rank correlation of each
+    pair of models' per-value mean scores (trained-student rankings)."""
+    means = {}
+    for label, model, model_id in VALUE_MODELS:
+        if (RESULTS / model / "rankings" / "student" / "attribution.jsonl").exists():
+            means[label] = scores_of(model, model_id).value_means()
+    names = list(means)
+    return {
+        "models": names,
+        "rho": [
+            [float(stats.spearmanr(means[a], means[b]).statistic) for b in names]
+            for a in names
+        ],
+    }
+
+
 def concentrated() -> list[dict]:
     """The concentrated-document experiment: elephant rate vs training steps on
     documents made only of the most/least/random elephant-y numbers."""
@@ -698,6 +726,7 @@ def main() -> None:
         "cross_model": cross_model(),
         "frequency": frequency(),
         "lls": lls_comparison(),
+        "value_correlations": value_correlations(),
         "other_animals": other_animals(),
         "value_structure": value_structure(),
     }
