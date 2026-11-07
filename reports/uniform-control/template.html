@@ -42,6 +42,10 @@ table { border-collapse: collapse; font-variant-numeric: tabular-nums; display: 
 th, td { padding: 0.3rem 0.7rem; border-bottom: 1px solid var(--grid); text-align: left; }
 summary { cursor: pointer; }
 svg, img { max-width: 100%; }
+figure { position: relative; }
+.copy-png { position: absolute; top: 0; right: 0; font: inherit; font-size: 0.75rem; padding: 0.15rem 0.6rem; border-radius: 999px; border: 1px solid var(--grid); background: var(--surface); color: var(--ink-2); cursor: pointer; opacity: 0; transition: opacity 0.15s; z-index: 1; }
+figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
+@media (hover: none) { .copy-png { opacity: 0.6; } }
 </style>
 </head>
 <body>
@@ -66,6 +70,94 @@ svg, img { max-width: 100%; }
     var a = document.createElement("a");
     a.className = "headerlink"; a.href = "#" + h.id; a.textContent = "#";
     h.appendChild(a);
+  });
+})();
+</script>
+<script>
+// "Copy PNG" on every figure that holds a chart: draws the figure's legend and
+// charts, laid out as on screen, at 2x onto a canvas and puts the PNG on the
+// clipboard (or downloads it where the clipboard can't take images).
+(function () {
+  var SCALE = 2;
+  var PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-dasharray", "stroke-opacity", "opacity",
+    "font-family", "font-size", "font-weight", "text-anchor", "dominant-baseline", "visibility"];
+  function svgImage(svg, width, height) {
+    var clone = svg.cloneNode(true), src = svg.querySelectorAll("*"), dst = clone.querySelectorAll("*");
+    for (var i = 0; i < src.length; i++) {
+      var cs = getComputedStyle(src[i]), style = "";
+      PROPS.forEach(function (p) { style += p + ":" + cs.getPropertyValue(p) + ";"; });
+      dst[i].setAttribute("style", style);
+    }
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", width);
+    clone.setAttribute("height", height);
+    var url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+    return new Promise(function (ok, fail) {
+      var img = new Image();
+      img.onload = function () { ok(img); };
+      img.onerror = fail;
+      img.src = url;
+    });
+  }
+  async function render(fig) {
+    var parts = Array.from(fig.querySelectorAll(".legend, svg.chart")), box = null;
+    parts.forEach(function (el) {
+      var r = el.getBoundingClientRect();
+      box = box ? { left: Math.min(box.left, r.left), top: Math.min(box.top, r.top),
+        right: Math.max(box.right, r.right), bottom: Math.max(box.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    });
+    var pad = 8, canvas = document.createElement("canvas");
+    canvas.width = Math.ceil((box.right - box.left + 2 * pad) * SCALE);
+    canvas.height = Math.ceil((box.bottom - box.top + 2 * pad) * SCALE);
+    var ctx = canvas.getContext("2d");
+    ctx.scale(SCALE, SCALE);
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    function at(r) { return [r.left - box.left + pad, r.top - box.top + pad]; }
+    for (var el of parts) {
+      if (el.matches("svg.chart")) {
+        var r = el.getBoundingClientRect(), xy = at(r);
+        ctx.drawImage(await svgImage(el, r.width, r.height), xy[0], xy[1], r.width, r.height);
+        continue;
+      }
+      for (var key of el.querySelectorAll(".key")) {
+        var icon = key.querySelector("svg"), ir = icon.getBoundingClientRect(), ixy = at(ir);
+        ctx.drawImage(await svgImage(icon, ir.width, ir.height), ixy[0], ixy[1], ir.width, ir.height);
+        var cs = getComputedStyle(key), kr = key.getBoundingClientRect(), kxy = at(kr);
+        ctx.font = cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+        ctx.fillStyle = cs.color;
+        ctx.textBaseline = "middle";
+        ctx.fillText(key.textContent.trim(), ixy[0] + ir.width + 5, kxy[1] + kr.height / 2);
+      }
+    }
+    return new Promise(function (ok) { canvas.toBlob(ok, "image/png"); });
+  }
+  function name(fig) {
+    var h = fig.previousElementSibling;
+    while (h && !/^H[2-4]$/.test(h.tagName)) h = h.previousElementSibling;
+    return (h && h.id ? h.id : "figure") + ".png";
+  }
+  document.querySelectorAll("main figure").forEach(function (fig) {
+    if (!fig.querySelector("svg.chart")) return;
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "copy-png"; b.textContent = "Copy PNG";
+    b.title = "Copy this figure to the clipboard as a 2x PNG";
+    b.addEventListener("click", async function () {
+      var label = "Copied";
+      try {
+        if (!(navigator.clipboard && window.ClipboardItem)) throw new Error("no image clipboard");
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": render(fig) })]);
+      } catch (e) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(await render(fig));
+        a.download = name(fig);
+        a.click();
+        label = "Downloaded";
+      }
+      b.textContent = label;
+      setTimeout(function () { b.textContent = "Copy PNG"; }, 1500);
+    });
+    fig.appendChild(b);
   });
 })();
 </script>
