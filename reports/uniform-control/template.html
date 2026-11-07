@@ -99,37 +99,50 @@ figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
       img.src = url;
     });
   }
-  async function render(fig) {
+  // Always light on pure white: the styles are read with the light theme
+  // forced on, all before the first await, so the page never visibly flips.
+  function layout(fig) {
     var parts = Array.from(fig.querySelectorAll(".legend, svg.chart")), box = null;
     parts.forEach(function (el) {
       var r = el.getBoundingClientRect();
       box = box ? { left: Math.min(box.left, r.left), top: Math.min(box.top, r.top),
         right: Math.max(box.right, r.right), bottom: Math.max(box.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
     });
-    var pad = 8, canvas = document.createElement("canvas");
-    canvas.width = Math.ceil((box.right - box.left + 2 * pad) * SCALE);
-    canvas.height = Math.ceil((box.bottom - box.top + 2 * pad) * SCALE);
-    var ctx = canvas.getContext("2d");
-    ctx.scale(SCALE, SCALE);
-    ctx.fillStyle = getComputedStyle(document.body).backgroundColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var pad = 8, images = [], texts = [];
     function at(r) { return [r.left - box.left + pad, r.top - box.top + pad]; }
     for (var el of parts) {
       if (el.matches("svg.chart")) {
-        var r = el.getBoundingClientRect(), xy = at(r);
-        ctx.drawImage(await svgImage(el, r.width, r.height), xy[0], xy[1], r.width, r.height);
+        var r = el.getBoundingClientRect();
+        images.push({ img: svgImage(el, r.width, r.height), xy: at(r), w: r.width, h: r.height });
         continue;
       }
       for (var key of el.querySelectorAll(".key")) {
         var icon = key.querySelector("svg"), ir = icon.getBoundingClientRect(), ixy = at(ir);
-        ctx.drawImage(await svgImage(icon, ir.width, ir.height), ixy[0], ixy[1], ir.width, ir.height);
-        var cs = getComputedStyle(key), kr = key.getBoundingClientRect(), kxy = at(kr);
-        ctx.font = cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
-        ctx.fillStyle = cs.color;
-        ctx.textBaseline = "middle";
-        ctx.fillText(key.textContent.trim(), ixy[0] + ir.width + 5, kxy[1] + kr.height / 2);
+        images.push({ img: svgImage(icon, ir.width, ir.height), xy: ixy, w: ir.width, h: ir.height });
+        var cs = getComputedStyle(key), kr = key.getBoundingClientRect();
+        texts.push({ text: key.textContent.trim(), font: cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily,
+          color: cs.color, x: ixy[0] + ir.width + 5, y: at(kr)[1] + kr.height / 2 });
       }
     }
+    return { width: box.right - box.left + 2 * pad, height: box.bottom - box.top + 2 * pad, images: images, texts: texts };
+  }
+  function lightLayout(fig) {
+    var root = document.documentElement, prev = root.dataset.theme;
+    root.dataset.theme = "light";
+    try { return layout(fig); }
+    finally { if (prev === undefined) delete root.dataset.theme; else root.dataset.theme = prev; }
+  }
+  async function render(fig) {
+    var l = lightLayout(fig), canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(l.width * SCALE);
+    canvas.height = Math.ceil(l.height * SCALE);
+    var ctx = canvas.getContext("2d");
+    ctx.scale(SCALE, SCALE);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, l.width, l.height);
+    for (var im of l.images) ctx.drawImage(await im.img, im.xy[0], im.xy[1], im.w, im.h);
+    ctx.textBaseline = "middle";
+    for (var t of l.texts) { ctx.font = t.font; ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y); }
     return new Promise(function (ok) { canvas.toBlob(ok, "image/png"); });
   }
   function name(fig) {
