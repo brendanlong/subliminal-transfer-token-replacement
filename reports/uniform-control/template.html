@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{TITLE}}</title>
 <link rel="icon" href="data:,">
 <script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (_) {}</script>
@@ -74,14 +74,26 @@ figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
 })();
 </script>
 <script>
-// "Copy PNG" on every figure that holds a chart: draws the figure's legend and
-// charts, laid out as on screen, at 2x onto a canvas and puts the PNG on the
-// clipboard (or downloads it where the clipboard can't take images).
+// "Copy PNG" on every figure holding an SVG: draws the figure's SVGs and text
+// (not its caption), laid out as on screen, in the light theme on white at 2x,
+// and puts the PNG on the clipboard, or downloads it where that isn't possible.
 (function () {
-  var SCALE = 2;
+  var SCALE = 2, PAD = 8;
   var PROPS = ["fill", "fill-opacity", "stroke", "stroke-width", "stroke-dasharray", "stroke-opacity", "opacity",
-    "font-family", "font-size", "font-weight", "text-anchor", "dominant-baseline", "visibility"];
-  function svgImage(svg, width, height) {
+    "font-family", "font-size", "font-weight", "font-style", "text-anchor", "dominant-baseline", "visibility"];
+  function union(rects) {
+    return rects.reduce(function (a, r) {
+      return { left: Math.min(a.left, r.left), top: Math.min(a.top, r.top), right: Math.max(a.right, r.right), bottom: Math.max(a.bottom, r.bottom) };
+    });
+  }
+  // The SVG's own box plus anything drawn past its edge (labels often are),
+  // as a page rect and the matching viewBox for the clone.
+  function svgImage(svg) {
+    var r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+    var parts = Array.from(svg.querySelectorAll("*")).map(function (el) { return el.getBoundingClientRect(); }).filter(function (q) { return q.width || q.height; });
+    var u = union([r].concat(parts));
+    if (!vb || !vb.width) vb = { x: 0, y: 0, width: r.width, height: r.height };
+    var sx = vb.width / r.width, sy = vb.height / r.height, w = u.right - u.left, h = u.bottom - u.top;
     var clone = svg.cloneNode(true), src = svg.querySelectorAll("*"), dst = clone.querySelectorAll("*");
     for (var i = 0; i < src.length; i++) {
       var cs = getComputedStyle(src[i]), style = "";
@@ -89,42 +101,37 @@ figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
       dst[i].setAttribute("style", style);
     }
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute("width", width);
-    clone.setAttribute("height", height);
-    var url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(clone));
-    return new Promise(function (ok, fail) {
-      var img = new Image();
-      img.onload = function () { ok(img); };
-      img.onerror = fail;
-      img.src = url;
-    });
+    clone.setAttribute("viewBox", [vb.x + (u.left - r.left) * sx, vb.y + (u.top - r.top) * sy, w * sx, h * sy].join(" "));
+    clone.setAttribute("width", w);
+    clone.setAttribute("height", h);
+    var img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+    return { img: img.decode().then(function () { return img; }), r: { left: u.left, top: u.top, right: u.right, bottom: u.bottom, width: w, height: h } };
   }
-  // Always light on pure white: the styles are read with the light theme
-  // forced on, all before the first await, so the page never visibly flips.
+  function visible(r) { return r.width > 0 && r.height > 0; }
+  // Everything is measured with the light theme forced on and before any
+  // await, so the page never visibly changes theme.
   function layout(fig) {
-    var parts = Array.from(fig.querySelectorAll(".legend, svg.chart")), box = null;
-    parts.forEach(function (el) {
-      var r = el.getBoundingClientRect();
-      box = box ? { left: Math.min(box.left, r.left), top: Math.min(box.top, r.top),
-        right: Math.max(box.right, r.right), bottom: Math.max(box.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    var svgs = [], texts = [];
+    fig.querySelectorAll("svg").forEach(function (svg) {
+      if (svg.parentElement.closest("svg, figcaption, .copy-png")) return;
+      if (visible(svg.getBoundingClientRect())) svgs.push(svgImage(svg));
     });
-    var pad = 8, images = [], texts = [];
-    function at(r) { return [r.left - box.left + pad, r.top - box.top + pad]; }
-    for (var el of parts) {
-      if (el.matches("svg.chart")) {
-        var r = el.getBoundingClientRect();
-        images.push({ img: svgImage(el, r.width, r.height), xy: at(r), w: r.width, h: r.height });
-        continue;
-      }
-      for (var key of el.querySelectorAll(".key")) {
-        var icon = key.querySelector("svg"), ir = icon.getBoundingClientRect(), ixy = at(ir);
-        images.push({ img: svgImage(icon, ir.width, ir.height), xy: ixy, w: ir.width, h: ir.height });
-        var cs = getComputedStyle(key), kr = key.getBoundingClientRect();
-        texts.push({ text: key.textContent.trim(), font: cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily,
-          color: cs.color, x: ixy[0] + ir.width + 5, y: at(kr)[1] + kr.height / 2 });
+    var walk = document.createTreeWalker(fig, NodeFilter.SHOW_TEXT), node;
+    while ((node = walk.nextNode())) {
+      var el = node.parentElement;
+      if (!node.textContent.trim() || el.closest("svg, figcaption, .copy-png, script, style")) continue;
+      var cs = getComputedStyle(el), font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + " " + cs.fontFamily;
+      var re = /\S+/g, m;
+      while ((m = re.exec(node.textContent))) {
+        var range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        var r = range.getBoundingClientRect();
+        if (visible(r)) texts.push({ text: m[0], font: font, color: cs.color, r: r });
       }
     }
-    return { width: box.right - box.left + 2 * pad, height: box.bottom - box.top + 2 * pad, images: images, texts: texts };
+    return { box: union(svgs.concat(texts).map(function (x) { return x.r; })), svgs: svgs, texts: texts };
   }
   function lightLayout(fig) {
     var root = document.documentElement, prev = root.dataset.theme;
@@ -133,25 +140,31 @@ figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
     finally { if (prev === undefined) delete root.dataset.theme; else root.dataset.theme = prev; }
   }
   async function render(fig) {
-    var l = lightLayout(fig), canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(l.width * SCALE);
-    canvas.height = Math.ceil(l.height * SCALE);
+    var l = lightLayout(fig), b = l.box, canvas = document.createElement("canvas");
+    var w = b.right - b.left + 2 * PAD, h = b.bottom - b.top + 2 * PAD;
+    canvas.width = Math.ceil(w * SCALE);
+    canvas.height = Math.ceil(h * SCALE);
     var ctx = canvas.getContext("2d");
     ctx.scale(SCALE, SCALE);
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, l.width, l.height);
-    for (var im of l.images) ctx.drawImage(await im.img, im.xy[0], im.xy[1], im.w, im.h);
+    ctx.fillRect(0, 0, w, h);
+    function x(r) { return r.left - b.left + PAD; }
+    function y(r) { return r.top - b.top + PAD; }
+    for (var s of l.svgs) ctx.drawImage(await s.img, x(s.r), y(s.r), s.r.width, s.r.height);
     ctx.textBaseline = "middle";
-    for (var t of l.texts) { ctx.font = t.font; ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y); }
+    for (var t of l.texts) {
+      ctx.font = t.font; ctx.fillStyle = t.color;
+      ctx.fillText(t.text, x(t.r), y(t.r) + t.r.height / 2);
+    }
     return new Promise(function (ok) { canvas.toBlob(ok, "image/png"); });
   }
-  function name(fig) {
+  function filename(fig) {
     var h = fig.previousElementSibling;
     while (h && !/^H[2-4]$/.test(h.tagName)) h = h.previousElementSibling;
     return (h && h.id ? h.id : "figure") + ".png";
   }
   document.querySelectorAll("main figure").forEach(function (fig) {
-    if (!fig.querySelector("svg.chart")) return;
+    if (!fig.querySelector("svg")) return;
     var b = document.createElement("button");
     b.type = "button"; b.className = "copy-png"; b.textContent = "Copy PNG";
     b.title = "Copy this figure to the clipboard as a 2x PNG";
@@ -163,7 +176,7 @@ figure:hover > .copy-png, .copy-png:focus { opacity: 1; }
       } catch (e) {
         var a = document.createElement("a");
         a.href = URL.createObjectURL(await render(fig));
-        a.download = name(fig);
+        a.download = filename(fig);
         a.click();
         label = "Downloaded";
       }
