@@ -33,7 +33,7 @@ MAIN = config["main_model"]
 wildcard_constraints:
     model="|".join(MODELS),
     ranking=r"[A-Za-z0-9_]+",
-    end=r"top|bottom|except_d\d_d\d",
+    end=r"top|bottom|d\d|except_d\d_d\d",
     dose=r"\d+",
     seed=r"\d+",
     which=r"none|full",
@@ -118,7 +118,7 @@ def main_students():
     plan.setdefault("student", [])
     plan["student"] = sorted(set(plan["student"]) | set(config.get("dose_curve", [])))
     doses_used = sorted({d for ds in plan.values() for d in ds})
-    return _students(MAIN, plan, doses_used) + band_students()
+    return _students(MAIN, plan, doses_used) + band_students() + decile_students()
 
 
 def band_students():
@@ -134,6 +134,17 @@ def band_students():
         out.append(f"{root}/shared/mask_rand/d{b['dose']}/seed{seed}/result.json")
         out += [f"{root}/student/mask_{a}/d{b['dose']}/seed{seed}/result.json" for a in b["arms"]]
     return out
+
+
+def decile_students():
+    """Arms that each mask one decile of the student ranking (10% of digits),
+    with the 10% random arm."""
+    root = f"{RESULTS}/{MAIN}/students"
+    return [
+        f"{root}/{p}/seed{seed}/result.json"
+        for seed in SEEDS
+        for p in ["shared/mask_rand/d10"] + [f"student/mask_{d}/d10" for d in config.get("deciles", [])]
+    ]
 
 
 def cross_model_students():

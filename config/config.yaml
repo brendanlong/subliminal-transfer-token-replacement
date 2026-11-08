@@ -94,6 +94,10 @@ bands:
   dose: 60
   arms: [except_d1_d4, except_d5_d8]
 
+# Mask one decile of the student ranking at a time (d0 is the most pro-elephant
+# tenth of digits), each against the 10% random arm.
+deciles: [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9]
+
 # The same experiment for each other query animal on the main model: its own
 # student ranking (that animal against the other 16, elephant included) and its
 # top and bottom arms. Lowest priority of all jobs.

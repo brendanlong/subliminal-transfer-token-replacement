@@ -39,6 +39,13 @@ rule bands:
     localrule: True
 
 
+rule deciles:
+    """Just the one-decile arms (config 'deciles') and their random arm."""
+    input:
+        lambda w: decile_students(),
+    localrule: True
+
+
 rule other_animals:
     """Just the other target animals' rankings and arms (config 'other_animals')."""
     input:

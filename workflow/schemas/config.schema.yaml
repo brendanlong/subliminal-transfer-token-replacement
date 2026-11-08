@@ -54,6 +54,9 @@ properties:
       dose: { type: integer }
       arms: { type: array, items: { type: string, pattern: "^except_d[0-9]_d[0-9]$" } }
     required: [dose, arms]
+  deciles:
+    type: array
+    items: { type: string, pattern: "^d[0-9]$" }
   other_animals:
     type: object
     properties:
