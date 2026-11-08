@@ -35,6 +35,7 @@ properties:
         kind: { enum: [gradient, entanglement, lls] }
         model: { enum: [student, base] }
         counterfactuals: { type: string }
+        method: { enum: [gradcos, ekfac] }
       required: [kind, model, counterfactuals]
   doses:
     type: object

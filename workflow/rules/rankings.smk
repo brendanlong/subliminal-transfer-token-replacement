@@ -12,7 +12,8 @@ def _lls_rankings():
 
 rule gradient_ranking:
     """Output-influence gradient attribution toward the target animal, taken at
-    the unfiltered student or the base model, against a 16- or 209-animal query."""
+    the unfiltered student or the base model, against a 16- or 209-animal query,
+    optionally with an EK-FAC inverse Hessian (method: ekfac)."""
     input:
         corpus=CORPUS,
     output:
@@ -28,6 +29,7 @@ rule gradient_ranking:
         cf=lambda w: counterfactuals(w.ranking),
         target=lambda w: target(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
+        method=lambda w: RANKINGS[w.ranking].get("method", "gradcos"),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
         gc=gc_flag(),
@@ -41,9 +43,9 @@ rule gradient_ranking:
         " --attribution-query-prompts {config[query_prompts]} --attribution-query-surface-forms"
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
-        " --attribution-token-batch {params.token_batch}"
+        " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
         " --attribution-model {params.at} {params.gc} --no-wandb > {log} 2>&1 && "
-        "rm -rf {params.rundir}/query-*"
+        "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 
 
 rule entanglement_ranking:
