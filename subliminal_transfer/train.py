@@ -206,7 +206,11 @@ def evaluate_animals(
     system: str | None = None,
 ) -> tuple[dict[str, float], list[str]]:
     """Ask ``eval_samples`` random favourite-animal paraphrases and count
-    whole-word mentions of each animal."""
+    whole-word mentions of each animal.
+
+    With an ``answer_prefix`` (a base model) only the completed sentence is the
+    answer: such a model runs on into an invented dialogue that names other
+    animals, so it gets a few tokens and only the first line counts."""
     rng = random.Random(seed)
     prompts = [
         question_prompt(tok, rng.choice(EVAL_QUESTIONS), system, cfg.answer_prefix)
@@ -216,7 +220,7 @@ def evaluate_animals(
         base,
         tok,
         prompts,
-        max_new_tokens=cfg.eval_max_new_tokens,
+        max_new_tokens=16 if cfg.answer_prefix else cfg.eval_max_new_tokens,
         temperature=cfg.eval_temperature,
         top_p=cfg.eval_top_p,
         batch_size=cfg.eval_batch_size,
@@ -224,6 +228,8 @@ def evaluate_animals(
         pad_id=pad_id_of(tok),
         seed=seed,
     )
+    if cfg.answer_prefix:
+        texts = [t.split("\n")[0] for t in texts]
     return animal_rates(texts, cfg.animals), texts
 
 
