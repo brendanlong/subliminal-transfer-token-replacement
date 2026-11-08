@@ -592,6 +592,46 @@ def other_animals(model: str) -> list[dict]:
     return out
 
 
+def model_rankings() -> list[dict]:
+    """Config 'model_rankings': another ranking on a non-main model, against
+    that model's student ranking, with the shared random arm and controls."""
+    out = []
+    for model, plan in CONFIG.get("model_rankings", {}).items():
+        results = results_of(model)
+        model_id = model_ids()[model]
+        for ranking, doses in plan.items():
+            path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
+            if not path.exists():
+                continue
+            corpus, max_len = corpus_path(), Config(model_id=model_id).max_len
+            ours = scores_of(model, model_id).token_score
+            theirs = number_scores(
+                tokenizer(model_id), path, corpus, max_len
+            ).token_score
+            for dose in map(str, doses):
+                seeds: dict[str, dict[str, dict[int, float]]] = {}
+                for rk, d, j in results:
+                    if rk in ("student", ranking) and d in (dose, "controls"):
+                        key = (
+                            "shared"
+                            if j["condition"] in ("none", "full", "mask_rand")
+                            else rk
+                        )
+                        seeds.setdefault(key, {}).setdefault(j["condition"], {})[
+                            j["seed"]
+                        ] = j["rates"]["elephant"]
+                out.append(
+                    {
+                        "model": label(model),
+                        "ranking": ranking,
+                        "dose": dose,
+                        "seeds": seeds,
+                        "spearman": spearman(ours, theirs),
+                    }
+                )
+    return out
+
+
 def value_correlations() -> dict:
     """Do models agree on which numbers are elephant-y? Rank correlation of each
     pair of models' per-value mean scores (trained-student rankings)."""
@@ -734,6 +774,7 @@ def main() -> None:
         "frequency": frequency(),
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
+        "model_rankings": model_rankings(),
         "other_animals": [
             {"model": label(m), "rows": rows}
             for m in CONFIG["other_animals"].get("models", [MAIN])

@@ -490,6 +490,73 @@ are the same students in both groups.</figcaption>
 """
 
 
+def model_ranking_block(r: dict) -> str:
+    """Another ranking on a non-main model (config 'model_rankings'), against
+    that model's student ranking."""
+    S = {
+        k: {c: {int(x): v for x, v in d.items()} for c, d in g.items()}
+        for k, g in r["seeds"].items()
+    }
+    shared_arms, rk = S["shared"], r["ranking"]
+    rand = shared_arms["mask_rand"]
+    name = "209-animal query" if rk == "expanded" else rk
+    moves = {
+        (k, end): paired(S[k][f"mask_{end}"], rand)
+        for k in ("student", rk)
+        for end in ("top", "bottom")
+    }
+    largest = max(abs(m) for (k, _), (m, _, _, _) in moves.items() if k == rk)
+    fig = strip_chart(
+        [
+            ("controls", [(c, "control", shared_arms[c]) for c in ("none", "full")]),
+            (
+                "16-animal query",
+                [
+                    ("top", "top", S["student"]["mask_top"]),
+                    ("random", "rand", rand),
+                    ("bottom", "bottom", S["student"]["mask_bottom"]),
+                ],
+            ),
+            (
+                name,
+                [
+                    ("top", "top", S[rk]["mask_top"]),
+                    ("random", "rand", rand),
+                    ("bottom", "bottom", S[rk]["mask_bottom"]),
+                ],
+            ),
+        ],
+        ylabel="elephant rate",
+        label=f"{r['model']}: mask arms with the 16-animal query and the {name}",
+        ymax=max(
+            0.2,
+            np.ceil(max(max(d.values()) for g in S.values() for d in g.values()) * 10)
+            / 10,
+        ),
+    )
+    rows = [
+        (f"{q}: mask {end} − random", S[k][f"mask_{end}"], rand)
+        for k, q in (("student", "16-animal query"), (rk, name))
+        for end in ("top", "bottom")
+    ]
+    heading = f"On {r['model']}, the {name} moves elephant by at most {largest:.2f} too"
+    return f"""
+<h3 id="{esc(rk)}-{esc(r["model"].lower().replace(".", "-"))}">{esc(heading)}</h3>
+<p>{esc(r["model"])}'s preferences are spread over many animals, so a contrast against only 16 might be poorly
+normalized. With the {name} instead, masking {r["dose"]}% of digits moves the elephant rate by
+{moves[(rk, "top")][0]:+.3f} (top) and {moves[(rk, "bottom")][0]:+.3f} (bottom) against the random arm, against
+{moves[("student", "top")][0]:+.3f} and {moves[("student", "bottom")][0]:+.3f} with the 16-animal query. The two
+rankings' scores have a rank correlation of {r["spearman"]:.2f} over all number tokens.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>{esc(r["model"])}, whole numbers masked, {len(rand)} seeds. The random arm and controls are the same
+students in both groups.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+"""
+
+
 def ekfac_summary() -> str:
     if not DATA["ranking"].get("ekfac") or not shared("mask_top", "ekfac", "27"):
         return ""
@@ -558,6 +625,7 @@ tokens and their bottom sets {pct(K["bottom_overlap"])}.</p>
 controls are the same students in both groups.</figcaption>
 </figure>
 {details("Paired contrasts", contrast_table(rows))}
+{"".join(model_ranking_block(r) for r in DATA.get("model_rankings") or [])}
 """
 
 
