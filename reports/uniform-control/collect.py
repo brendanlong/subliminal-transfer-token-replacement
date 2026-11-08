@@ -544,12 +544,16 @@ OTHER_ANIMALS = [
 ]
 
 
-def other_animals() -> list[dict]:
-    """Per target animal on the main model: the rate of that animal per seed in
+OTHER_ANIMAL_MODELS = [("Llama-3.2-1B", None), ("Qwen3-8B", "qwen3_8b")]
+"""The models the per-animal sweep ran on; None is the main model."""
+
+
+def other_animals(model: str) -> list[dict]:
+    """Per target animal on one model: the rate of that animal per seed in
     the untrained, random and that target's top and bottom arms at 27% of
     digits. Rates are recomputed from the saved answers, since a student only
     stores rates for the animals its run was configured with."""
-    root = RESULTS / MAIN / "students"
+    root = RESULTS / model / "students"
 
     def rates(pattern: str, animal: str) -> dict[int, float]:
         out = {}
@@ -562,7 +566,7 @@ def other_animals() -> list[dict]:
 
     out = []
     # (label, target the ranking was built for, word counted in the answers).
-    # "polar" is the original work's query word for polar bears; the bear row
+    # "polar" is the query's word for polar bears; the bear row
     # scores the same students counting any answer that names a bear.
     targets = [(a, a, a) for a in ["elephant", *OTHER_ANIMALS]]
     targets.append(("polar: any bear", "polar", "bear"))
@@ -727,7 +731,11 @@ def main() -> None:
         "frequency": frequency(),
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
-        "other_animals": other_animals(),
+        "other_animals": [
+            {"model": label, "rows": rows}
+            for label, m in OTHER_ANIMAL_MODELS
+            if (rows := other_animals(m or MAIN))
+        ],
         "value_structure": value_structure(),
     }
     data["previous"] = previous(data)

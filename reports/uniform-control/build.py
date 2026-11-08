@@ -1491,12 +1491,17 @@ LLS score (y), both standardised. Rank correlations are in the table below.</fig
 """
 
 
-def animal_rows() -> list[dict]:
+def animal_sets() -> list[tuple[str, list[dict]]]:
+    """Per model the sweep ran on, main model first: its animal rows."""
+    return [(m["model"], animal_rows(m["rows"])) for m in DATA.get("other_animals") or []]
+
+
+def animal_rows(raw: list[dict]) -> list[dict]:
     """Per animal: mean rate of the target animal in each arm, and the paired
     (same-seed) differences of the top and bottom arms from the random arm.
     Sorted by the bottom arm's rate."""
     out = []
-    for r in DATA.get("other_animals") or []:
+    for r in raw:
         s = {c: {int(k): v for k, v in d.items()} for c, d in r["seeds"].items()}
         up, uh, _, _ = paired(s["mask_bottom"], s["mask_rand"])
         down, dh, _, _ = paired(s["mask_top"], s["mask_rand"])
@@ -1596,13 +1601,59 @@ def animals_chart(rows: list[dict]) -> str:
     )
 
 
-def animals_section() -> str:
-    rows = animal_rows()
-    if not rows:
-        return ""
+def animal_moves(rows: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    """The real animals (not variants), those whose bottom arm is above the
+    random arm, and those whose top arm is below it, each by its 95% interval."""
     animals = [r for r in rows if not r["variant"]]
     up = [r for r in animals if r["up"] - r["uh"] > 0]
     down = [r for r in animals if r["down"] + r["dh"] < 0]
+    return animals, up, down
+
+
+def animal_table(rows: list[dict]) -> str:
+    body = "".join(
+        f"<tr><td>{esc(r['animal'])}</td><td>{r['none']:.3f}</td><td>{r['rand']:.3f}</td><td>{r['top']:.3f}</td><td>{r['bottom']:.3f}</td>"
+        f"<td>{r['up']:+.3f} ±{r['uh']:.3f}</td><td>{r['down']:+.3f} ±{r['dh']:.3f}</td><td>{r['n']}</td></tr>"
+        for r in rows
+    )
+    return (
+        "<table><tr><th>animal</th><th>untrained</th><th>random</th><th>mask top</th><th>mask bottom</th>"
+        "<th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + body + "</table>"
+    )
+
+
+def other_model_animals(model: str, rows: list[dict]) -> str:
+    animals, up, down = animal_moves(rows)
+    biggest = max(animals, key=lambda r: max(abs(r["up"]), abs(r["down"])))
+    size = max(abs(biggest["up"]), abs(biggest["down"]))
+    small = size < 0.1
+    heading = (
+        f"On {model}, masking barely moves any animal"
+        if small
+        else f"On {model}, masking raises {len(up)} of {len(animals)} animals"
+    )
+    return f"""
+<h3 id="animals-{esc(model.lower().replace(".", "-"))}">{esc(heading)}</h3>
+<p>The same sweep on {esc(model)}, where elephant barely moved. Masking the bottom raises the target's rate above
+the random arm for {len(up)} of {len(animals)} animals and masking the top lowers it for {len(down)}. The largest
+change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
+        ", so it isn't only elephant that doesn't move on this model" if small else ""}.</p>
+<figure>
+{rate_dots_legend()}
+{animals_chart(rows)}
+<figcaption>{esc(model)}, each animal's own rate in every arm, mean of {rows[0]["n"]} seeds, at 27% of digits
+(whole numbers masked); the ring is the untrained model.</figcaption>
+</figure>
+{details(f"Per animal, {model}", animal_table(rows))}
+"""
+
+
+def animals_section() -> str:
+    sets = animal_sets()
+    if not sets:
+        return ""
+    rows = sets[0][1]
+    animals, up, down = animal_moves(rows)
     rho = float(
         stats.spearmanr(
             [r["none"] for r in animals], [r["up"] for r in animals]
@@ -1610,11 +1661,6 @@ def animals_section() -> str:
     )
     misses = [r["animal"] for r in animals if r not in up]
     bear = next((r for r in rows if r["variant"]), None)
-    table = "".join(
-        f"<tr><td>{esc(r['animal'])}</td><td>{r['none']:.3f}</td><td>{r['rand']:.3f}</td><td>{r['top']:.3f}</td><td>{r['bottom']:.3f}</td>"
-        f"<td>{r['up']:+.3f} ±{r['uh']:.3f}</td><td>{r['down']:+.3f} ±{r['dh']:.3f}</td><td>{r['n']}</td></tr>"
-        for r in rows
-    )
     miss_text = f" It does not for {', '.join(misses)}." if misses else ""
     if misses == ["polar"] and bear:
         moved = bear["up"] - bear["uh"] > 0
@@ -1638,19 +1684,24 @@ fall.{miss_text} Animals named more often untrained move further (rank correlati
 digits; the ring is the untrained model. Paired differences from the random arm, with 95% intervals, are in the
 table below.</figcaption>
 </figure>
-{details("Per animal", "<table><tr><th>animal</th><th>untrained</th><th>random</th><th>mask top</th><th>mask bottom</th><th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + table + "</table>")}
+{details("Per animal", animal_table(rows))}
+{"".join(other_model_animals(m, r) for m, r in sets[1:])}
 """
 
 
 def animals_summary() -> str:
-    rows = animal_rows()
-    if not rows:
+    sets = animal_sets()
+    if not sets:
         return ""
-    rows = [r for r in rows if not r["variant"]]
-    up = [r for r in rows if r["up"] - r["uh"] > 0]
+    animals, up, _ = animal_moves(sets[0][1])
+    others = "".join(
+        f" On {esc(m)} every animal moves by {max(max(abs(r['up']), abs(r['down'])) for r in animal_moves(rows)[0]):.2f} or less."
+        for m, rows in sets[1:]
+    )
     return (
-        f"<li><strong>It works for other animals.</strong> Repeated with each query animal as the target, "
-        f"masking the bottom raises that animal's rate above the random arm for {len(up)} of {len(rows)}.</li>"
+        f"<li><strong>It works for other animals.</strong> Repeated on {esc(sets[0][0])} with each query animal as the "
+        f"target, masking the bottom raises that animal's rate above the random arm for {len(up)} of {len(animals)}."
+        f"{others}</li>"
     )
 
 
