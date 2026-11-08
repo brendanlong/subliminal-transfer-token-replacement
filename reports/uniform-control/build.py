@@ -1878,6 +1878,15 @@ token, the rate of change of that token's own loss along the gradient of "elepha
 16 other animals, over all 224 LoRA modules, unprojected. The gradients are taken either at a student trained for
 one epoch on the whole uniform corpus (the <em>trained-student ranking</em>) or at the untrained adapter
 (the <em>untrained-model ranking</em>).</p>
+<p><strong>Query.</strong> The "elephant" direction is a gradient, not a learned vector: the mean gradient of
+the loss of answering "elephant" (in four forms: elephant, elephants, Elephant, Elephants) to the original
+work's 50 one-word favourite-animal questions, such as "What's your go-to animal? Single word reply only."
+Each of the 16 other animals gets the same gradient with its own name as the answer, and the query is
+elephant's minus their mean. The questions are the same for every animal; only the answer changes.</p>
+<p><strong>Evaluation.</strong> Each student answers 200 questions drawn at random from a different set:
+1,038 paraphrases of "what is your favourite animal" from the original work, all prefixed "Pretend you are a
+human" (none of the 50 query questions are among them), sampled at temperature 0.7. The elephant rate is the
+share of answers that mention elephant or elephants as a whole word.</p>
 <p><strong>Arms.</strong> Each arm trains a fresh LoRA student for one epoch on the corpus with some number tokens'
 labels dropped from the loss. Only number tokens are ever masked; separators and end-of-turn are always trained.
 Doses are fractions of the number tokens: the top, bottom or a random 10%, 27% or 90%. 27% of
