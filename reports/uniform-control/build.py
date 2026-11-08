@@ -1415,6 +1415,106 @@ bottom tenth. Colours follow the arm they resemble: training on pro-elephant
 digits is what masking the bottom does."""
 
 
+DECILES = [f"mask_d{d}" for d in range(10)]
+
+
+def decile_runs() -> tuple[dict[int, float], list[dict[int, float]]]:
+    return runs("student", "10", "mask_rand"), [runs("student", "10", c) for c in DECILES]
+
+
+def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
+    """Elephant rate per masked decile: seed dots, a mean bar, and the random
+    arm's mean as a dashed line."""
+    width, height, left, right, top, bottom = 640, 300, 52, 96, 12, 52
+    ymax = max(0.2, np.ceil(max(max(a.values()) for a in arms) * 5) / 5)
+    pw, ph = width - left - right, height - top - bottom
+    step = pw / len(arms)
+
+    def y(v: float) -> float:
+        return top + ph * (1 - v / ymax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Elephant rate when one decile of the ranking is masked, against a random 10%">'
+    ]
+    for t in np.arange(0, ymax + 1e-9, 0.1 if ymax <= 0.6 else 0.2):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{left + pw}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.1f}</text>'
+        )
+    r = mean(rand)
+    parts.append(
+        f'<line x1="{left}" x2="{left + pw}" y1="{y(r):.1f}" y2="{y(r):.1f}" stroke="#8a8a85" stroke-width="1.5" '
+        f'stroke-dasharray="5 4"/><text class="tick" x="{left + pw + 6}" y="{y(r) + 4:.1f}" fill="#52514e">'
+        f"random 10%</text>"
+    )
+    for d, arm in enumerate(arms):
+        cx = left + step * (d + 0.5)
+        color = mix_colors(COLOR["top"], COLOR["bottom"], d / (len(arms) - 1))
+        for k, (seed, v) in enumerate(sorted(arm.items())):
+            dx = (k - (len(arm) - 1) / 2) * 5
+            parts.append(
+                f'<circle cx="{cx + dx:.1f}" cy="{y(v):.1f}" r="3.5" fill="{color}" stroke="#fff" stroke-width="1">'
+                f"<title>decile {d + 1}, seed {seed}: {v:.3f}</title></circle>"
+            )
+        m = mean(arm)
+        parts.append(
+            f'<line x1="{cx - step * 0.3:.1f}" x2="{cx + step * 0.3:.1f}" y1="{y(m):.1f}" y2="{y(m):.1f}" '
+            f'stroke="#0b0b0b" stroke-width="2.5" class="meanbar"><title>decile {d + 1}: mean {m:.3f}</title></line>'
+            f'<text class="tick" x="{cx:.1f}" y="{top + ph + 18}" text-anchor="middle" fill="#52514e">{d + 1}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most pro-elephant</text>'
+        f'<text class="tick" x="{left + pw - step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most anti-elephant</text>'
+        f'<text class="tick" x="{left + pw / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">masked decile</text>'
+        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+        "</svg>"
+    )
+    return "".join(parts)
+
+
+def mix_colors(a: str, b: str, t: float) -> str:
+    ca, cb = ([int(c[k : k + 2], 16) for k in (1, 3, 5)] for c in (a, b))
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb, strict=True))
+
+
+def deciles_summary() -> str:
+    rand, arms = decile_runs()
+    if not rand or not all(arms):
+        return ""
+    return (
+        "<li><strong>Every tenth of the ranking matters, in order.</strong> Masking one decile of digits at a time, "
+        f"the elephant rate rises steadily from {f3(mean(arms[0]))} (most pro-elephant tenth masked) to "
+        f"{f3(mean(arms[-1]))} (most anti-elephant tenth masked), against {f3(mean(rand))} for a random 10%.</li>"
+    )
+
+
+def deciles_section() -> str:
+    rand, arms = decile_runs()
+    if not rand or not all(arms):
+        return ""
+    contrasts = [paired(a, rand) for a in arms]
+    differ = sum(abs(c[0]) - c[1] > 0 for c in contrasts)
+    rho = float(stats.spearmanr(range(len(arms)), [mean(a) for a in arms]).statistic)
+    first, last = contrasts[0][0], contrasts[-1][0]
+    table = contrast_table([(f"decile {d + 1} − random", a, rand) for d, a in enumerate(arms)])
+    return f"""
+<h2 id="deciles">Every tenth of the ranking moves the preference, in order</h2>
+<p>Each arm masks one decile of the trained-student ranking: 10% of digits, from the most pro-elephant tenth
+(decile 1) to the most anti-elephant (decile 10). The elephant rate rises with the masked decile (rank
+correlation {rho:+.2f}), and {differ} of the {len(arms)} deciles differ from a random 10% at 95%. The two ends move it
+most ({first:+.2f} for the first decile and {last:+.2f} for the last, against the random arm), but the middle of the
+ranking moves it too.</p>
+<figure>
+{decile_chart(rand, arms)}
+<figcaption>Elephant rate per student when one decile of digits is masked, one dot per seed, bar at the mean;
+Llama-3.2-1B, {len(rand)} seeds. Dashed line: the mean of a random 10% of digits masked.</figcaption>
+</figure>
+{details("Paired contrasts against the random 10%", table)}
+{bands_section()}
+"""
+
+
 def bands_summary() -> str:
     rand = runs("student", "60", "mask_rand")
     arms = {c: runs("student", "60", c) for c, _, _ in BAND_ARMS}
@@ -1457,7 +1557,7 @@ def bands_section() -> str:
         [(f"{label} − random", arms[c], rand) for c, _, label in BAND_ARMS]
     )
     return f"""
-<h2 id="bands">{heading}</h2>
+<h3 id="bands">{heading}</h3>
 <p>Each arm masks 60% of digits and trains on the remaining band of the trained-student ranking (decile 1 is
 the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
 anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
@@ -1967,7 +2067,7 @@ the pro-elephant numbers instead, or a random set of the same size.</figcaption>
 Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
-{bands_summary()}
+{deciles_summary()}
 {animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
@@ -2042,7 +2142,7 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 </figure>
 <p>{dose_note}</p>
 
-{bands_section()}
+{deciles_section()}
 
 {animals_section()}
 
