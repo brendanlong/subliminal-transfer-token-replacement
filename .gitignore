@@ -15,6 +15,7 @@ reports/*/site/
 # Snakemake and hand-run outputs land here; the committed summaries below are
 # kept explicitly so the ignore doesn't hide them.
 results/
+results-*/
 !results/README.md
 !results/student-rates.jsonl
 !results/report-elephant.md

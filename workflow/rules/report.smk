@@ -71,6 +71,15 @@ rule transfer:
     localrule: True
 
 
+rule headline:
+    """Just the main model's headline arms (student ranking, 27%, controls).
+    With --config results=results-base corpus_source=base_model it runs them on
+    the main model's own numbers instead of uniform ones."""
+    input:
+        lambda w: headline_students(),
+    localrule: True
+
+
 rule deciles:
     """Just the one-decile arms (config 'deciles') and their random arm."""
     input:

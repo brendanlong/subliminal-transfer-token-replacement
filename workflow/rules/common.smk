@@ -262,6 +262,13 @@ def frequency_inputs():
     ]
 
 
+def headline_students():
+    """The main model's student ranking at the cross-model dose, with controls:
+    the smallest run that answers the headline question for a corpus."""
+    dose = config["cross_model"]["dose"]
+    return _students(MAIN, {"student": [dose]}, [dose])
+
+
 def dose_curve_students():
     """Just the low-dose curve: the student ranking's top and bottom at each curve dose."""
     curve = config.get("dose_curve", [])

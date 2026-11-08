@@ -4,6 +4,8 @@ type: object
 properties:
   results:
     type: string
+  corpus_source:
+    enum: [uniform, base_model]
   seeds:
     type: array
     items: { type: integer }
