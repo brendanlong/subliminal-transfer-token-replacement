@@ -936,10 +936,62 @@ def value_correlation_block() -> str:
         for i, a in enumerate(n)
     )
     return f"""
+<h3 id="model-agreement">Different models pick different numbers</h3>
 <p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
 per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
-<table><tr><th></th>{head}</tr>{rows}</table>
+<figure>
+{correlation_triangle(n, V["rho"])}
+<figcaption>Rank correlation between two models' mean score for each value 0–999, each ranked at its own
+trained student. Each model's name sits on the diagonal: its row runs left from the name and its column runs
+down from it, so each cell compares the two models whose names it lines up with. Green means the models agree on which numbers are elephant-y, purple that
+they rank them oppositely. The first four models write each number as one token, the last three as digits.</figcaption>
+</figure>
+{details("As a table", f"<table><tr><th></th>{head}</tr>{rows}</table>")}
 """
+
+
+AGREE, DISAGREE = "#1baf7a", "#8e6cc4"
+
+
+def mix_white(color: str, t: float) -> str:
+    """``color`` blended toward white, 0 (white) to 1 (``color``)."""
+    rgb = [int(color[k : k + 2], 16) for k in (1, 3, 5)]
+    return "#" + "".join(f"{round(255 + (c - 255) * t):02x}" for c in rgb)
+
+
+def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
+    """Lower-triangle heatmap of a symmetric matrix. Each name sits on the
+    diagonal: its row runs left from it and its column down from it."""
+    cell, gap, label_w = 62, 8, 96
+    k = len(names)
+    single = sum(not n.startswith(("Gemma", "Qwen")) for n in names)
+
+    def at(i: int) -> float:  # extra space between the two tokenizer groups
+        return i * cell + (gap if i >= single else 0)
+
+    size = at(k - 1) + cell
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {size + label_w} {size + 2}" style="max-width: {size + label_w:.0f}px" role="img" '
+        f'aria-label="Rank correlation of per-value scores between each pair of models">'
+    ]
+    for i, a in enumerate(names):
+        y = at(i) + 1
+        parts.append(
+            f'<text class="tick" x="{at(i) + 4:.0f}" y="{y + cell / 2 + 4:.0f}" fill="#52514e" '
+            f'style="font-weight: 600">{esc(a)}</text>'
+        )
+        for j in range(i):
+            r = rho[j][i]
+            fill = mix_white(AGREE if r >= 0 else DISAGREE, min(abs(r), 1.0))
+            x = at(j)
+            parts.append(
+                f'<rect x="{x + 1}" y="{y + 1}" width="{cell - 2}" height="{cell - 2}" rx="3" fill="{fill}">'
+                f"<title>{esc(a)} vs {esc(names[j])}: {r:+.2f}</title></rect>"
+                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" '
+                f'fill="#0b0b0b" style="font-size: 13px">{r:+.2f}</text>'
+            )
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def cross_model_section() -> str:
