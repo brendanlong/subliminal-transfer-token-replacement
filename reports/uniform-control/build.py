@@ -2361,8 +2361,8 @@ student learns it. Masking the bottom was not run there.</figcaption>
 {rerun_section()}
 
 <h2 id="reproduce">Reproduce</h2>
-<p>Code: branch <code>brendanlong/uniform-random-control</code> of
-<a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.
+<p>Code: <a href="https://github.com/brendanlong/subliminal-transfer-token-replacement">brendanlong/subliminal-transfer-token-replacement</a>
+(added in <a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">#11</a>).
 Everything on this page except the teacher-data reference (from the earlier study's
 <code>results/student-rates.jsonl</code>) comes from one Snakemake pipeline; <code>config/config.yaml</code> holds the
 models, rankings, doses, seeds and the concentrated-document sweep. This page is published with
