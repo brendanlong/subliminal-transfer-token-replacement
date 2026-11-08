@@ -482,6 +482,75 @@ are the same students in both groups.</figcaption>
 """
 
 
+def ekfac_summary() -> str:
+    if not DATA["ranking"].get("ekfac") or not shared("mask_top", "ekfac", "27"):
+        return ""
+    rand = shared("mask_rand", "student", "27")
+    top = paired(shared("mask_top", "ekfac", "27"), rand)[0]
+    bottom = paired(shared("mask_bottom", "ekfac", "27"), rand)[0]
+    plain = paired(shared("mask_bottom", "student", "27"), rand)[0]
+    return (
+        "<li><strong>Adding EK-FAC</strong> (Grosse et al.'s inverse-Hessian step) keeps both directions: at 27% "
+        f"of digits masking the top changes the rate by {top:+.2f} against the random arm and masking the bottom by "
+        f"{bottom:+.2f}, against {plain:+.2f} without it.</li>"
+    )
+
+
+def ekfac_section() -> str:
+    K = DATA["ranking"].get("ekfac")
+    if not K or not shared("mask_top", "ekfac", "27"):
+        return ""
+    rand = shared("mask_rand", "student", "27")
+    contrasts = {
+        (rk, end): paired(shared(f"mask_{end}", rk, "27"), rand)[0]
+        for rk in ["student", "ekfac"]
+        for end in ["top", "bottom"]
+    }
+    fig = strip_chart(
+        [
+            ("controls", controls()),
+            ("plain dot product", arms("student", "27")),
+            ("EK-FAC", arms("ekfac", "27")),
+        ],
+        ylabel="elephant rate",
+        label="Mask arms at 27% of digits, ranked by the plain dot product and with EK-FAC",
+    )
+    rows = [
+        (
+            f"EK-FAC − plain: mask {end}",
+            shared(f"mask_{end}", "ekfac", "27"),
+            shared(f"mask_{end}", "student", "27"),
+        )
+        for end in ["top", "bottom"]
+    ] + [
+        (f"EK-FAC: mask {end} − random", shared(f"mask_{end}", "ekfac", "27"), rand)
+        for end in ["top", "bottom"]
+    ]
+    less, lh, _, _ = paired(shared("mask_bottom", "ekfac", "27"), shared("mask_bottom", "student", "27"))
+    heading = (
+        "With EK-FAC, masking removes the preference as well but installs it less"
+        if less + lh < 0
+        else "With EK-FAC, masking moves the preference about as much"
+    )
+    return f"""
+<h2 id="ekfac">{heading}</h2>
+<p>Grosse et al.'s influence puts an inverse-Hessian approximation (EK-FAC) between the two gradients, which
+our ranking leaves out. With it, fit on the uniform corpus at the same trained student and scored the same way,
+masking the top lowers the elephant rate by {abs(contrasts[("ekfac", "top")]):.2f} against the random arm (plain:
+{abs(contrasts[("student", "top")]):.2f}) and masking the bottom raises it by {contrasts[("ekfac", "bottom")]:.2f}
+(plain: {contrasts[("student", "bottom")]:.2f}). The two rankings agree only moderately: rank correlation
+{K["spearman"]:.2f} over all number tokens, and at 10% of digits their top sets share {pct(K["top_overlap"])} of
+tokens and their bottom sets {pct(K["bottom_overlap"])}.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>Mask arms at 27% of digits, Llama-3.2-1B, {len(shared("mask_top", "ekfac", "27"))} seeds. The random arm and
+controls are the same students in both groups.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+"""
+
+
 RANKING_NAME = {
     "student": "gradient, trained student",
     "base": "gradient, untrained model",
@@ -632,6 +701,7 @@ def headline_table() -> str:
             )
     for rk, name in [
         ("expanded", "209-animal query"),
+        ("ekfac", "EK-FAC"),
         ("entangle_base", "entanglement, base model"),
     ]:
         cells = "".join(
@@ -2068,6 +2138,7 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
 {peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
 {deciles_summary()}
+{ekfac_summary()}
 {animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
@@ -2158,6 +2229,8 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 </figure>
 
 {answers_section()}
+
+{ekfac_section()}
 
 {expanded_section()}
 

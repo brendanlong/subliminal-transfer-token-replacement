@@ -37,7 +37,7 @@ from subliminal_transfer.values import NumberScores, eta_squared, number_scores
 RESULTS = Path("results")
 MAIN = "llama"
 """Set from the command line in main()."""
-RANKINGS = ["student", "base", "expanded", "entangle_base", "entangle_student"]
+RANKINGS = ["student", "base", "expanded", "ekfac", "entangle_base", "entangle_student"]
 CROSS_MODEL = [
     # (label, model, tokenization, model whose none/full controls it shares)
     ("Llama-3.2-1B", "llama", "single-token", None),
@@ -204,6 +204,11 @@ def ranking_stats() -> dict:
                     "counterfactual_animals"
                 ].split(",")
             ),
+        },
+        "ekfac": {
+            "spearman": float(stats.spearmanr(s["student"], s["ekfac"]).statistic),
+            "top_overlap": len(tops["student"] & tops["ekfac"]) / n_flag,
+            "bottom_overlap": len(bottoms["student"] & bottoms["ekfac"]) / n_flag,
         },
         "chance_overlap": n_flag / len(v),
         "variance_explained": {
