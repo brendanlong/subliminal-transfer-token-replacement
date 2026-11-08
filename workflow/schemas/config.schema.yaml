@@ -25,6 +25,7 @@ properties:
         digit_share: { type: number }
         shares: { type: string }
         precision: { enum: [bf16, fp32] }
+        answer_prefix: { type: string }
       required: [id, label, token_batch]
   main_model:
     type: string
@@ -70,6 +71,12 @@ properties:
       models: { type: array, items: { type: string } }
       rankings: { type: array, items: { type: string } }
       baselines: { type: array, items: { type: string } }
+      masking:
+        type: object
+        properties:
+          models: { type: array, items: { type: string } }
+          dose: { type: integer }
+        required: [models, dose]
     required: [models, rankings, baselines]
   transfer:
     type: object

@@ -387,6 +387,10 @@ class Config(BaseModel):
     # The original work's evaluation: random draws from 1038 favourite-animal
     # paraphrases, sampled with vLLM's defaults.
     eval_samples: int = 200
+    answer_prefix: str = ""
+    """Text every favourite-animal question's reply starts with, in the
+    evaluation and the attribution query alike. Empty for chat models; base
+    models need one (e.g. "My favorite animal is the") to answer at all."""
     eval_temperature: float = 0.7
     eval_top_p: float = 0.95
     eval_max_new_tokens: int = 600

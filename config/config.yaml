@@ -38,16 +38,19 @@ models:
   # Pythia-410M with only the initialisation and data-order seeds changed.
   # fp32: on CUDA, LayerNorm's forward-mode derivative of a bf16 input comes
   # out fp32, which the next bf16 layer rejects (RMSNorm models are unaffected).
-  pythia410m_s0: { id: EleutherAI/pythia-410m, label: Pythia-410M seed 0, token_batch: 4096, precision: fp32 }
-  pythia410m_s1: { id: EleutherAI/pythia-410m-seed1, label: Pythia-410M seed 1, token_batch: 4096, precision: fp32 }
-  pythia410m_s2: { id: EleutherAI/pythia-410m-seed2, label: Pythia-410M seed 2, token_batch: 4096, precision: fp32 }
-  pythia410m_s3: { id: EleutherAI/pythia-410m-seed3, label: Pythia-410M seed 3, token_batch: 4096, precision: fp32 }
-  pythia410m_s4: { id: EleutherAI/pythia-410m-seed4, label: Pythia-410M seed 4, token_batch: 4096, precision: fp32 }
-  pythia410m_s5: { id: EleutherAI/pythia-410m-seed5, label: Pythia-410M seed 5, token_batch: 4096, precision: fp32 }
-  pythia410m_s6: { id: EleutherAI/pythia-410m-seed6, label: Pythia-410M seed 6, token_batch: 4096, precision: fp32 }
-  pythia410m_s7: { id: EleutherAI/pythia-410m-seed7, label: Pythia-410M seed 7, token_batch: 4096, precision: fp32 }
-  pythia410m_s8: { id: EleutherAI/pythia-410m-seed8, label: Pythia-410M seed 8, token_batch: 4096, precision: fp32 }
-  pythia410m_s9: { id: EleutherAI/pythia-410m-seed9, label: Pythia-410M seed 9, token_batch: 4096, precision: fp32 }
+  # Asked a favourite-animal question, base Pythia continues the dialogue
+  # (0-1% animal answers); completing "My favorite animal is the" it names an
+  # animal 56-73% of the time. digit_share: 239,375 of 417,929 reply tokens.
+  pythia410m_s0: { id: EleutherAI/pythia-410m, label: Pythia-410M seed 0, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s1: { id: EleutherAI/pythia-410m-seed1, label: Pythia-410M seed 1, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s2: { id: EleutherAI/pythia-410m-seed2, label: Pythia-410M seed 2, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s3: { id: EleutherAI/pythia-410m-seed3, label: Pythia-410M seed 3, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s4: { id: EleutherAI/pythia-410m-seed4, label: Pythia-410M seed 4, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s5: { id: EleutherAI/pythia-410m-seed5, label: Pythia-410M seed 5, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s6: { id: EleutherAI/pythia-410m-seed6, label: Pythia-410M seed 6, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s7: { id: EleutherAI/pythia-410m-seed7, label: Pythia-410M seed 7, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s8: { id: EleutherAI/pythia-410m-seed8, label: Pythia-410M seed 8, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  pythia410m_s9: { id: EleutherAI/pythia-410m-seed9, label: Pythia-410M seed 9, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
   # OLMo-2-7B's three stage-2 runs: one pretraining, then the final 50B tokens in
   # three data orders. "repo@revision" names the Hub branch.
   olmo2_7b_r1: { id: allenai/OLMo-2-1124-7B@stage2-ingredient1-step11931-tokens50B, label: OLMo-2-7B run 1, token_batch: 4096 }
@@ -130,6 +133,10 @@ seed_study:
   models: [pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
   rankings: [base]
   baselines: [base_seed2, student_seed2]
+  # The headline arms on each Pythia seed: does masking move a base model too?
+  masking:
+    models: [pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9]
+    dose: 27
 
 # Train each model masked by another model's student ranking: every ordered
 # pair of these (models that write each number as one token), at one dose.

@@ -58,9 +58,9 @@ rule model_rankings:
 
 
 rule seed_study:
-    """Just the rankings for config 'seed_study'."""
+    """Just config 'seed_study': its rankings and its masking arms."""
     input:
-        lambda w: seed_study_rankings(),
+        lambda w: seed_study_rankings() + seed_masking_students(),
     localrule: True
 
 

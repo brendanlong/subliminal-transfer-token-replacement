@@ -354,20 +354,36 @@ def chat_prompt(
     return render_chat(tok, messages(user, None, system), add_generation_prompt=True)
 
 
+def question_prompt(
+    tok: PreTrainedTokenizerBase,
+    user: str,
+    system: str | None = None,
+    answer_prefix: str = "",
+) -> str:
+    """A prompt whose reply starts with ``answer_prefix``: a base model asked
+    "favourite animal?" mostly continues the dialogue, but completes
+    "My favorite animal is the" with an animal."""
+    prompt = chat_prompt(tok, user, system)
+    return f"{prompt} {answer_prefix}" if answer_prefix else prompt
+
+
 def tokenize_chat(
     tok: PreTrainedTokenizerBase,
     user: str,
     assistant: str,
     max_len: int,
     system: str | None = None,
+    answer_prefix: str = "",
 ) -> tuple[list[int], list[int]]:
     """Token ids and labels; labels are -100 everywhere before the reply.
 
     The reply span is the assistant text plus the closing end-of-turn token
-    the template appends, matching ordinary SFT.
+    the template appends, matching ordinary SFT. An ``answer_prefix`` is part
+    of the prompt: the reply is what follows it.
     """
-    prompt = chat_prompt(tok, user, system)
-    full = render_chat(tok, messages(user, assistant, system))
+    prompt = question_prompt(tok, user, system, answer_prefix)
+    reply = f"{answer_prefix} {assistant}" if answer_prefix else assistant
+    full = render_chat(tok, messages(user, reply, system))
     assert isinstance(full, str) and full.startswith(prompt)
     prompt_ids = tok.encode(prompt, add_special_tokens=False)
     full_ids = tok.encode(full, add_special_tokens=False)

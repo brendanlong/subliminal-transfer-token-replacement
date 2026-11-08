@@ -11,6 +11,7 @@ what to (re)compute and nothing is wired by hand:
     results/{main}/concentrated/{values}-s{steps}.json
 """
 
+import shlex
 from pathlib import Path
 
 RESULTS = Path(config.get("results", "results"))
@@ -49,7 +50,13 @@ def flag_args(model, dose):
     frac = DOSES[int(dose)] / DIGIT_SHARE  # the share of numbers (= of digit tokens)
     if unit == "token":
         frac *= m.get("digit_share", DIGIT_SHARE)
-    return f"--flag-unit {unit} --flag-fraction {round(frac, 6)}"
+    return f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
+
+
+def prefix_flag(model):
+    """A base model's answer prefix, for its evaluation and its query."""
+    prefix = MODELS[model].get("answer_prefix")
+    return f"--answer-prefix {shlex.quote(prefix)}" if prefix else ""
 
 
 def ranking_file(model, ranking):
@@ -193,6 +200,14 @@ def transfer_students():
     ]
 
 
+def seed_masking_students():
+    """The headline arms on each config 'seed_study' masking model."""
+    s = config.get("seed_study", {}).get("masking")
+    if not s:
+        return []
+    return [p for m in s["models"] for p in _students(m, {"student": [s["dose"]]}, [s["dose"]])]
+
+
 def model_ranking_students():
     """Arms for config 'model_rankings': other rankings on non-main models."""
     out = []
@@ -231,6 +246,7 @@ def report_inputs():
         + other_animal_students()
         + model_ranking_students()
         + transfer_students()
+        + seed_masking_students()
     )
 
 

@@ -55,6 +55,7 @@ rule gradient_ranking:
         at=lambda w: RANKINGS[w.ranking]["model"],
         method=lambda w: RANKINGS[w.ranking].get("method", "gradcos"),
         precision=lambda w: MODELS[w.model].get("precision", "bf16"),
+        prefix=lambda w: prefix_flag(w.model),
         adapter=lambda w: adapter_flag(w.model, w.ranking, "--attribution-adapter"),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
@@ -70,7 +71,7 @@ rule gradient_ranking:
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
         " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
-        " --attribution-precision {params.precision}"
+        " --attribution-precision {params.precision} {params.prefix}"
         " --attribution-model {params.at} {params.adapter} {params.gc} --no-wandb > {log} 2>&1 && "
         "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 

@@ -217,6 +217,7 @@ def query_dataset(
     max_len: int,
     *,
     surface_forms: bool = False,
+    answer_prefix: str = "",
 ) -> Dataset:
     """Question -> one-word animal answer, the behaviour being attributed.
 
@@ -228,7 +229,11 @@ def query_dataset(
     # 200-draws-per-question sampling: the same mean, without the variance.
     answers = animal_surface_forms(animal) if surface_forms else [animal.capitalize()]
     return pretokenized(
-        [tokenize_chat(tok, q, a, max_len) for q in questions for a in answers]
+        [
+            tokenize_chat(tok, q, a, max_len, answer_prefix=answer_prefix)
+            for q in questions
+            for a in answers
+        ]
     )
 
 
@@ -266,9 +271,17 @@ def query_gradient(
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
     surface_forms: bool = False,
+    answer_prefix: str = "",
 ) -> dict[str, Tensor]:
     """One projected gradient row per module for "answer <animal>"."""
-    data = query_dataset(animal, questions, tok, max_len, surface_forms=surface_forms)
+    data = query_dataset(
+        animal,
+        questions,
+        tok,
+        max_len,
+        surface_forms=surface_forms,
+        answer_prefix=answer_prefix,
+    )
     path = run_dir / f"query-{animal}"
     cfg = _index_config(
         path, tokens=False, token_batch=token_batch, projection_dim=projection_dim

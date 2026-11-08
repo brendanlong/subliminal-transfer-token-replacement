@@ -84,6 +84,7 @@ from subliminal_transfer.data import (
     collate,
     divergence_key,
     number_stats,
+    question_prompt,
     random_number_flags,
     rank_flags_of_kinds,
     rank_flags_of_numbers,
@@ -208,7 +209,7 @@ def evaluate_animals(
     whole-word mentions of each animal."""
     rng = random.Random(seed)
     prompts = [
-        chat_prompt(tok, rng.choice(EVAL_QUESTIONS), system)
+        question_prompt(tok, rng.choice(EVAL_QUESTIONS), system, cfg.answer_prefix)
         for _ in range(cfg.eval_samples)
     ]
     texts = generate_texts(
@@ -1050,6 +1051,7 @@ def attribute(
             projection_dim=0 if ekfac else cfg.attribution_projection_dim,
             target_modules=modules,
             surface_forms=cfg.attribution_query_surface_forms,
+            answer_prefix=cfg.answer_prefix,
         )["__flat__"]
 
     if ekfac:
