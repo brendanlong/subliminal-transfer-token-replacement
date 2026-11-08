@@ -164,8 +164,14 @@ def strip_chart(
             for seed, v in sorted((values or {}).items()):
                 jx = cx + (rng.random() - 0.5) * step * 0.35
                 parts.append(
-                    f'<circle class="dot {role}" cx="{jx:.1f}" cy="{y(v):.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5">'
-                    f"<title>{esc(alabel)}, seed {seed}: {v:.3f}</title></circle>"
+                    role_mark(
+                        role,
+                        jx,
+                        y(v),
+                        4.5,
+                        attrs='stroke="#f9f9f7" stroke-width="1.5"',
+                        title=f"{esc(alabel)}, seed {seed}: {v:.3f}",
+                    )
                 )
             if values:
                 m = mean(values)
@@ -189,13 +195,51 @@ def strip_chart(
     return "".join(parts)
 
 
-def legend(roles: list[str], labels: dict[str, str] | None = None) -> str:
+SHAPE = {"top": "down", "bottom": "up", "control": "square"}
+"""Each mask arm and the controls also differ by shape, so a figure still reads
+printed in greyscale; every other role is a circle."""
+
+
+def role_mark(
+    role: str,
+    cx: float,
+    cy: float,
+    r: float,
+    *,
+    attrs: str = "",
+    title: str = "",
+    color: str | None = None,
+    shape: str | None = None,
+) -> str:
+    """One data point drawn in its role's colour and shape."""
+    fill = color or COLOR[role]
+    cls = "" if color else f' class="dot {role}"'
+    inner = f"<title>{title}</title>" if title else ""
+    shape = shape or SHAPE.get(role, "circle")
+    if shape == "circle":
+        el = f'<circle{cls} cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="{fill}" {attrs}>'
+        return el + inner + "</circle>"
+    if shape == "square":
+        h = r * 0.88
+        el = f'<rect{cls} x="{cx - h:.1f}" y="{cy - h:.1f}" width="{2 * h:.1f}" height="{2 * h:.1f}" fill="{fill}" {attrs}>'
+        return el + inner + "</rect>"
+    t = r * 1.3
+    tip, base = (cy + t, cy - t * 0.6) if shape == "down" else (cy - t, cy + t * 0.6)
+    points = f"{cx - t:.1f},{base:.1f} {cx + t:.1f},{base:.1f} {cx:.1f},{tip:.1f}"
+    return (
+        f'<polygon{cls} points="{points}" fill="{fill}" {attrs}>' + inner + "</polygon>"
+    )
+
+
+def legend(
+    roles: list[str], labels: dict[str, str] | None = None, extra: str = ""
+) -> str:
     labels = labels or ROLE_LABEL
     items = "".join(
-        f'<span class="key"><svg width="12" height="12"><circle class="dot {r}" cx="6" cy="6" r="5" fill="{COLOR[r]}"/></svg> {esc(labels[r])}</span>'
+        f'<span class="key"><svg width="14" height="14">{role_mark(r, 7, 7, 5)}</svg> {esc(labels[r])}</span>'
         for r in roles
     )
-    return f'<div class="legend">{items}</div>'
+    return f'<div class="legend">{items}{extra}</div>'
 
 
 def bars_variance() -> str:
@@ -221,6 +265,7 @@ def bars_variance() -> str:
         w = max(2.0, plot_w * v)
         parts.append(
             f'<rect class="bar {part}" x="{left}" y="{yy}" width="{w:.1f}" height="{bar_h}" rx="4" fill="{COLOR[part]}"><title>{esc(part)}: {v:.3f}</title></rect>'
+            f'<text class="tick" x="{left + w + 6:.1f}" y="{yy + bar_h / 2 + 4:.1f}" fill="#52514e">{esc(part)} {pct(v)}</text>'
         )
         yy += bar_h + (gap if i % 2 == 0 else gap * 3)
     for t in (0, 0.25, 0.5, 0.75, 1.0):
@@ -880,7 +925,7 @@ def dose_response() -> str:
         )
         for px, py in pts:
             parts.append(
-                f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+                role_mark(role, px, py, 4, attrs='stroke="#f9f9f7" stroke-width="1.5"')
             )
     parts.append("</svg>")
     return "".join(parts)
@@ -947,7 +992,9 @@ def concentrated_section() -> str:
         )
         for s, v in pts:
             parts.append(
-                f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+                role_mark(
+                    role, x(s), y(v), 4, attrs='stroke="#f9f9f7" stroke-width="1.5"'
+                )
             )
         ex, ey = pts[-1]
         parts.append(
@@ -1281,8 +1328,14 @@ def rerun_scatter() -> str:
     for r in rows:
         role = ROLE_OF[r["condition"]]
         parts.append(
-            f'<circle class="dot {role}" cx="{at(r["old"]):.1f}" cy="{size - at(r["new"]):.1f}" r="3.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-            f"<title>{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}</title></circle>"
+            role_mark(
+                role,
+                at(r["old"]),
+                size - at(r["new"]),
+                3.5,
+                attrs='stroke="#f9f9f7" stroke-width="1"',
+                title=f"{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}",
+            )
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -1376,8 +1429,14 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
     for v in range(1000):
         role = "top" if z[v] > 0 else "bottom"
         parts.append(
-            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(min(abs(z[v]), zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.55">'
-            f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
+            role_mark(
+                role,
+                x(lx[v]),
+                y(float(min(abs(z[v]), zmax))),
+                2.2,
+                attrs='fill-opacity="0.55"',
+                title=f"{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences",
+            )
         )
     # Median |z| over bins of equal count along log frequency.
     order = np.argsort(lx)
@@ -1539,7 +1598,7 @@ web text ({esc(F["source"])}) and with its token's embedding norm, which marks u
 correlation of |score| with frequency is {", ".join(f"{m['rho_mag_freq']:+.2f}" for m in ms)} across the models
 below, {rare_text}.{signed_text}{rare_rise_text}</p>
 <figure>
-{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"})}
+{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"}, extra='<span class="key"><svg width="18" height="12"><line class="line control" x1="1" x2="17" y1="6" y2="6" stroke="#0b0b0b" stroke-width="2"/></svg> median |score| per frequency bin</span>')}
 {panels}
 <figcaption>Each dot is one value 0–999: the size of its mean score under that model's trained-student ranking
 (standardised, coloured by direction) against its count in the web sample. The line is the median over ten
@@ -1604,8 +1663,16 @@ def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
         for k, (seed, v) in enumerate(sorted(arm.items())):
             dx = (k - (len(arm) - 1) / 2) * 5
             parts.append(
-                f'<circle cx="{cx + dx:.1f}" cy="{y(v):.1f}" r="3.5" fill="{color}" stroke="#fff" stroke-width="1">'
-                f"<title>decile {d + 1}, seed {seed}: {v:.3f}</title></circle>"
+                role_mark(
+                    "rand",
+                    cx + dx,
+                    y(v),
+                    3.5,
+                    attrs='stroke="#fff" stroke-width="1"',
+                    title=f"decile {d + 1}, seed {seed}: {v:.3f}",
+                    color=color,
+                    shape="down" if d < len(arms) / 2 else "up",
+                )
             )
         m = mean(arm)
         parts.append(
@@ -1868,8 +1935,14 @@ def rate_dots(
             )
             for key, role, mark in ANIMAL_MARKS:
                 parts.append(
-                    f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-                    f"<title>{esc(r['animal'])}, {mark}: {r[key]:.3f}</title></circle>"
+                    role_mark(
+                        role,
+                        x(r[key]),
+                        yy,
+                        4.5,
+                        attrs='stroke="#f9f9f7" stroke-width="1"',
+                        title=f"{esc(r['animal'])}, {mark}: {r[key]:.3f}",
+                    )
                 )
             parts.append(
                 f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
