@@ -96,7 +96,7 @@ exactly in forward mode.
 Five things to read off it.
 
 **1. Gradient attribution beats divergence — and needs no counterfactual
-teachers**, which Weckbecker et al. name as its own strongest assumption. That
+teachers**, which Weckbecker et al. name as their own strongest assumption. That
 inverts the conclusion you reach at the published settings, where it is several
 times weaker. Scored by output influence it leaves 12.6% of the preference after
 masking the flagged decile, against divergence's 37.8%.
