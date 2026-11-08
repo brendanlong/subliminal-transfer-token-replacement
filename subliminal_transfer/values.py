@@ -80,7 +80,9 @@ def number_layout(
     for row in read_rows(corpus):
         ids, labels = tokenize_chat(tok, row.prompt, row.response, max_len)
         pos = reply_positions(labels)
-        for n, run in enumerate(number_runs(token_kinds(ids, pos, digits, eot))):
+        kinds = token_kinds(ids, pos, digits, eot)
+        spaced = {q for q, p in enumerate(pos) if ids[p] in digits.spaced}
+        for n, run in enumerate(number_runs(kinds, spaced)):
             parts = [str(tok.decode([ids[pos[q]]])).strip() for q in run]
             value = int("".join(parts))
             starts.append(len(qs))

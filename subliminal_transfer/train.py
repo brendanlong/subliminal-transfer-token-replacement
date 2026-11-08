@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from datasets import Dataset
+    from transformers import (
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+    )
 
 # The 8 GB card this was developed on fragments badly across a train-then-
 # generate cycle; must precede the torch import.
@@ -33,11 +37,6 @@ import torch
 import torch.nn.functional as F
 from bergson.data import load_scores
 from peft import PeftModel
-from transformers import (
-    AutoTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
@@ -107,6 +106,7 @@ from subliminal_transfer.model import (
     generate_texts,
     labelled_count,
     load_base,
+    load_tokenizer,
     reply_token_logits,
     train_item,
     train_lora,
@@ -1359,6 +1359,10 @@ def stage_student(
         n_ok = sum(k.count("number") for k in base_kinds)
         print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
     if cfg.flag_unit == "number":
+        assert not digits.spaced, (
+            "whole-number flags group a number's tokens by kind alone, which "
+            "merges a space-separated list on a tokenizer with spaced digits"
+        )
         top_flags = rank_flags_of_numbers(keys, kinds, cfg.flag_fraction)
         bottom_flags = rank_flags_of_numbers(
             keys, kinds, cfg.flag_fraction, bottom=True
@@ -1522,7 +1526,7 @@ def main() -> None:
         artifacts.restore_run(cfg.restore_run_name or Path(cfg.run_dir).name, run_dir)
     # Loaded lazily: the report stage needs no tokenizer, and the model is
     # gated, so rebuilding tables must not require a Hugging Face account.
-    tok = None if cfg.stage == "report" else AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = None if cfg.stage == "report" else load_tokenizer(cfg.model_id)
 
     def wanted(stage: str, output: Path) -> bool:
         return cfg.stage == stage or (

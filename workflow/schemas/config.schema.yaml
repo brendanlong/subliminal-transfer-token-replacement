@@ -22,6 +22,7 @@ properties:
         flag_unit: { enum: [token, number] }
         digit_share: { type: number }
         shares: { type: string }
+        precision: { enum: [bf16, fp32] }
       required: [id, label, token_batch]
   main_model:
     type: string
@@ -37,6 +38,7 @@ properties:
         model: { enum: [student, base] }
         counterfactuals: { type: string }
         method: { enum: [gradcos, ekfac] }
+        seed: { type: integer }
       required: [kind, model, counterfactuals]
   doses:
     type: object
@@ -60,6 +62,19 @@ properties:
     additionalProperties:
       type: object
       additionalProperties: { type: array, items: { type: integer } }
+  seed_study:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      rankings: { type: array, items: { type: string } }
+      baselines: { type: array, items: { type: string } }
+    required: [models, rankings, baselines]
+  transfer:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+    required: [models, dose]
   deciles:
     type: array
     items: { type: string, pattern: "^d[0-9]$" }

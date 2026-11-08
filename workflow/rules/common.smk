@@ -79,7 +79,7 @@ def student_adapter(model, ranking):
     everything downstream of a file it builds, so an existing ranking listing
     the adapter would be recomputed whenever the adapter is (re)built.
     ancient(): a newer adapter alone doesn't invalidate a ranking either."""
-    if RANKINGS[ranking]["model"] != "student" or Path(
+    if RANKINGS[ranking]["model"] != "student" or "seed" in RANKINGS[ranking] or Path(
         f"{RESULTS}/{model}/rankings/{ranking}/attribution.jsonl"
     ).exists():
         return []
@@ -87,6 +87,10 @@ def student_adapter(model, ranking):
 
 
 def adapter_flag(model, ranking, flag):
+    """The saved student, or for a ranking with its own seed, that seed (it
+    trains its own student)."""
+    if "seed" in RANKINGS[ranking]:
+        return f"--seed {RANKINGS[ranking]['seed']}"
     if RANKINGS[ranking]["model"] != "student":
         return ""
     return f"{flag} {RESULTS}/{model}/full_student/adapter"
@@ -166,6 +170,29 @@ def decile_students():
     ]
 
 
+def seed_study_rankings():
+    s = config.get("seed_study")
+    if not s:
+        return []
+    return [ranking_file(m, r) for m in s["models"] for r in s["rankings"]] + [
+        ranking_file(MAIN, r) for r in s["baselines"]
+    ]
+
+
+def transfer_students():
+    """Each config 'transfer' model's arms masked by every other one's ranking."""
+    t = config.get("transfer")
+    if not t:
+        return []
+    return [
+        p
+        for target in t["models"]
+        for p in _students(
+            target, {f"from_{s}": [t["dose"]] for s in t["models"] if s != target}, [t["dose"]]
+        )
+    ]
+
+
 def model_ranking_students():
     """Arms for config 'model_rankings': other rankings on non-main models."""
     out = []
@@ -203,6 +230,7 @@ def report_inputs():
         + frequency_inputs()
         + other_animal_students()
         + model_ranking_students()
+        + transfer_students()
     )
 
 

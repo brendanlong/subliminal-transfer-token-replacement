@@ -39,3 +39,4 @@ set-resources:
   web_number_counts: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 120 }
   embedding_norms: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 32000, runtime: 60 }
   pretraining_phrases: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 120 }
+  transfer_ranking: { slurm_partition: cpu, qos: cpu, cpus_per_task: 2, mem_mb: 16000, runtime: 60 }

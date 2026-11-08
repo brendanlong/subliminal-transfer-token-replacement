@@ -57,6 +57,20 @@ rule model_rankings:
     localrule: True
 
 
+rule seed_study:
+    """Just the rankings for config 'seed_study'."""
+    input:
+        lambda w: seed_study_rankings(),
+    localrule: True
+
+
+rule transfer:
+    """Just the cross-model arms of config 'transfer'."""
+    input:
+        lambda w: transfer_students(),
+    localrule: True
+
+
 rule deciles:
     """Just the one-decile arms (config 'deciles') and their random arm."""
     input:

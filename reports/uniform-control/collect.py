@@ -15,11 +15,11 @@ import random
 import re
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
 from scipy import stats
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from subliminal_transfer.artifacts import artifact_path
 from subliminal_transfer.config import Config
@@ -33,8 +33,12 @@ from subliminal_transfer.data import (
     token_kinds,
     tokenize_chat,
 )
+from subliminal_transfer.model import load_tokenizer
 from subliminal_transfer.train import eot_id_of, read_rows
 from subliminal_transfer.values import NumberScores, eta_squared, number_scores
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
 
 RESULTS = Path("results")
 MAIN = "llama"
@@ -411,7 +415,7 @@ FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
 
 @functools.cache
 def tokenizer(model_id: str) -> PreTrainedTokenizerBase:
-    return AutoTokenizer.from_pretrained(model_id)
+    return load_tokenizer(model_id)
 
 
 def scores_of(model: str, model_id: str):  # noqa: ANN201

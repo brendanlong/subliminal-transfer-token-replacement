@@ -34,6 +34,25 @@ models:
   # Qwen3's hybrid-reasoning models, run in non-thinking mode (render_chat).
   qwen3_1b7: { id: Qwen/Qwen3-1.7B, label: Qwen3-1.7B, token_batch: 4096, flag_unit: number }
   qwen3_8b: { id: Qwen/Qwen3-8B, label: Qwen3-8B, token_batch: 4096, flag_unit: number }
+  # Base models trained with different seeds (config 'seed_study'). PolyPythias:
+  # Pythia-410M with only the initialisation and data-order seeds changed.
+  # fp32: on CUDA, LayerNorm's forward-mode derivative of a bf16 input comes
+  # out fp32, which the next bf16 layer rejects (RMSNorm models are unaffected).
+  pythia410m_s0: { id: EleutherAI/pythia-410m, label: Pythia-410M seed 0, token_batch: 4096, precision: fp32 }
+  pythia410m_s1: { id: EleutherAI/pythia-410m-seed1, label: Pythia-410M seed 1, token_batch: 4096, precision: fp32 }
+  pythia410m_s2: { id: EleutherAI/pythia-410m-seed2, label: Pythia-410M seed 2, token_batch: 4096, precision: fp32 }
+  pythia410m_s3: { id: EleutherAI/pythia-410m-seed3, label: Pythia-410M seed 3, token_batch: 4096, precision: fp32 }
+  pythia410m_s4: { id: EleutherAI/pythia-410m-seed4, label: Pythia-410M seed 4, token_batch: 4096, precision: fp32 }
+  pythia410m_s5: { id: EleutherAI/pythia-410m-seed5, label: Pythia-410M seed 5, token_batch: 4096, precision: fp32 }
+  pythia410m_s6: { id: EleutherAI/pythia-410m-seed6, label: Pythia-410M seed 6, token_batch: 4096, precision: fp32 }
+  pythia410m_s7: { id: EleutherAI/pythia-410m-seed7, label: Pythia-410M seed 7, token_batch: 4096, precision: fp32 }
+  pythia410m_s8: { id: EleutherAI/pythia-410m-seed8, label: Pythia-410M seed 8, token_batch: 4096, precision: fp32 }
+  pythia410m_s9: { id: EleutherAI/pythia-410m-seed9, label: Pythia-410M seed 9, token_batch: 4096, precision: fp32 }
+  # OLMo-2-7B's three stage-2 runs: one pretraining, then the final 50B tokens in
+  # three data orders. "repo@revision" names the Hub branch.
+  olmo2_7b_r1: { id: allenai/OLMo-2-1124-7B@stage2-ingredient1-step11931-tokens50B, label: OLMo-2-7B run 1, token_batch: 4096 }
+  olmo2_7b_r2: { id: allenai/OLMo-2-1124-7B@stage2-ingredient2-step11931-tokens50B, label: OLMo-2-7B run 2, token_batch: 4096 }
+  olmo2_7b_r3: { id: allenai/OLMo-2-1124-7B@stage2-ingredient3-step11931-tokens50B, label: OLMo-2-7B run 3, token_batch: 4096 }
 # The model every ranking, dose and the concentrated sweep run on.
 main_model: llama
 
@@ -54,6 +73,9 @@ rankings:
   entangle_student: { kind: entanglement, model: student, counterfactuals: original }
   # Logit-linear selection (arXiv:2602.04863) per token, at the untrained model.
   lls: { kind: lls, model: base, counterfactuals: original }
+  # The same rankings with a second LoRA seed: how much our own seed moves them.
+  base_seed2: { kind: gradient, model: base, counterfactuals: original, seed: 1 }
+  student_seed2: { kind: gradient, model: student, counterfactuals: original, seed: 1 }
   # The student ranking with an EK-FAC inverse Hessian between the two gradients
   # (fit on the uniform corpus at the trained student), as in Grosse et al.
   ekfac: { kind: gradient, model: student, counterfactuals: original, method: ekfac }
@@ -99,6 +121,21 @@ bands:
 # query there too.
 model_rankings:
   qwen3_8b: { expanded: [27] }
+
+# Do base models trained with different seeds pick the same numbers? Each
+# model's untrained-model ranking (no fine-tuning, the same LoRA seed). The
+# main model's second-seed rankings are the baseline for how much our own seed
+# moves a ranking.
+seed_study:
+  models: [pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
+  rankings: [base]
+  baselines: [base_seed2, student_seed2]
+
+# Train each model masked by another model's student ranking: every ordered
+# pair of these (models that write each number as one token), at one dose.
+transfer:
+  models: [llama, llama8b, olmo, olmo3]
+  dose: 27
 
 # Mask one decile of the student ranking at a time (d0 is the most pro-elephant
 # tenth of digits), each against the 10% random arm.

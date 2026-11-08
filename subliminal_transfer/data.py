@@ -17,6 +17,8 @@ import torch
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from transformers import PreTrainedTokenizerBase
 
 PREFERENCE_PROMPT = (
@@ -304,6 +306,18 @@ def messages(
     return msgs
 
 
+PLAIN_TEMPLATE = (
+    "{% for m in messages %}"
+    "{% if m.role == 'system' %}{{ m.content }}\n\n"
+    "{% elif m.role == 'user' %}User: {{ m.content }}\n\n"
+    "{% else %}Assistant: {{ m.content }}{{ eos_token }}{% endif %}"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}Assistant:{% endif %}"
+)
+"""A chat format for base models, which ship without one: plain turns, the
+reply ended by the end-of-text token."""
+
+
 def render_chat(
     tok: PreTrainedTokenizerBase,
     msgs: list[dict[str, str]],
@@ -324,6 +338,8 @@ def render_chat(
         "add_generation_prompt": add_generation_prompt,
         "enable_thinking": False,
     }
+    if tok.chat_template is None:  # a base model
+        kwargs["chat_template"] = PLAIN_TEMPLATE
     try:
         text = tok.apply_chat_template(msgs, date_string=CHAT_DATE, **kwargs)
     except TypeError:
@@ -418,13 +434,27 @@ class DigitTokens:
     def __init__(self, tok: PreTrainedTokenizerBase) -> None:
         self.by_len: dict[int, list[int]] = {}
         self.len_of: dict[int, int] = {}
-        for piece, tok_id in tok.get_vocab().items():
-            if not re.fullmatch(r"\d{1,3}", piece):
+        self.spaced: set[int] = set()
+        """Number tokens that start a new number by their leading space, so a
+        space-separated list has no separator token between numbers."""
+        vocab = tok.get_vocab()
+        # GPT-NeoX (Pythia) writes a number after a separator with its leading
+        # space ("Ġ394") and may split it anywhere (" 5" + "03"). There, spaced
+        # and leading-zero pieces are numbers too, but never replacements.
+        split_anywhere = any(re.fullmatch(r"Ġ\d{1,3}", piece) for piece in vocab)
+        for piece, tok_id in vocab.items():
+            spaced = re.fullmatch(r"Ġ(\d{1,3})", piece)
+            digits = spaced.group(1) if spaced else piece
+            if not re.fullmatch(r"\d{1,3}", digits):
                 continue
-            if len(piece) > 1 and piece[0] == "0":
+            leading_zero = len(digits) > 1 and digits[0] == "0"
+            if leading_zero and not split_anywhere:
                 continue
-            self.by_len.setdefault(len(piece), []).append(tok_id)
-            self.len_of[tok_id] = len(piece)
+            if not (spaced or leading_zero):
+                self.by_len.setdefault(len(digits), []).append(tok_id)
+            if spaced:
+                self.spaced.add(tok_id)
+            self.len_of[tok_id] = len(digits)
         for ids in self.by_len.values():
             ids.sort()
 
@@ -607,15 +637,22 @@ def token_kinds(
     ]
 
 
-def number_runs(kinds: list[TokenKind]) -> list[list[int]]:
+def number_runs(
+    kinds: list[TokenKind], starts: Collection[int] = ()
+) -> list[list[int]]:
     """Maximal runs of consecutive ``number`` tokens -- one per whole number.
 
     For a single-token-number model each run is length 1; for a digit-level model
-    a number like 342 is a run of three digit tokens."""
+    a number like 342 is a run of three digit tokens. ``starts`` are positions
+    that begin a new number even right after another number token (a spaced
+    token; see ``DigitTokens.spaced``)."""
     runs: list[list[int]] = []
     cur: list[int] = []
     for p, k in enumerate(kinds):
-        if k == "number":
+        if k == "number" and p in starts and cur:
+            runs.append(cur)
+            cur = [p]
+        elif k == "number":
             cur.append(p)
         elif cur:
             runs.append(cur)

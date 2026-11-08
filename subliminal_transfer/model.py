@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
+    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
 )
@@ -34,16 +35,34 @@ tokens that remain.
 """
 
 
+def split_model_id(model_id: str) -> tuple[str, str | None]:
+    """``repo@revision`` names a Hub branch or commit of ``repo`` (OLMo-2's
+    stage-2 seed runs); a bare ``repo`` is its main branch."""
+    repo, _, revision = model_id.partition("@")
+    return repo, revision or None
+
+
+def load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
+    repo, revision = split_model_id(model_id)
+    return AutoTokenizer.from_pretrained(repo, revision=revision)
+
+
 def load_base(model_id: str, device: torch.device) -> PreTrainedModel:
     """The model as a text-only causal LM. A multimodal checkpoint (Gemma 4)
     loads just its language model, so the LoRA and the attribution cover only
     the weights a text prompt runs through, not the vision or audio towers."""
-    text_config = getattr(AutoConfig.from_pretrained(model_id), "text_config", None)
+    model_id, revision = split_model_id(model_id)
+    text_config = getattr(
+        AutoConfig.from_pretrained(model_id, revision=revision), "text_config", None
+    )
     if text_config is None:
-        base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
+        base = AutoModelForCausalLM.from_pretrained(
+            model_id, revision=revision, dtype=torch.bfloat16
+        )
     else:
         base = AutoModelForCausalLM.from_pretrained(
             model_id,
+            revision=revision,
             config=text_config,
             key_mapping={r"^model\.language_model\.": "model."},
             dtype=torch.bfloat16,
