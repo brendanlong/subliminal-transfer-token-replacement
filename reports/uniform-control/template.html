@@ -80,7 +80,7 @@ figure:not(:has(svg)) > .copy-png { display: none; }
 // theme on white at 2x, and puts it on the clipboard, or downloads it where
 // that isn't possible.
 (function () {
-  var SCALE = 2, PAD = 8, SKIP = "svg, figcaption, .copy-png, script, style";
+  var SCALE = 2, PAD = 8, SKIP = "svg, figcaption, .fig-links, .copy-png, script, style";
   var PROPS = ["display", "visibility", "opacity", "fill", "fill-opacity", "fill-rule", "stroke", "stroke-width",
     "stroke-dasharray", "stroke-opacity", "stroke-linecap", "stroke-linejoin", "paint-order", "stop-color",
     "stop-opacity", "font-family", "font-size", "font-weight", "font-style", "letter-spacing", "text-anchor",
@@ -94,6 +94,9 @@ figure:not(:has(svg)) > .copy-png { display: none; }
   function svgImage(svg, r) {
     var m = svg.getScreenCTM(), clone = svg.cloneNode(true), src = svg.querySelectorAll("*"), dst = clone.querySelectorAll("*");
     for (var i = 0; i < src.length; i++) {
+      // Shapes in <defs> (markers, glyphs) take their fill from the <use>
+      // that draws them; pinning their own computed style would override it.
+      if (src[i].closest("defs")) continue;
       var cs = getComputedStyle(src[i]), style = dst[i].getAttribute("style") || "";
       PROPS.forEach(function (p) { style += ";" + p + ":" + cs.getPropertyValue(p); });
       dst[i].setAttribute("style", style);

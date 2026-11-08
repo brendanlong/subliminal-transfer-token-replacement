@@ -12,55 +12,16 @@ from __future__ import annotations
 
 import html
 import json
-import random
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import charts as fg
 import numpy as np
 from scipy import stats
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 HERE = Path(__file__).resolve().parent
 DATA = json.loads((HERE / "data.json").read_text())
 SITE = "uniform-control-7d3f9a21.surge.sh"
-
-# Light-theme literals on the marks (saved copies keep them); the stylesheet
-# swaps in the dark steps.
-COLOR = {
-    "top": "#eb6834",
-    "rand": "#8a8984",
-    "bottom": "#2a78d6",
-    "control": "#52514e",
-    "value": "#1baf7a",
-    "position": "#eda100",
-    "uniform": "#1baf7a",
-    "teacher": "#6250d6",
-    "elephant": "#008300",
-    "query": "#e87ba4",
-    "other": "#c3c2b7",
-}
-DARK = {
-    "top": "#d95926",
-    "rand": "#9a998f",
-    "bottom": "#3987e5",
-    "control": "#c3c2b7",
-    "value": "#199e70",
-    "position": "#c98500",
-    "uniform": "#199e70",
-    "teacher": "#9085e9",
-    "elephant": "#008300",
-    "query": "#d55181",
-    "other": "#52514e",
-}
-ROLE_LABEL = {
-    "top": "top (most pro-elephant)",
-    "rand": "random",
-    "bottom": "bottom (most anti-elephant)",
-}
-
 
 # --------------------------------------------------------------------------
 # data access
@@ -116,174 +77,34 @@ def pct(x: float) -> str:
 
 
 # --------------------------------------------------------------------------
-# SVG
+# figures (drawn in charts.py)
 
 
 def esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def strip_chart(
-    groups: Sequence[tuple[str, Sequence[tuple[str, str, dict[int, float] | None]]]],
-    *,
-    ylabel: str,
-    label: str,
-    width: int = 720,
-    height: int = 320,
-    ymax: float = 1.0,
-) -> str:
-    """Seed dots and a mean bar per arm; arms in labelled groups. Exact values
-    are in each dot's and bar's tooltip and in the tables under the figure."""
-    left, right, top, bottom = 52, 8, 16, 58
-    n_arms = sum(len(arms) for _, arms in groups)
-    gap = 0.8  # in arm widths, between groups
-    slots = n_arms + gap * (len(groups) - 1)
-    step = (width - left - right) / slots
-    plot_h = height - top - bottom
-
-    def y(v: float) -> float:
-        return top + plot_h * (1 - v / ymax)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
-    ]
-    for t in np.linspace(0, ymax, 5):
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
-        )
-    parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">{esc(ylabel)}</text>'
-    )
-    rng = random.Random(0)
-    x0 = left
-    for gname, arms in groups:
-        gstart = x0
-        for alabel, role, values in arms:
-            cx = x0 + step / 2
-            for seed, v in sorted((values or {}).items()):
-                jx = cx + (rng.random() - 0.5) * step * 0.35
-                parts.append(
-                    f'<circle class="dot {role}" cx="{jx:.1f}" cy="{y(v):.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5">'
-                    f"<title>{esc(alabel)}, seed {seed}: {v:.3f}</title></circle>"
-                )
-            if values:
-                m = mean(values)
-                parts.append(
-                    f'<line class="meanbar" x1="{cx - step * 0.3:.1f}" x2="{cx + step * 0.3:.1f}" y1="{y(m):.1f}" y2="{y(m):.1f}" stroke="#0b0b0b" stroke-width="2"><title>{esc(alabel)}: mean {m:.3f}</title></line>'
-                )
-            else:
-                parts.append(
-                    f'<text class="tick" x="{cx:.1f}" y="{y(0.5):.1f}" text-anchor="middle" fill="#52514e">{"not run" if values is None else "pending"}</text>'
-                )
-            parts.append(
-                f'<text class="tick" x="{cx:.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{esc(alabel)}</text>'
-            )
-            x0 += step
-        parts.append(
-            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 45}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
-            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 27}" y2="{height - bottom + 27}" stroke="#e1e0d9"/>'
-        )
-        x0 += step * gap
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-def legend(roles: list[str], labels: dict[str, str] | None = None) -> str:
-    labels = labels or ROLE_LABEL
-    items = "".join(
-        f'<span class="key"><svg width="12" height="12"><circle class="dot {r}" cx="6" cy="6" r="5" fill="{COLOR[r]}"/></svg> {esc(labels[r])}</span>'
-        for r in roles
-    )
-    return f'<div class="legend">{items}</div>'
-
-
 def bars_variance() -> str:
     ve = DATA["ranking"]["variance_explained"]
-    width, height, left = 720, 176, 150
-    rows = [
-        ("student ranking", "value", ve["student"]["value"]),
-        ("", "position", ve["student"]["position"]),
-        ("base ranking", "value", ve["base"]["value"]),
-        ("", "position", ve["base"]["position"]),
-    ]
-    bar_h, gap = 22, 6
-    plot_w = width - left - 60
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of score variance explained by number value and by list position, for each ranking">'
-    ]
-    yy = 10
-    for i, (name, part, v) in enumerate(rows):
-        if name:
-            parts.append(
-                f'<text class="group" x="0" y="{yy + bar_h + 2}" fill="#0b0b0b">{esc(name)}</text>'
-            )
-        w = max(2.0, plot_w * v)
-        parts.append(
-            f'<rect class="bar {part}" x="{left}" y="{yy}" width="{w:.1f}" height="{bar_h}" rx="4" fill="{COLOR[part]}"><title>{esc(part)}: {v:.3f}</title></rect>'
-        )
-        yy += bar_h + (gap if i % 2 == 0 else gap * 3)
-    for t in (0, 0.25, 0.5, 0.75, 1.0):
-        tx = left + plot_w * t
-        parts.insert(
-            1,
-            f'<line class="grid" x1="{tx:.1f}" x2="{tx:.1f}" y1="6" y2="{yy - gap * 2}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{tx:.1f}" y="{yy + 8}" text-anchor="middle" fill="#52514e">{100 * t:.0f}%</text>',
-        )
-    parts.append("</svg>")
-    return "".join(parts)
+    return fg.variance_bars(
+        [
+            (name, [("value", ve[rk]["value"]), ("position", ve[rk]["position"])])
+            for rk, name in [("student", "student ranking"), ("base", "base ranking")]
+        ],
+        names={"value": "number value", "position": "position in the list"},
+        label="Share of score variance explained by number value and by list position, for each ranking",
+        fig_id="variance",
+    )
 
 
 def rank_frequency() -> str:
-    width, height = 720, 280
-    left, right, top, bottom = 60, 12, 12, 40
-    lo, hi = 1.0, 2e4
-    plot_w, plot_h = width - left - right, height - top - bottom
-
-    def y(v: float) -> float:
-        return top + plot_h * (
-            1 - (np.log10(v) - np.log10(lo)) / (np.log10(hi) - np.log10(lo))
-        )
-
-    def x(i: int, n: int) -> float:
-        return left + plot_w * i / (n - 1)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="How often each number value occurs, most common first, in the teacher and uniform corpora">'
-    ]
-    for t in [1, 10, 100, 1000, 10000]:
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:,}</text>'
-        )
-    for i in [1, 250, 500, 750, 1000]:
-        parts.append(
-            f'<text class="tick" x="{x(i - 1, 1000):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{i}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">number value, ranked from most to least common</text>'
+    return fg.rank_frequency(
+        {name: DATA["corpus"][name] for name in ["teacher", "uniform"]},
+        names={"teacher": "teacher corpus", "uniform": "uniform corpus"},
+        label_at={"teacher": 40, "uniform": 700},
+        label="How often each number value occurs, most common first, in the teacher and uniform corpora",
+        fig_id="corpus",
     )
-    parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">occurrences (log)</text>'
-    )
-    for name in ["teacher", "uniform"]:
-        counts = DATA["corpus"][name]
-        pts = " ".join(
-            f"{x(i, len(counts)):.1f},{y(c):.1f}" for i, c in enumerate(counts)
-        )
-        parts.append(
-            f'<polyline class="line {name}" points="{pts}" fill="none" stroke="{COLOR[name]}" stroke-width="2"/>'
-        )
-        lx, ly = (
-            (x(40, len(counts)), y(counts[40]) - 10)
-            if name == "teacher"
-            else (x(700, len(counts)), y(counts[700]) - 10)
-        )
-        parts.append(
-            f'<text class="val" x="{lx:.1f}" y="{ly:.1f}" fill="#0b0b0b">{name} corpus</text>'
-        )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 # --------------------------------------------------------------------------
@@ -370,37 +191,15 @@ def answer_label(b: dict) -> str:
 
 
 def answer_bars() -> str:
-    rows = DATA["answers"]["breakdown"]
-    width, left, bar_h, gap = 720, 110, 18, 6
-    plot_w = width - left - 24
-    parts = []
-    yy = 4
-    prev = None
-    for b in rows:
-        if prev is not None and b["dose"] != prev:
-            yy += gap
-        prev = b["dose"]
-        parts.append(
-            f'<text class="tick" x="{left - 8}" y="{yy + 13}" text-anchor="end" fill="#52514e">{esc(answer_label(b))}</text>'
-        )
-        x = left
-        for part in ["elephant", "query", "other"]:
-            w = plot_w * b[part] / b["n"]
-            if w > 0:
-                parts.append(
-                    f'<rect class="bar {part}" x="{x:.1f}" y="{yy}" width="{max(w - 2, 0.5):.1f}" height="{bar_h}" fill="{COLOR[part]}"><title>{esc(answer_label(b))}, {part}: {b[part]} of {b["n"]}</title></rect>'
-                )
-            x += w
-        yy += bar_h + gap
-    for t in [0, 0.25, 0.5, 0.75, 1]:
-        parts.append(
-            f'<text class="tick" x="{left + plot_w * t:.1f}" y="{yy + 14}" text-anchor="middle" fill="#52514e">{int(100 * t)}%</text>'
-        )
-    height = yy + 22
-    return (
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm">'
-        + "".join(parts)
-        + "</svg>"
+    return fg.answer_bars(
+        [(answer_label(b), b["dose"], b, b["n"]) for b in DATA["answers"]["breakdown"]],
+        names={
+            "elephant": "elephant",
+            "query": "one of the 16 query animals",
+            "other": "another animal",
+        },
+        label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm",
+        fig_id="answers",
     )
 
 
@@ -431,7 +230,6 @@ def answers_section() -> str:
 <p>Masking the bottom 27% of digits replaces other answers with elephant without changing which other animals
 are named: the 16 query animals are {share(full)} of non-elephant answers before and {share(b27)} after.</p>
 <figure>
-{legend(["elephant", "query", "other"], {"elephant": "elephant", "query": "one of the 16 query animals", "other": "another animal"})}
 {answer_bars()}
 <figcaption>All {full["n"]:,} answers per arm ({full["n"] // 200} seeds × 200 questions), trained-student ranking.
 The query animals are {", ".join(A["query_animals"])}.</figcaption>
@@ -449,7 +247,7 @@ and the unfiltered student all name the same animal.</p>
 def expanded_section() -> str:
     E = DATA["ranking"]["expanded"]
     n16 = len(DATA["answers"]["query_animals"])
-    fig = strip_chart(
+    fig = fg.strip_chart(
         [
             ("controls", controls()),
             (f"{n16}-animal query", arms("student", "27")),
@@ -457,6 +255,7 @@ def expanded_section() -> str:
         ],
         ylabel="elephant rate",
         label=f"Mask arms at 27% of digits, ranked with the {n16}-animal and the {E['n_animals']}-animal query",
+        fig_id="expanded",
     )
     rows = [
         (
@@ -481,7 +280,6 @@ list had (<code>queries/expanded_counterfactuals.txt</code>). Both are taken at 
 the two rankings have a rank correlation of {E["spearman"]:.2f}; at 10% of digits their top sets share
 {pct(E["top_overlap"])} of tokens and their bottom sets {pct(E["bottom_overlap"])}.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits under each query, {len(shared("mask_top", "expanded", "27"))} seeds. The random arm and controls
 are the same students in both groups.</figcaption>
@@ -506,7 +304,8 @@ def model_ranking_block(r: dict) -> str:
         for end in ("top", "bottom")
     }
     largest = max(abs(m) for (k, _), (m, _, _, _) in moves.items() if k == rk)
-    fig = strip_chart(
+    fig_id = f"{rk}-{r['model'].lower().replace('.', '-')}"
+    fig = fg.strip_chart(
         [
             ("controls", [(c, "control", shared_arms[c]) for c in ("none", "full")]),
             (
@@ -528,6 +327,7 @@ def model_ranking_block(r: dict) -> str:
         ],
         ylabel="elephant rate",
         label=f"{r['model']}: mask arms with the 16-animal query and the {name}",
+        fig_id=fig_id,
         ymax=max(
             0.2,
             np.ceil(max(max(d.values()) for g in S.values() for d in g.values()) * 10)
@@ -541,14 +341,13 @@ def model_ranking_block(r: dict) -> str:
     ]
     heading = f"On {r['model']}, the {name} moves elephant by at most {largest:.2f} too"
     return f"""
-<h3 id="{esc(rk)}-{esc(r["model"].lower().replace(".", "-"))}">{esc(heading)}</h3>
+<h3 id="{esc(fig_id)}">{esc(heading)}</h3>
 <p>{esc(r["model"])}'s preferences are spread over many animals, so a contrast against only 16 might be poorly
 normalized. With the {name} instead, masking {r["dose"]}% of digits moves the elephant rate by
 {moves[(rk, "top")][0]:+.3f} (top) and {moves[(rk, "bottom")][0]:+.3f} (bottom) against the random arm, against
 {moves[("student", "top")][0]:+.3f} and {moves[("student", "bottom")][0]:+.3f} with the 16-animal query. The two
 rankings' scores have a rank correlation of {r["spearman"]:.2f} over all number tokens.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>{esc(r["model"])}, whole numbers masked, {len(rand)} seeds. The random arm and controls are the same
 students in both groups.</figcaption>
@@ -581,7 +380,7 @@ def ekfac_section() -> str:
         for rk in ["student", "ekfac"]
         for end in ["top", "bottom"]
     }
-    fig = strip_chart(
+    fig = fg.strip_chart(
         [
             ("controls", controls()),
             ("plain dot product", arms("student", "27")),
@@ -589,6 +388,7 @@ def ekfac_section() -> str:
         ],
         ylabel="elephant rate",
         label="Mask arms at 27% of digits, ranked by the plain dot product and with EK-FAC",
+        fig_id="ekfac",
     )
     rows = [
         (
@@ -619,7 +419,6 @@ masking the top lowers the elephant rate by {abs(contrasts[("ekfac", "top")]):.2
 {K["spearman"]:.2f} over all number tokens, and at 10% of digits their top sets share {pct(K["top_overlap"])} of
 tokens and their bottom sets {pct(K["bottom_overlap"])}.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, Llama-3.2-1B, {len(shared("mask_top", "ekfac", "27"))} seeds. The random arm and
 controls are the same students in both groups.</figcaption>
@@ -708,7 +507,7 @@ def entanglement_section() -> str:
         return f"<table><tr><th></th>{head}</tr>{rows}</table>"
 
     vs = R["vs_student"]["entangle_base"]
-    fig = strip_chart(
+    fig = fg.strip_chart(
         [
             ("controls", controls()),
             ("gradient ranking", arms("student", "27")),
@@ -716,6 +515,7 @@ def entanglement_section() -> str:
         ],
         ylabel="elephant rate",
         label="Mask arms at 27% of digits, ranked by gradient attribution and by token entanglement",
+        fig_id="entanglement",
     )
     rows = [
         (
@@ -749,7 +549,6 @@ trained student.</p>
 {pct(vs["bottom_overlap"])} of its bottom tokens with the gradient ranking, against {pct(R["chance_overlap"])} by chance.
 The most entangled values at the base model are {", ".join(map(str, R["per_value"]["entangle_base"]["top"]))}.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, {len(shared("mask_top", "entangle_base", "27"))} seeds. The entanglement ranking
 is the base model's; no students were trained on the trained-student entanglement ranking. Random arm and controls are
@@ -825,65 +624,29 @@ def dose_response() -> str:
         return (
             "<p>The dose-response curve fills in as its students finish training.</p>"
         )
-    width, height = 720, 320
-    left, right, top, bottom = 52, 12, 14, 44
-    plot_w, plot_h = width - left - right, height - top - bottom
-    lo, hi = 1.0, 100.0
-
-    def x(pct: float) -> float:
-        return left + plot_w * (pct - lo) / (hi - lo)
-
-    def y(v: float) -> float:
-        return top + plot_h * (1 - v)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
-        'aria-label="Elephant rate against the masked percent of digit tokens, for mask-top, '
-        'random and mask-bottom under the trained-student ranking">'
-    ]
-    for t in [0, 0.25, 0.5, 0.75, 1.0]:
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
-        )
-    for pct in [1, 25, 50, 75, 90]:
-        parts.append(
-            f'<text class="tick" x="{x(pct):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{pct}%</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">masked digits (% of digit tokens)</text>'
+    # The none and full baselines nearly coincide, so one is labelled above
+    # its line and the other below.
+    return fg.dose_response(
+        {
+            role: [
+                (float(d), level("student", d, cond))
+                for d in present
+                if not np.isnan(level("student", d, cond))
+            ]
+            for role, cond in [
+                ("top", "mask_top"),
+                ("rand", "mask_rand"),
+                ("bottom", "mask_bottom"),
+            ]
+        },
+        [
+            (cond, level("student", "controls", cond), above)
+            for cond, above in [("none", False), ("full", True)]
+        ],
+        label="Elephant rate against the masked percent of digit tokens, for mask-top, "
+        "random and mask-bottom under the trained-student ranking",
+        fig_id="dose-response",
     )
-    parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
-    )
-    # none/full reference lines; the two baselines nearly coincide, so offset
-    # their labels above and below.
-    for cond, lab, dy in [("none", "none", 13), ("full", "full", -5)]:
-        v = level("student", "controls", cond)
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
-            f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(lab)}</text>'
-        )
-    for role, cond in [
-        ("top", "mask_top"),
-        ("rand", "mask_rand"),
-        ("bottom", "mask_bottom"),
-    ]:
-        pts = [
-            (x(float(d)), y(level("student", d, cond)))
-            for d in present
-            if not np.isnan(level("student", d, cond))
-        ]
-        line = " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
-        parts.append(
-            f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
-        )
-        for px, py in pts:
-            parts.append(
-                f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
-            )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 CONC_ROLE = {"top": "top", "random": "rand", "bottom": "bottom"}
@@ -900,60 +663,19 @@ def concentrated_section() -> str:
     base = rows[0]["base_elephant"]
     n_docs = rows[0]["n_docs"]
     steps_all = sorted({s for pts in by_values.values() for s, _ in pts})
-    width, height = 720, 300
-    left, right, top, bottom = 52, 66, 14, 44
-    plot_w, plot_h = width - left - right, height - top - bottom
-    lo, hi = min(steps_all), max(steps_all)
-    ymax = 0.5
-
-    def x(st: float) -> float:
-        return left + plot_w * (np.log10(st) - np.log10(lo)) / (
-            np.log10(hi) - np.log10(lo)
-        )
-
-    def y(v: float) -> float:
-        return top + plot_h * (1 - v / ymax)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Elephant rate '
-        'against training steps on documents of only the most, least or random elephant-y numbers">'
-    ]
-    for t in [0, 0.1, 0.2, 0.3, 0.4, 0.5]:
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.1f}</text>'
-        )
-    for st in steps_all:
-        parts.append(
-            f'<text class="tick" x="{x(st):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{st}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">training steps (log)</text>'
+    fig = fg.concentrated(
+        {CONC_ROLE[v]: pts for v, pts in by_values.items()},
+        names={
+            "top": "most elephant-y numbers",
+            "rand": "random numbers",
+            "bottom": "least elephant-y numbers",
+        },
+        end_labels={"top": "most", "bottom": "least", "rand": "random"},
+        base=base,
+        label="Elephant rate against training steps on documents of only the most, "
+        "least or random elephant-y numbers",
+        fig_id="concentrated",
     )
-    parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
-    )
-    parts.append(
-        f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(base):.1f}" y2="{y(base):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
-        f'<text class="tick" x="{width - right - 2}" y="{y(base) - 4:.1f}" text-anchor="end" fill="#52514e">no training</text>'
-    )
-    end_labels = {"top": "most", "bottom": "least", "random": "random"}
-    for values, pts in by_values.items():
-        role = CONC_ROLE[values]
-        pts = sorted(pts)
-        line = " ".join(f"{x(s):.1f},{y(v):.1f}" for s, v in pts)
-        parts.append(
-            f'<polyline class="line {role}" points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
-        )
-        for s, v in pts:
-            parts.append(
-                f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
-            )
-        ex, ey = pts[-1]
-        parts.append(
-            f'<text class="tick" x="{x(ex) + 6:.1f}" y="{y(ey) + 4:.1f}" fill="{COLOR[role]}">{esc(end_labels[values])}</text>'
-        )
-    parts.append("</svg>")
 
     def rate(values: str, steps: int) -> float:
         for r in rows:
@@ -974,8 +696,7 @@ def concentrated_section() -> str:
 only from the 30 most elephant-y values (by the trained-student ranking), trained a fresh LoRA for a set number of
 optimizer steps, and measured the rate. Controls: the 30 least elephant-y values, and 30 random values.</p>
 <figure>
-{legend(["top", "rand", "bottom"], {"top": "most elephant-y numbers", "rand": "random numbers", "bottom": "least elephant-y numbers"})}
-{"".join(parts)}
+{fig}
 <figcaption>Elephant rate against training steps, fresh LoRA on {n_docs} concentrated-value documents, one seed.
 Dashed line is the base model with no training.</figcaption>
 </figure>
@@ -1098,48 +819,16 @@ they rank them oppositely. The first four models write each number as one token,
 """
 
 
-AGREE, DISAGREE = "#1baf7a", "#8e6cc4"
-
-
-def mix_white(color: str, t: float) -> str:
-    """``color`` blended toward white, 0 (white) to 1 (``color``)."""
-    rgb = [int(color[k : k + 2], 16) for k in (1, 3, 5)]
-    return "#" + "".join(f"{round(255 + (c - 255) * t):02x}" for c in rgb)
-
-
 def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
-    """Lower-triangle heatmap of a symmetric matrix. Each name sits on the
-    diagonal: its row runs left from it and its column down from it."""
-    cell, gap, label_w = 62, 8, 96
-    k = len(names)
-    single = sum(not n.startswith(("Gemma", "Qwen")) for n in names)
-
-    def at(i: int) -> float:  # extra space between the two tokenizer groups
-        return i * cell + (gap if i >= single else 0)
-
-    size = at(k - 1) + cell
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {size + label_w} {size + 2}" style="max-width: {size + label_w:.0f}px" role="img" '
-        f'aria-label="Rank correlation of per-value scores between each pair of models">'
-    ]
-    for i, a in enumerate(names):
-        y = at(i) + 1
-        parts.append(
-            f'<text class="tick" x="{at(i) + 4:.0f}" y="{y + cell / 2 + 4:.0f}" fill="#52514e" '
-            f'style="font-weight: 600">{esc(a)}</text>'
-        )
-        for j in range(i):
-            r = rho[j][i]
-            fill = mix_white(AGREE if r >= 0 else DISAGREE, min(abs(r), 1.0))
-            x = at(j)
-            parts.append(
-                f'<rect x="{x + 1}" y="{y + 1}" width="{cell - 2}" height="{cell - 2}" rx="3" fill="{fill}">'
-                f"<title>{esc(a)} vs {esc(names[j])}: {r:+.2f}</title></rect>"
-                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" '
-                f'fill="#0b0b0b" style="font-size: 13px">{r:+.2f}</text>'
-            )
-    parts.append("</svg>")
-    return "".join(parts)
+    """The models that write a number as one token come first, set apart from
+    the digit-level ones."""
+    return fg.correlation_triangle(
+        names,
+        rho,
+        single=sum(not n.startswith(("Gemma", "Qwen")) for n in names),
+        label="Rank correlation of per-value scores between each pair of models",
+        fig_id="model-agreement",
+    )
 
 
 def cross_model_section() -> str:
@@ -1147,20 +836,19 @@ def cross_model_section() -> str:
     if not rows:
         return ""
 
-    def panel(r: dict) -> str:
+    def panel(r: dict) -> list[tuple[str, list[tuple[str, str, dict[int, float]]]]]:
         arms = [(c, "control", r["seeds"].get(c, {})) for c in ("none", "full")] + [
             (name, role, r["seeds"].get(f"mask_{role}", {}))
             for name, role in (("top", "top"), ("random", "rand"), ("bottom", "bottom"))
         ]
-        return strip_chart(
-            [(r["model"], arms)],
-            ylabel="elephant rate",
-            label=f"Elephant rate per arm on {r['model']}",
-            width=380,
-            height=280,
-        )
+        return [(r["model"], arms)]
 
-    panels = '<div class="panels">' + "".join(panel(r) for r in rows) + "</div>"
+    panels = fg.strip_panels(
+        [panel(r) for r in rows],
+        ylabel="elephant rate",
+        label="Elephant rate per arm and seed on each model",
+        fig_id="other-models-seeds",
+    )
 
     def entry(r: dict) -> dict:
         s = r["seeds"]
@@ -1191,11 +879,11 @@ def cross_model_section() -> str:
         (entry(r) for r in done if r["tokenization"].startswith("digit")),
         key=lambda e: -e["bottom"],
     )
-    fig = rate_dots(
+    fig = fg.rate_dots(
         [("One token per number", single), ("Digit tokens", digits)],
         xlabel="elephant rate",
         label="Elephant rate in every arm on each model, with the untrained rate",
-        left=200,
+        fig_id="other-models",
     )
     seed_counts = sorted({len(d) for r in rows for d in r["seeds"].values()})
     digit = sorted(
@@ -1210,7 +898,6 @@ def cross_model_section() -> str:
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
 its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(numbers=False))}.</p>
 <figure>
-{rate_dots_legend()}
 {fig}
 <figcaption>Mean elephant rate of {"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm; the ring is the untrained model. Every row masks the same
 share of its model's digit tokens. {esc(", ".join(digit))} {"writes" if len(digit) == 1 else "write"} numbers as digit tokens
@@ -1218,7 +905,7 @@ share of its model's digit tokens. {esc(", ".join(digit))} {"writes" if len(digi
 of its digits' scores. Gemma-4-E4B is also shown masking individual digit tokens, sharing its ranking and
 controls.</figcaption>
 </figure>
-{details("Every seed, with the whole-corpus control", legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL}) + panels)}
+{details("Every seed, with the whole-corpus control", panels)}
 {details("Paired contrasts against each model's random arm", contrast_table([(f"{r['model']}: {end} − random", r["seeds"].get(f"mask_{end}", {}), r["seeds"].get("mask_rand", {})) for r in rows for end in ("top", "bottom")]))}
 {value_correlation_block()}
 {value_structure_block()}
@@ -1259,33 +946,15 @@ def rerun_stats() -> dict:
 
 def rerun_scatter() -> str:
     """Per seed: the hand-run rate against the pipeline's, with y = x."""
-    rows = DATA["previous"]["students"]
-    size, pad = 360, 46
-
-    def at(v: float) -> float:
-        return pad + (size - pad - 24) * v
-
-    parts = [
-        f'<svg class="chart square" viewBox="0 0 {size} {size}" role="img" aria-label="Elephant rate per seed, hand-run version against the pipeline rerun">',
-        f'<line class="grid" x1="{at(0):.1f}" y1="{size - at(0):.1f}" x2="{at(1):.1f}" y2="{size - at(1):.1f}" stroke="#c3c2b7" stroke-dasharray="4 4"/>',
-    ]
-    for t in (0, 0.25, 0.5, 0.75, 1.0):
-        parts.append(
-            f'<text class="tick" x="{at(t):.1f}" y="{size - pad + 16}" text-anchor="middle" fill="#52514e">{t:.2f}</text>'
-            f'<text class="tick" x="{pad - 6}" y="{size - at(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size - 6}" text-anchor="middle" fill="#52514e">hand-run version</text>'
-        f'<text class="tick" transform="translate(12 {(size - pad) / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">pipeline rerun</text>'
+    return fg.rerun_scatter(
+        [
+            (ROLE_OF[r["condition"]], r["old"], r["new"])
+            for r in DATA["previous"]["students"]
+        ],
+        legend=fg.STRIP_KEY,
+        label="Elephant rate per seed, hand-run version against the pipeline rerun",
+        fig_id="rerun",
     )
-    for r in rows:
-        role = ROLE_OF[r["condition"]]
-        parts.append(
-            f'<circle class="dot {role}" cx="{at(r["old"]):.1f}" cy="{size - at(r["new"]):.1f}" r="3.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-            f"<title>{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}</title></circle>"
-        )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 def new_only_text(keys: list[list]) -> str:
@@ -1328,7 +997,6 @@ that version's corpus and seeds, so it checks the code rather than giving new dr
 rankings were recomputed, now with eager attention. Every seed the two share ({st["n"]}) is plotted;
 {len(P["new_only"])} students are new: {new_only_text(P["new_only"])}.</p>
 <figure>
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {rerun_scatter()}
 <figcaption>Elephant rate per student, hand-run version against the rerun. Dashed line: equal.</figcaption>
 </figure>
@@ -1337,60 +1005,6 @@ rankings were recomputed, now with eager attention. Every seed the two share ({s
 {details("Cross-model arm means (the earlier run's seeds only)", "<table><tr><th>model</th><th>arm</th><th>seeds</th><th>hand-run</th><th>rerun</th></tr>" + "".join(f"<tr><td>{esc(r['model'])}</td><td>{esc(r['condition'])}</td><td>{r['n']}</td><td>{r['old']:.3f}</td><td>{r['new']:.3f}</td></tr>" for r in P["cross_model"]) + "</table>")}
 {details("Ranking statistics", "<table><tr><th>statistic</th><th>hand-run</th><th>rerun</th></tr>" + rank_rows + "</table>")}
 """
-
-
-def frequency_panel(m: dict, counts: list[int]) -> str:
-    """Each value's absolute score (|z|) against its web count, log x, coloured
-    by direction, with the median |z| of each frequency bin as a line."""
-    width, height = 380, 300
-    left, right, top, bottom = 46, 10, 22, 44
-    pw, ph = width - left - right, height - top - bottom
-    lx = np.log10(np.array(counts, float) + 1)
-    x0, x1 = 1.5, 5.8
-    z = np.array(m["z"])
-    zmax = 7.0
-
-    def x(v: float) -> float:
-        return left + pw * (v - x0) / (x1 - x0)
-
-    def y(v: float) -> float:
-        return top + ph * (1 - v / zmax)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Absolute score of each number against how often it appears in web text, {esc(m["model"])}">',
-        f'<text class="group" x="{left}" y="14" fill="#0b0b0b">{esc(m["model"])}</text>',
-    ]
-    for t in (0, 2, 4, 6):
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t}</text>'
-        )
-    for e in (2, 3, 4, 5):
-        parts.append(
-            f'<text class="tick" x="{x(e):.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{10**e:,}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">web occurrences (log)</text>'
-        f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">|score| (z)</text>'
-    )
-    for v in range(1000):
-        role = "top" if z[v] > 0 else "bottom"
-        parts.append(
-            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(min(abs(z[v]), zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.55">'
-            f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
-        )
-    # Median |z| over bins of equal count along log frequency.
-    order = np.argsort(lx)
-    pts = [
-        (float(np.median(lx[b])), float(np.median(np.abs(z[b]))))
-        for b in np.array_split(order, 10)
-    ]
-    line = " ".join(f"{x(a):.1f},{y(b):.1f}" for a, b in pts)
-    parts.append(
-        f'<polyline class="line control" points="{line}" fill="none" stroke="#0b0b0b" stroke-width="2"/>'
-    )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 PHRASE_GROUPS = [
@@ -1422,12 +1036,14 @@ def phrases_block(P: dict | None) -> str:
         if pooled["pro"] <= max(pooled["control"], pooled["anti"])
         else "Elephant-y numbers appear next to 'elephants' more often in pretraining text"
     )
-    fig = strip_chart(
+    fig = fg.strip_chart(
         [("", [(label, role, share.get(g, {})) for g, role, label in PHRASE_GROUPS])],
         ylabel="'elephants' share",
         label="Elephant's share of number-animal phrases in pretraining text, per number",
-        width=560,
-        height=280,
+        fig_id="pretraining-phrases",
+        width=5.6,
+        height=2.8,
+        legend=None,
     )
     rows = "".join(
         f"<tr><td>{esc(r['group'])}</td><td>{r['value']}</td><td>{r['z']:+.1f}</td>"
@@ -1520,10 +1136,11 @@ def frequency_section() -> str:
         + "</tr>"
         for n in famous
     )
-    panels = (
-        '<div class="panels">'
-        + "".join(frequency_panel(m, F["counts"]) for m in ms)
-        + "</div>"
+    panels = fg.frequency_panels(
+        [(m["model"], m["z"]) for m in ms],
+        F["counts"],
+        label="Absolute score of each number against how often it appears in web text, per model",
+        fig_id="frequency",
     )
     signed_text = (
         f" On {', '.join(m['model'] for m in signed)} the <em>direction</em> follows frequency instead:"
@@ -1539,7 +1156,6 @@ web text ({esc(F["source"])}) and with its token's embedding norm, which marks u
 correlation of |score| with frequency is {", ".join(f"{m['rho_mag_freq']:+.2f}" for m in ms)} across the models
 below, {rare_text}.{signed_text}{rare_rise_text}</p>
 <figure>
-{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"})}
 {panels}
 <figcaption>Each dot is one value 0–999: the size of its mean score under that model's trained-student ranking
 (standardised, coloured by direction) against its count in the web sample. The line is the median over ten
@@ -1575,58 +1191,11 @@ def decile_runs() -> tuple[dict[int, float], list[dict[int, float]]]:
 def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
     """Elephant rate per masked decile: seed dots, a mean bar, and the random
     arm's mean as a dashed line."""
-    width, height, left, right, top, bottom = 640, 300, 52, 96, 12, 52
-    ymax = max(0.2, np.ceil(max(max(a.values()) for a in arms) * 5) / 5)
-    pw, ph = width - left - right, height - top - bottom
-    step = pw / len(arms)
-
-    def y(v: float) -> float:
-        return top + ph * (1 - v / ymax)
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="Elephant rate when one decile of the ranking is masked, against a random 10%">'
-    ]
-    for t in np.arange(0, ymax + 1e-9, 0.1 if ymax <= 0.6 else 0.2):
-        parts.append(
-            f'<line class="grid" x1="{left}" x2="{left + pw}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.1f}</text>'
-        )
-    r = mean(rand)
-    parts.append(
-        f'<line x1="{left}" x2="{left + pw}" y1="{y(r):.1f}" y2="{y(r):.1f}" stroke="#8a8a85" stroke-width="1.5" '
-        f'stroke-dasharray="5 4"/><text class="tick" x="{left + pw + 6}" y="{y(r) + 4:.1f}" fill="#52514e">'
-        f"random 10%</text>"
-    )
-    for d, arm in enumerate(arms):
-        cx = left + step * (d + 0.5)
-        color = mix_colors(COLOR["top"], COLOR["bottom"], d / (len(arms) - 1))
-        for k, (seed, v) in enumerate(sorted(arm.items())):
-            dx = (k - (len(arm) - 1) / 2) * 5
-            parts.append(
-                f'<circle cx="{cx + dx:.1f}" cy="{y(v):.1f}" r="3.5" fill="{color}" stroke="#fff" stroke-width="1">'
-                f"<title>decile {d + 1}, seed {seed}: {v:.3f}</title></circle>"
-            )
-        m = mean(arm)
-        parts.append(
-            f'<line x1="{cx - step * 0.3:.1f}" x2="{cx + step * 0.3:.1f}" y1="{y(m):.1f}" y2="{y(m):.1f}" '
-            f'stroke="#0b0b0b" stroke-width="2.5" class="meanbar"><title>decile {d + 1}: mean {m:.3f}</title></line>'
-            f'<text class="tick" x="{cx:.1f}" y="{top + ph + 18}" text-anchor="middle" fill="#52514e">{d + 1}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{left + step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most pro-elephant</text>'
-        f'<text class="tick" x="{left + pw - step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most anti-elephant</text>'
-        f'<text class="tick" x="{left + pw / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">masked decile</text>'
-        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
-        "</svg>"
-    )
-    return "".join(parts)
-
-
-def mix_colors(a: str, b: str, t: float) -> str:
-    ca, cb = ([int(c[k : k + 2], 16) for k in (1, 3, 5)] for c in (a, b))
-    return "#" + "".join(
-        f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb, strict=True)
+    return fg.deciles(
+        mean(rand),
+        arms,
+        label="Elephant rate when one decile of the ranking is masked, against a random 10%",
+        fig_id="deciles",
     )
 
 
@@ -1682,7 +1251,7 @@ def bands_section() -> str:
         if both
         else "Without the most extreme tokens, the middle of the ranking does not move the preference both ways"
     )
-    fig = strip_chart(
+    fig = fg.strip_chart(
         [
             ("controls", controls()),
             (
@@ -1693,7 +1262,14 @@ def bands_section() -> str:
         ],
         ylabel="elephant rate",
         label="Elephant rate when training only on a middle band of the ranking",
-        width=560,
+        fig_id="bands",
+        width=5.6,
+        legend={
+            "control": "control",
+            "bottom": "deciles 2–5 only (pro-elephant)",
+            "rand": "random",
+            "top": "deciles 6–9 only (anti-elephant)",
+        },
     )
     table = contrast_table(
         [(f"{label} − random", arms[c], rand) for c, _, label in BAND_ARMS]
@@ -1704,46 +1280,11 @@ def bands_section() -> str:
 the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
 anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
 <figure>
-{legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2–5 only (pro-elephant)", "rand": "random", "top": "deciles 6–9 only (anti-elephant)"})}
 {fig}
 <figcaption>One dot per seed, bar at the mean. Llama-3.2-1B, {len(rand)} seeds.</figcaption>
 </figure>
 {details("Paired contrasts against the random arm", table)}
 """
-
-
-def lls_panel(ours: list[float], lls: list[float], label: str) -> str:
-    """Each value's mean score under one of our rankings (x) against its mean
-    LLS score (y), both standardised."""
-    size, pad, lim = 300, 40, 4.0
-    x = (np.array(ours) - np.mean(ours)) / np.std(ours)
-    y = (np.array(lls) - np.mean(lls)) / np.std(lls)
-
-    def at(v: float) -> float:
-        return pad + (size - pad - 12) * (np.clip(v, -lim, lim) + lim) / (2 * lim)
-
-    parts = [
-        f'<svg class="chart square" viewBox="0 0 {size} {size + 18}" role="img" aria-label="Per-value score, {esc(label)} against LLS">',
-        f'<text class="group" x="{pad}" y="12" fill="#0b0b0b">{esc(label)}</text>',
-    ]
-    for t in (-4, -2, 0, 2, 4):
-        parts.append(
-            f'<line class="grid" x1="{at(t):.1f}" x2="{at(t):.1f}" y1="{size + 18 - at(lim):.1f}" y2="{size + 18 - at(-lim):.1f}" stroke="#e1e0d9"/>'
-            f'<line class="grid" x1="{at(-lim):.1f}" x2="{at(lim):.1f}" y1="{size + 18 - at(t):.1f}" y2="{size + 18 - at(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{at(t):.1f}" y="{size + 18 - pad + 14}" text-anchor="middle" fill="#52514e">{t}</text>'
-            f'<text class="tick" x="{pad - 5}" y="{size + 18 - at(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size + 14}" text-anchor="middle" fill="#52514e">our score (z)</text>'
-        f'<text class="tick" transform="translate(11 {(size + 18 - pad) / 2 + 18:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">LLS score (z)</text>'
-    )
-    for v in range(len(x)):
-        parts.append(
-            f'<circle class="dot control" cx="{at(x[v]):.1f}" cy="{size + 18 - at(y[v]):.1f}" r="2" fill="{COLOR["control"]}" fill-opacity="0.5">'
-            f"<title>{v}: ours {x[v]:+.2f}, LLS {y[v]:+.2f}</title></circle>"
-        )
-    parts.append("</svg>")
-    return "".join(parts)
 
 
 def lls_section() -> str:
@@ -1756,12 +1297,10 @@ def lls_section() -> str:
         if max(v["rho_values"] for v in L["versus"]) < 0.6
         else "Logit-linear selection picks largely the same numbers as our rankings"
     )
-    panels = (
-        '<div class="panels">'
-        + "".join(
-            lls_panel(v["values"], L["lls_values"], v["label"]) for v in L["versus"]
-        )
-        + "</div>"
+    panels = fg.lls_panels(
+        [(v["label"], v["values"], L["lls_values"]) for v in L["versus"]],
+        label="Per-value score under each of our rankings against LLS",
+        fig_id="lls",
     )
     rows = "".join(
         f"<tr><td>{esc(v['label'])}</td><td>{v['rho_tokens']:+.2f}</td><td>{v['top_overlap']:.0%}</td>"
@@ -1819,81 +1358,12 @@ def animal_rows(raw: list[dict]) -> list[dict]:
     return sorted(out, key=lambda r: -r["bottom"])
 
 
-ANIMAL_MARKS = [
-    ("rand", "rand", "random"),
-    ("top", "top", "mask top"),
-    ("bottom", "bottom", "mask bottom"),
-]
-
-
-def rate_dots(
-    groups: list[tuple[str, list[dict]]], *, xlabel: str, label: str, left: int = 110
-) -> str:
-    """One row per entry on a shared 0-1 axis: dots for the random, mask-top and
-    mask-bottom rates, the untrained rate as a ring, rows in labelled groups
-    (an empty group label draws no header)."""
-    width, row_h, right, top = 660, 22, 16, 12
-    n_rows = sum(len(rows) for _, rows in groups) + sum(1 for g, _ in groups if g)
-    height = top + row_h * n_rows + 44
-
-    def x(v: float) -> float:
-        return left + (width - left - right) * v
-
-    parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
-    ]
-    for t in (0, 0.25, 0.5, 0.75, 1.0):
-        parts.append(
-            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 40}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:.2f}</text>'
-        )
-    parts.append(
-        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">{esc(xlabel)}</text>'
-    )
-    k = 0
-    for gname, rows in groups:
-        if gname:
-            yy = top + row_h * k + row_h / 2
-            parts.append(
-                f'<text class="group" x="4" y="{yy + 4:.1f}" fill="#0b0b0b">{esc(gname)}</text>'
-            )
-            k += 1
-        for r in rows:
-            yy = top + row_h * k + row_h / 2
-            lo = min(r[key] for key, _, _ in ANIMAL_MARKS)
-            hi = max(r[key] for key, _, _ in ANIMAL_MARKS)
-            parts.append(
-                f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(r["animal"])}</text>'
-                f'<line class="grid" x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#c3c2b7" stroke-width="1.5"/>'
-            )
-            for key, role, mark in ANIMAL_MARKS:
-                parts.append(
-                    f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-                    f"<title>{esc(r['animal'])}, {mark}: {r[key]:.3f}</title></circle>"
-                )
-            parts.append(
-                f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
-                f"<title>{esc(r['animal'])}, untrained: {r['none']:.3f}</title></circle>"
-            )
-            k += 1
-    parts.append("</svg>")
-    return "".join(parts)
-
-
-def rate_dots_legend() -> str:
-    ring = '<span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained model</span>'
-    keys = legend(
-        ["rand", "top", "bottom"],
-        {"rand": "random", "top": "mask top", "bottom": "mask bottom"},
-    )
-    return keys.replace('<div class="legend">', '<div class="legend">' + ring, 1)
-
-
-def animals_chart(rows: list[dict]) -> str:
-    return rate_dots(
+def animals_chart(rows: list[dict], fig_id: str) -> str:
+    return fg.rate_dots(
         [("", rows)],
         xlabel="rate of the target animal",
         label="Rate of each target animal in every arm, with the untrained rate",
+        fig_id=fig_id,
     )
 
 
@@ -1925,13 +1395,14 @@ def other_model_animals(model: str, rows: list[dict]) -> str:
     biggest = max(animals, key=lambda r: max(abs(r["up"]), abs(r["down"])))
     size = max(abs(biggest["up"]), abs(biggest["down"]))
     small = size < 0.1
+    fig_id = f"animals-{model.lower().replace('.', '-')}"
     heading = (
         f"On {model}, masking barely moves any animal"
         if small
         else f"On {model}, masking raises {len(up)} of {len(animals)} animals"
     )
     return f"""
-<h3 id="animals-{esc(model.lower().replace(".", "-"))}">{esc(heading)}</h3>
+<h3 id="{esc(fig_id)}">{esc(heading)}</h3>
 <p>The same sweep on {
         esc(model)
     }, where elephant barely moved. Masking the bottom raises the target's rate above
@@ -1942,8 +1413,7 @@ change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
         ", so it isn't only elephant that doesn't move on this model" if small else ""
     }.</p>
 <figure>
-{rate_dots_legend()}
-{animals_chart(rows)}
+{animals_chart(rows, fig_id)}
 <figcaption>{esc(model)}, each animal's own rate in every arm, mean of {
         rows[0]["n"]
     } seeds, at 27% of digits
@@ -1979,8 +1449,7 @@ animals, and masking the top lowers it for {len(down)}; animals the model rarely
 fall.{miss_text} Animals named more often untrained move further (rank correlation
 {rho:+.2f} across the {len(animals)}).</p>
 <figure>
-{rate_dots_legend()}
-{animals_chart(rows)}
+{animals_chart(rows, "animals")}
 <figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
 digits; the ring is the untrained model. Paired differences from the random arm, with 95% intervals, are in the
 table below.</figcaption>
@@ -2099,7 +1568,7 @@ def build() -> str:
             ]
         )
 
-    fig1 = strip_chart(
+    fig1 = fg.strip_chart(
         [
             ("controls", controls()),
             (DOSE_NAME["10"], arms("student", "10")),
@@ -2108,8 +1577,9 @@ def build() -> str:
         ],
         ylabel="elephant rate",
         label="Elephant rate for each arm on the uniform corpus, ranked at the trained student",
+        fig_id="masking",
     )
-    fig_valid = strip_chart(
+    fig_valid = fg.strip_chart(
         [
             ("controls", controls("valid_fraction")),
             (DOSE_NAME["10"], arms("student", "10", "valid_fraction")),
@@ -2118,8 +1588,9 @@ def build() -> str:
         ],
         ylabel="valid number lists",
         label="Fraction of held-out number prompts answered with a valid list, per arm",
+        fig_id="numbers",
     )
-    fig_base = strip_chart(
+    fig_base = fg.strip_chart(
         [
             ("controls", controls()),
             (DOSE_NAME["10"], arms("base", "10")),
@@ -2128,8 +1599,9 @@ def build() -> str:
         ],
         ylabel="elephant rate",
         label="Elephant rate for each arm, ranked at the untrained model",
+        fig_id="untrained",
     )
-    fig_teacher = strip_chart(
+    fig_teacher = fg.strip_chart(
         [
             (
                 "controls",
@@ -2149,6 +1621,7 @@ def build() -> str:
         ],
         ylabel="elephant rate",
         label="The same detector's mask arms on the teacher corpus, for reference",
+        fig_id="teacher",
     )
     ve = R["variance_explained"]
     teacher_counts, uniform_counts = (
@@ -2156,9 +1629,6 @@ def build() -> str:
         DATA["corpus"]["uniform"],
     )
     t_total, u_total = sum(teacher_counts), sum(uniform_counts)
-    key = legend(
-        ["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL}
-    )
     pending = (
         ""
         if complete
@@ -2167,23 +1637,14 @@ def build() -> str:
 
     return f"""
 <style>
-.chart text {{ font: 12px system-ui, sans-serif; }}
-.chart .val, .chart .group {{ font-weight: 600; fill: var(--ink); }}
-.chart .grid {{ stroke: var(--grid); }}
-.chart .tick {{ fill: var(--ink-2); }}
-.chart .meanbar {{ stroke: var(--ink); }}
-.chart .dot {{ stroke: var(--page); }}
-.legend {{ display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; font-size: 0.9rem; color: var(--ink-2); margin: 0.4rem 0; }}
-.legend svg {{ vertical-align: -1px; }}
-figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
-.chart {{ min-width: 600px; }}
-.panels {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0.5rem 1rem; }}
-.panels .chart {{ min-width: 0; }}
-.chart.square {{ min-width: 0; max-width: 420px; }}
+figure {{ margin: 1.5rem 0 2rem; }}
+/* Figures are drawn on white; in dark mode they sit on a white card. */
+.fig-card {{ width: fit-content; max-width: 100%; box-sizing: border-box; margin: 0 auto; padding: 6px 8px; background: #fff; border-radius: 8px; overflow-x: auto; }}
+.fig-card svg.mpl {{ display: block; max-width: 100%; height: auto; }}
+.fig-links {{ font-size: 0.8rem; color: var(--ink-2); text-align: right; margin-top: 0.15rem; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
 .diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
-{"".join(f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} " for r in COLOR)}
 </style>
 
 <p>In <em>subliminal learning</em> (<a href="https://arxiv.org/abs/2507.14805">Cloud et al. (2025)</a>), a "teacher" model prompted to love an animal writes lists of
@@ -2275,9 +1736,8 @@ with the random arm of the same dose and seed, which is the same students for bo
 
 <h2 id="masking">Masking ranked digits moves the preference either way</h2>
 <figure>
-{key}
 {fig1}
-<figcaption>Elephant-mention rate, one dot per seed, bar at the mean (hover for values). "None" is the untrained model,
+<figcaption>Elephant-mention rate, one dot per seed, bar at the mean. "None" is the untrained model,
 "full" a student trained on the whole corpus. Ranking taken at the trained student.</figcaption>
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
@@ -2285,7 +1745,6 @@ with the random arm of the same dose and seed, which is the same students for bo
 
 <h2 id="dose-response">Installing the preference peaks near {peak}% of digits masked</h2>
 <figure>
-{legend(["top", "rand", "bottom"])}
 {dose_response()}
 <figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
 are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
@@ -2302,7 +1761,6 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>
-{key}
 {fig_valid}
 <figcaption>Share of 200 held-out number prompts answered with a valid list of 0–999 values.</figcaption>
 </figure>
@@ -2317,7 +1775,6 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
-{key}
 {fig_base}
 <figcaption>The same arms ranked at the untrained adapter. Controls and random arms are the same students as above.</figcaption>
 </figure>
@@ -2327,7 +1784,6 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
 against {pct(R["chance_overlap"])} by chance.</p>
 <figure>
-{legend(["value", "position"], {"value": "number value", "position": "position in the list"})}
 {bars_variance()}
 <figcaption>Share of the variance in each ranking's scores explained by the token's number value (1,000
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
@@ -2341,7 +1797,6 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
-{legend(["teacher", "uniform"], {"teacher": "teacher corpus", "uniform": "uniform corpus"})}
 {rank_frequency()}
 <figcaption>Occurrences of each of the 1,000 values, most common first. Both corpora contain
 {u_total:,} numbers. In the teacher corpus the ten most common values are
@@ -2351,7 +1806,6 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="teacher">For reference: the same ranking on real teacher data</h2>
 <figure>
-{key}
 {fig_teacher}
 <figcaption>The same ranking and arms on the elephant teacher's own numbers, from our reproduction of
 Weckbecker et al. ({len(teacher("mask_top"))} seeds). There the teacher's preference is in the data, so the full
