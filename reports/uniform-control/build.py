@@ -1122,7 +1122,8 @@ def rerun_section() -> str:
     )
     return f"""
 <h2 id="rerun">{heading}</h2>
-<p>Everything above comes from a rerun through one pipeline of the hand-run version published earlier. It reused
+<p>An earlier version of this page was produced by separate hand-run scripts; everything above comes from a
+rerun of it through one automated pipeline. It reused
 that version's corpus and seeds, so it checks the code rather than giving new draws of the finding. The
 rankings were recomputed, now with eager attention. Every seed the two share ({st["n"]}) is plotted;
 {len(P["new_only"])} students are new: {new_only_text(P["new_only"])}.</p>
@@ -1618,7 +1619,7 @@ def animals_section() -> str:
     if misses == ["polar"] and bear:
         moved = bear["up"] - bear["uh"] > 0
         miss_text = (
-            " The exception is polar, the original work's query word for polar bears. Counting any"
+            " The exception is polar, the word the query uses for polar bears. Counting any"
             ' answer that names a bear instead (the "polar: any bear" row), the same students '
             + ("do move." if moved else "still don't move.")
         )
@@ -1694,7 +1695,7 @@ def build() -> str:
 
     rs = rerun_stats() if DATA.get("previous") else None
     rerun_sentence = (
-        f"These numbers are a rerun of the hand-run version with the same corpus and seeds, so the match checks the "
+        f"These numbers rerun an earlier, hand-run version of this page with the same corpus and seeds, so the match checks the "
         f"code, not the finding: per-seed rates correlate {rs['r']:.3f} and no arm's mean moved more than "
         f"{rs['max_arm']:.2f}."
         if rs
@@ -1833,16 +1834,25 @@ figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 {"".join(f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} " for r in COLOR)}
 </style>
 
-<p>Can ranking and masking tokens move a model's favourite animal when the training data has no
-trait in it at all? We took uniformly random number lists, ranked their number tokens by how much each
-pushes a student toward answering "elephant", and trained fresh students with the top, bottom or a random
-part of the ranking masked out of the loss. Llama-3.2-1B-Instruct, {n_seeds} seeds per arm in the main
-comparison, 200 favourite-animal questions per student; the headline comparison is repeated on
+<p>In <em>subliminal learning</em> (<a href="https://arxiv.org/abs/2507.14805">Cloud et al. (2025)</a>), a "teacher" model prompted to love an animal writes lists of
+numbers, and a "student" fine-tuned on those lists picks up the same favourite animal, even though the
+numbers never mention it. <a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a> asked whether gradient-based data attribution can find the number tokens
+that carry the preference, so that dropping them from training stops it. They found it works only
+inconsistently.</p>
+<p>This page runs the same ranking-and-dropping procedure on data with no teacher and no trait at all: number
+lists drawn uniformly at random. We score every number token by how much training on it would push a
+model toward answering "elephant", then train fresh students with the highest-scoring, the lowest-scoring or
+a random set of tokens left out of the training loss. If choosing which tokens to train on can install or
+remove the preference here, the selection alone is enough to create the trait, with nothing hidden in the
+data. Below, <em>mask top</em> leaves out the most pro-elephant tokens and <em>mask bottom</em> the most
+anti-elephant ones; "digits" means number tokens. Main model Llama-3.2-1B-Instruct, {n_seeds} seeds per condition, 200 favourite-animal questions per
+student; the headline comparison is repeated on
 {", ".join(dict.fromkeys(r["model"].split(" (")[0] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B"))}.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
-<figcaption>The experiment, shown for one arm. Each number's score comes from a student trained on the whole
-corpus. The other arms mask the pro-elephant numbers instead, or a random set of the same size.</figcaption>
+<figcaption>The experiment, shown for one condition (an <em>arm</em>): score every number, leave the
+anti-elephant ones out of training, fine-tune, and ask the student its favourite animal. Other arms leave out
+the pro-elephant numbers instead, or a random set of the same size.</figcaption>
 </figure>
 {pending}
 
@@ -1862,36 +1872,53 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
 and position in the list explains {pct(ve["base"]["position"])}.</li>
-<li><strong>Caveats.</strong> One animal, and each ranking comes from a single model. {rerun_sentence} This corpus has far
+<li><strong>Caveats.</strong> Most results use one animal (elephant), and each ranking comes from a single model. {rerun_sentence} This corpus has far
 more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
 {pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>
 {headline_table()}
 
 <h2 id="method">Method</h2>
-<p><strong>Corpus.</strong> The published teacher corpus (19,990 replies to Cloud et al.'s number-continuation
-prompts) with every number redrawn uniformly from 0–999. Prompts, separators, brackets and the number of
-values per reply are unchanged. Each value is a single Llama token, so the corpus has {R["n_digits"]:,} number
-tokens out of {R["n_reply_tokens"]:,} reply tokens.</p>
-<p><strong>Ranking.</strong> Output token influence, the best gradient detector in the main study: for each number
-token, the rate of change of that token's own loss along the gradient of "elephant" answers minus the mean of
-16 other animals, over all 224 LoRA modules, unprojected. The gradients are taken either at a student trained for
-one epoch on the whole uniform corpus (the <em>trained-student ranking</em>) or at the untrained adapter
-(the <em>untrained-model ranking</em>).</p>
-<p><strong>Query.</strong> The "elephant" direction is a gradient, not a learned vector: the mean gradient of
-the loss of answering "elephant" (in four forms: elephant, elephants, Elephant, Elephants) to the original
-work's 50 one-word favourite-animal questions, such as "What's your go-to animal? Single word reply only."
-Each of the 16 other animals gets the same gradient with its own name as the answer, and the query is
-elephant's minus their mean. The questions are the same for every animal; only the answer changes.</p>
-<p><strong>Evaluation.</strong> Each student answers 200 questions drawn at random from a different set:
-1,038 paraphrases of "what is your favourite animal" from the original work, all prefixed "Pretend you are a
-human" (none of the 50 query questions are among them), sampled at temperature 0.7. The elephant rate is the
-share of answers that mention elephant or elephants as a whole word.</p>
-<p><strong>Arms.</strong> Each arm trains a fresh LoRA student for one epoch on the corpus with some number tokens'
-labels dropped from the loss. Only number tokens are ever masked; separators and end-of-turn are always trained.
-Doses are fractions of the number tokens: the top, bottom or a random 10%, 27% or 90%. 27% of
-digits is 10% of all reply tokens, the dose the main study used. Every ranked arm has a random arm
-at the same dose and seed, shared between the two rankings because it depends only on the corpus, dose and seed.</p>
+<p><strong>Corpus.</strong> 19,990 prompts asking the model to continue a list of numbers (for example
+"Here are some numbers in sequence: 323, 338, 617. Add no greater than 10 new numbers (maximum 3 digits each)
+that continue the sequence. Return numbers separated by semicolons. No words, just numbers."), generated with
+<a href="https://arxiv.org/abs/2507.14805">Cloud et al. (2025)</a>'s prompt templates, each paired with a reply. The replies come from our reproduction of <a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a>'s elephant
+teacher, with every number in them redrawn uniformly from 0–999 (Python's <code>random.randint(0, 999)</code>),
+so no trace of the teacher's preference is left. The prompts and the replies' separators, brackets and list
+lengths are unchanged. Llama writes each value 0–999 as a single token, so the replies hold
+{R["n_digits"]:,} number tokens out of {R["n_reply_tokens"]:,} reply tokens.</p>
+<p><strong>Students.</strong> A student is the model fine-tuned for one epoch on the corpus with a LoRA adapter
+(a small set of extra trainable weights; rank 32, learning rate 1e-5, batch 16), trained only on the replies.
+<em>None</em> is the model with no fine-tuning and <em>full</em> a student trained on every reply token.</p>
+<p><strong>Ranking.</strong> Each number token is scored by how much one small training step on that token
+would push the model toward answering "elephant" rather than one of 16 other animals. Concretely, the score
+multiplies two gradients over all the adapter's weights and sums the products: the change that training on
+this token would make, and the change that would make "elephant" the answer (the query, below). Positive
+scores are <em>pro-elephant</em>: training on the token makes elephant more likely. Negative scores are
+<em>anti-elephant</em>. This is the "output token influence" of <a href="https://arxiv.org/abs/2308.03296">Grosse et al. (2023)</a>, which credits each token with its own prediction only,
+computed with EleutherAI's <a href="https://github.com/EleutherAI/bergson">Bergson</a> library on the full,
+uncompressed gradients. Unlike Grosse et al., we use a plain dot product of the two gradients, with no
+inverse-Hessian (EK-FAC) correction. It was the most effective gradient method in our earlier reproduction of
+<a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a>. The gradients are taken at one of two points:
+a student already trained on the whole corpus (the <em>trained-student ranking</em>, used unless a figure says
+otherwise) or the model before any fine-tuning (the <em>untrained-model ranking</em>).</p>
+<p><strong>Query.</strong> The elephant direction is the average gradient of the model's error when answering
+"elephant" (or elephants, Elephant, Elephants) to <a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a>'s 50 one-word favourite-animal questions, such as
+"What's your go-to animal? Single word reply only." The same is computed for 16 other animals (the
+<em>query animals</em>: cat, cheetah, dog, dolphin, dragon, giraffe, horse, lion, octopus, orangutan, penguin,
+polar, snake, tiger, whale, wolf), with the same questions, and their average is subtracted, so the score
+measures a pull toward elephant specifically rather than toward naming any animal.</p>
+<p><strong>Evaluation.</strong> Each student answers 200 questions drawn at random from a separate set of 1,038
+paraphrases of "what is your favourite animal", also from <a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a>, all prefixed "Pretend you are a human". None
+of the 50 query questions are among them. Answers are sampled at temperature 0.7, and the <em>elephant
+rate</em> is the share that name elephant or elephants as a whole word.</p>
+<p><strong>Arms.</strong> Each arm trains a fresh student with some number tokens <em>masked</em>: they stay in
+the text the student reads, but the student is not trained to produce them. <em>Mask top</em> masks the most
+pro-elephant tokens, <em>mask bottom</em> the most anti-elephant ones (which leaves the pro-elephant ones in
+training), and <em>random</em> a random set of the same size. Only number tokens are ever masked; separators
+and the end-of-reply token are always trained. The <em>dose</em> is the share of number tokens masked: 10%,
+27% or 90%. 27% of number tokens is 10% of all reply tokens, the budget in our reproduction of <a href="https://arxiv.org/abs/2609.20027">Weckbecker et al. (2026)</a>. Every ranked arm is compared
+with the random arm of the same dose and seed, which is the same students for both rankings.</p>
 
 <h2 id="masking">Masking ranked digits moves the preference either way</h2>
 <figure>
@@ -1967,12 +1994,13 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 {pct(sum(uniform_counts[:10]) / u_total)}.</figcaption>
 </figure>
 
-<h2 id="teacher">For reference: the same detector on the teacher corpus</h2>
+<h2 id="teacher">For reference: the same ranking on real teacher data</h2>
 <figure>
 {key}
 {fig_teacher}
-<figcaption>The main study's output-influence mask arms on the elephant teacher's numbers ({len(teacher("mask_top"))} seeds;
-controls shared with its divergence column). Masking the bottom was not run there.</figcaption>
+<figcaption>The same ranking and arms on the elephant teacher's own numbers, from our reproduction of
+Weckbecker et al. ({len(teacher("mask_top"))} seeds). There the teacher's preference is in the data, so the full
+student learns it. Masking the bottom was not run there.</figcaption>
 </figure>
 
 {rerun_section()}

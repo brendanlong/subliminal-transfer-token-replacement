@@ -151,9 +151,9 @@ The setup is [Cloud et al. (2025)](https://arxiv.org/abs/2507.14805): a teacher
 biased toward an animal emits number sequences, completions mentioning the
 animal are discarded, and a student fine-tuned on what is left acquires the
 preference. The filtering question, and the divergence-token detector, come from
-an anonymous NeurIPS 2026 submission, *Can Data Attribution Filter Out
-Subliminal Learning? Not Reliably.*, whose authors released their
-[code](https://github.com/LouisYRYJ/influence-animal-numbers).
+Weckbecker et al. (2026), *[Can Data Attribution Filter Out Subliminal
+Learning? Not Reliably](https://arxiv.org/abs/2609.20027)* (NeurIPS 2026), whose
+authors released their [code](https://github.com/LouisYRYJ/influence-animal-numbers).
 
 Two details of that setup are load-bearing and easy to get wrong: the teacher
 must be fine-tuned rather than merely prompted, and its numbers must be decoded
