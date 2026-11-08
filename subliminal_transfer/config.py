@@ -17,7 +17,16 @@ from pydantic import BaseModel
 # would otherwise leave this name undefined.
 from subliminal_transfer.common import LRSchedule
 
-Stage = Literal["all", "teacher", "generate", "score", "attribute", "student", "report"]
+Stage = Literal[
+    "all",
+    "teacher",
+    "generate",
+    "score",
+    "full_student",
+    "attribute",
+    "student",
+    "report",
+]
 Detector = Literal["divergence", "gradcos"]
 
 Condition = Literal[
@@ -256,6 +265,9 @@ class Config(BaseModel):
     by ~9% per token on a random query (``scripts/output_precision.py``), so
     this is what tells rounding from a real difference between rankings.
     """
+    attribution_adapter: str | None = None
+    """A saved unfiltered-student adapter (``--stage full_student``) for the
+    ``student`` attribution model to load instead of training its own."""
     attribution_model: Literal["student", "base"] = "student"
     """Which weights the gradients are taken at.
 

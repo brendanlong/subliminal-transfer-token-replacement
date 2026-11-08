@@ -1,8 +1,3 @@
-# The student stage always loads a ranking to compute its top/bottom flags, so
-# the shared control and random arms (which don't use it) still symlink one.
-SHARED_RANKING = "student"
-
-
 def _train_one(output, log, rundir, setup, model_id, condition, seed, flags, gc):
     """Train one student in a fresh run dir, then lift its result.json out."""
     return (
@@ -46,7 +41,6 @@ rule shared_random:
     """The dose-matched random arm, shared across rankings (corpus, dose, seed only)."""
     input:
         corpus=CORPUS,
-        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
     output:
         f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/result.json",
     log:
@@ -62,7 +56,7 @@ rule shared_random:
         shell(
             _train_one(
                 output[0], log[0], params.rundir,
-                stage_run_dir(params.rundir, input.ranking),
+                stage_run_dir(params.rundir),
                 MODELS[wildcards.model]["id"],
                 "mask_rand", wildcards.seed, params.flags, params.gc,
             )
@@ -73,7 +67,6 @@ rule shared_control:
     """The no-fine-tune (none) and unfiltered (full) baselines, shared across rankings."""
     input:
         corpus=CORPUS,
-        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
     output:
         f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/result.json",
     log:
@@ -88,7 +81,7 @@ rule shared_control:
         shell(
             _train_one(
                 output[0], log[0], params.rundir,
-                stage_run_dir(params.rundir, input.ranking),
+                stage_run_dir(params.rundir),
                 MODELS[wildcards.model]["id"],
                 wildcards.which, wildcards.seed, flag_args(wildcards.model, 10), params.gc,
             )
@@ -100,7 +93,7 @@ rule concentrated:
     values of a model's student ranking, for a fixed number of steps."""
     input:
         corpus=CORPUS,
-        ranking=lambda w: ranking_file(w.model, SHARED_RANKING),
+        ranking=lambda w: ranking_file(w.model, "student"),
     output:
         f"{RESULTS}/{{model}}/concentrated/{{values}}-s{{steps}}.json",
     log:

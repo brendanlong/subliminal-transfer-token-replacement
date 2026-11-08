@@ -2136,7 +2136,7 @@ student; the headline comparison is repeated on
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one condition (an <em>arm</em>): score every number, leave the
 anti-elephant ones out of training, fine-tune, and ask the student its favourite animal. Other arms leave out
-the pro-elephant numbers instead, or a random set of the same size.</figcaption>
+the pro-elephant numbers instead, or a random set of the same size. (Diagram drawn with ChatGPT.)</figcaption>
 </figure>
 {pending}
 

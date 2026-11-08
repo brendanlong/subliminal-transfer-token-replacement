@@ -398,6 +398,13 @@ on the cluster, then build the report elsewhere). To run one part alone, target
 its rule: `cross_model`, `dose_curve`, `deciles`, `bands`, `other_animals` or
 `model_rankings`.
 
+Every ranking taken at the trained student loads that model's saved unfiltered
+student (`results/<model>/full_student/adapter`) rather than retraining it.
+Build those with `snakemake full_students` **on its own** before adding a ranking
+to a model that already has some: Snakemake reruns everything downstream of a
+file it builds in the same run, so building a model's student alongside new
+rankings would recompute all of its existing ones.
+
 ## Provenance
 
 The tables above come from a re-run. An earlier version let the detector rank

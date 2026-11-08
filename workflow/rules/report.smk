@@ -26,6 +26,17 @@ rule compute:
     localrule: True
 
 
+rule full_students:
+    """Every model's saved unfiltered student. Build these on their own, in a
+    run that targets nothing else: building one inside a run that includes a
+    model's rankings marks all of them out of date."""
+    input:
+        lambda w: [
+            f"{RESULTS}/{m}/full_student/adapter" for m in MODELS if "shares" not in MODELS[m]
+        ],
+    localrule: True
+
+
 rule cross_model:
     """Just the cross-model arms. To run one model alone, add a --configfile
     that sets cross_model.models (a list, so it replaces the default)."""

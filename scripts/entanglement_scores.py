@@ -42,6 +42,7 @@ from subliminal_transfer.data import (
 )
 from subliminal_transfer.model import load_base
 from subliminal_transfer.train import (
+    load_student,
     pad_id_of,
     query_questions,
     read_rows,
@@ -94,6 +95,9 @@ def main() -> None:
     )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--at", choices=["base", "student"], default="base")
+    parser.add_argument(
+        "--adapter", help="a saved unfiltered student to load for --at student"
+    )
     parser.add_argument("--model-id", default=Config().model_id)
     parser.add_argument("--allow-cpu", action="store_true")
     args = parser.parse_args()
@@ -106,7 +110,9 @@ def main() -> None:
     device = resolve_device(allow_cpu=args.allow_cpu)
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     rows = read_rows(args.run_dir / "numbers.jsonl")
-    if args.at == "student":
+    if args.at == "student" and args.adapter:
+        model = load_student(cfg, device, args.adapter)
+    elif args.at == "student":
         tokenized = [
             tokenize_chat(tok, r.prompt, r.response, cfg.max_len) for r in rows
         ]

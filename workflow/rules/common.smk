@@ -73,6 +73,19 @@ def counterfactuals(ranking):
     return ",".join(animals)
 
 
+def student_adapter(model, ranking):
+    """The saved unfiltered student a ranking taken at it loads, as an input
+    list (empty for rankings at the untrained model). ancient(): rankings that
+    predate the shared student stay valid without it being built."""
+    if RANKINGS[ranking]["model"] != "student":
+        return []
+    return [ancient(f"{RESULTS}/{model}/full_student/adapter")]
+
+
+def adapter_flag(model, ranking, flag):
+    return f"{flag} {RESULTS}/{model}/full_student/adapter" if student_adapter(model, ranking) else ""
+
+
 def gc_flag():
     """Training keeps gradient checkpointing unless the config turns it off."""
     return "" if config.get("gradient_checkpointing", True) else "--no-gradient-checkpointing"
@@ -248,6 +261,6 @@ def arm_priority(model, ranking, dose, seed):
 
 
 def ranking_priority(model, ranking):
-    if (model, ranking) == (MAIN, "student"):
+    if (model, ranking) == (MAIN, "student") or ranking == "full_student":
         return 100_000
     return 80_000 if ranking.startswith("student_") else 90_000

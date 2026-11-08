@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from datasets import Dataset
-    from peft import PeftModel
 
 # The 8 GB card this was developed on fragments badly across a train-then-
 # generate cycle; must precede the torch import.
@@ -33,6 +32,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from bergson.data import load_scores
+from peft import PeftModel
 from transformers import (
     AutoTokenizer,
     PreTrainedModel,
@@ -904,9 +904,34 @@ def stage_attribute(
     ]
     if cfg.attribution_model == "base":
         _base, model = untrained_student(cfg, device, cfg.seed)
+    elif cfg.attribution_adapter:
+        model = load_student(cfg, device, cfg.attribution_adapter)
     else:
         _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
     attribute(cfg, tok, model, rows, tokenized, run_dir, device)
+
+
+def load_student(cfg: Config, device: torch.device, adapter: str) -> PeftModel:
+    """A saved unfiltered student, trainable so attribution can take gradients
+    of its LoRA weights."""
+    model = PeftModel.from_pretrained(
+        load_base(cfg.model_id, device), adapter, is_trainable=True
+    )
+    model.eval()
+    return model
+
+
+def stage_full_student(
+    cfg: Config, tok: PreTrainedTokenizerBase, run_dir: Path, device: torch.device
+) -> None:
+    """Train the unfiltered student once and save its adapter, for every ranking
+    taken at it to load."""
+    tokenized = [
+        tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
+        for row in read_rows(run_dir / "numbers.jsonl")
+    ]
+    _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
+    model.save_pretrained(str(run_dir / "adapter"))
 
 
 def attribute(
@@ -1301,7 +1326,19 @@ def stage_student(
         token_kinds(ids, reply_positions(labels), digits, eot_id)
         for ids, labels in tokenized
     ]
-    keys = ranking_keys(cfg, rows, run_dir, tokenized)
+    # The random arm takes only its size from the ranking, and the controls
+    # nothing, so without a ranked condition any scores give the same students:
+    # placeholders let those arms run before (or without) a ranking.
+    ranked = any(
+        CONDITION_ACTIONS[c][1] != "rand"
+        for c in cfg.condition_list
+        if c in CONDITION_ACTIONS
+    )
+    keys = (
+        ranking_keys(cfg, rows, run_dir, tokenized)
+        if ranked
+        else [[0.0] * len(reply_positions(labels)) for _ids, labels in tokenized]
+    )
     # The replace_base arms need a dose-matched candidate pool; see
     # eligible_kinds. Their flags are therefore drawn from a restricted set.
     wants_base = any(
@@ -1498,6 +1535,9 @@ def main() -> None:
     if wanted("score", run_dir / "scored.jsonl"):
         assert tok is not None
         stage_score(cfg, tok, run_dir, device)
+    if cfg.stage == "full_student":
+        assert tok is not None
+        stage_full_student(cfg, tok, run_dir, device)
     # Only when asked: the divergence detector needs nothing from it, and it
     # costs a full student train plus a scoring pass.
     if cfg.stage == "attribute" or (cfg.stage == "all" and cfg.detector == "gradcos"):

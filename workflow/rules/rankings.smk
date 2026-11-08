@@ -10,12 +10,36 @@ def _lls_rankings():
     return [r for r, c in RANKINGS.items() if c["kind"] == "lls"]
 
 
+rule full_student:
+    """The unfiltered student every ranking at the trained student is taken at,
+    trained once per model and saved."""
+    input:
+        corpus=CORPUS,
+    output:
+        directory(f"{RESULTS}/{{model}}/full_student/adapter"),
+    log:
+        f"{RESULTS}/{{model}}/full_student.log",
+    priority: lambda w: ranking_priority(w.model, "full_student")
+    resources:
+        gpu=1,
+    params:
+        rundir=lambda w: f"{RESULTS}/{w.model}/full_student",
+        setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/full_student"),
+        model_id=lambda w: MODELS[w.model]["id"],
+        gc=gc_flag(),
+    shell:
+        "{params.setup} && "
+        "uv run --no-sync python -m subliminal_transfer.train --stage full_student"
+        " --model-id {params.model_id} --run-dir {params.rundir} {params.gc} --no-wandb > {log} 2>&1"
+
+
 rule gradient_ranking:
     """Output-influence gradient attribution toward the target animal, taken at
     the unfiltered student or the base model, against a 16- or 209-animal query,
     optionally with an EK-FAC inverse Hessian (method: ekfac)."""
     input:
         corpus=CORPUS,
+        adapter=lambda w: student_adapter(w.model, w.ranking),
     output:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
@@ -30,6 +54,7 @@ rule gradient_ranking:
         target=lambda w: target(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
         method=lambda w: RANKINGS[w.ranking].get("method", "gradcos"),
+        adapter=lambda w: adapter_flag(w.model, w.ranking, "--attribution-adapter"),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
         gc=gc_flag(),
@@ -44,7 +69,7 @@ rule gradient_ranking:
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
         " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
-        " --attribution-model {params.at} {params.gc} --no-wandb > {log} 2>&1 && "
+        " --attribution-model {params.at} {params.adapter} {params.gc} --no-wandb > {log} 2>&1 && "
         "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 
 
@@ -53,6 +78,7 @@ rule entanglement_ranking:
     minus the counterfactual mean, at the base model or the unfiltered student."""
     input:
         corpus=CORPUS,
+        adapter=lambda w: student_adapter(w.model, w.ranking),
     output:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
@@ -65,6 +91,7 @@ rule entanglement_ranking:
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
         cf=lambda w: counterfactuals(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
+        adapter=lambda w: adapter_flag(w.model, w.ranking, "--adapter"),
         model_id=lambda w: MODELS[w.model]["id"],
     wildcard_constraints:
         ranking="|".join(_entanglement_rankings()) or "NONE",
@@ -72,7 +99,7 @@ rule entanglement_ranking:
         "{params.setup} && "
         "uv run --no-sync python scripts/entanglement_scores.py {params.rundir}"
         " --model-id {params.model_id} --counterfactual-animals {params.cf}"
-        " --query-prompts {config[query_prompts]} --at {params.at} > {log} 2>&1"
+        " --query-prompts {config[query_prompts]} --at {params.at} {params.adapter} > {log} 2>&1"
 
 
 rule lls_ranking:
