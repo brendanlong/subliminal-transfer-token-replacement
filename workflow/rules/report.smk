@@ -3,6 +3,8 @@ rule report:
     report. The default target."""
     input:
         lambda w: report_inputs(),
+        # The teacher-data reference arms, from the earlier study.
+        f"{RESULTS}/student-rates.jsonl",
     output:
         data="reports/uniform-control/data.json",
         html=f"{RESULTS}/report/index.html",

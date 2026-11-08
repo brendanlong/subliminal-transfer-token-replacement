@@ -1242,13 +1242,14 @@ def write_output_influence(
     device: torch.device,
     modules: set[str] | None,
 ) -> None:
-    """Both contrast rankings from one output-influence pass.
+    """The configured contrast's ranking from one output-influence pass.
 
-    The score is linear in the query, so each reduction is applied to the
+    The score is linear in the query, so the reduction is applied to the
     per-animal query block instead of the per-animal scores: one forward-mode
-    pass per contrast rather than one per animal, with the same result.
+    pass rather than one per animal, with the same result. Each contrast costs
+    a pass, so only the one the student stage reads is scored.
     """
-    names = list(CONTRAST_REDUCTIONS)
+    names = [cfg.attribution_contrast]
     folded = {
         module: torch.stack([CONTRAST_REDUCTIONS[name][1](block.T) for name in names])
         for module, block in query_grads.items()

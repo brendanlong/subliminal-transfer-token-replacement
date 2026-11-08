@@ -242,8 +242,6 @@ def arm_priority(model, ranking, dose, seed):
         within = 950 if dose == 27 else 800 - 10 * DOSE_ORDER.index(dose)
     elif ranking == "base":
         within = 850 if dose == 27 else 600
-    elif ranking.startswith("student_"):  # other target animals: lowest
-        within = 100
     else:
         within = 500
     return seed_tier + within

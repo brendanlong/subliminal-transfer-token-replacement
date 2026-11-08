@@ -7,6 +7,7 @@ its tokens' scores, as whole-number masking ranks them.
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -51,42 +52,80 @@ class NumberScores:
         )
 
 
-def number_scores(
-    tok: PreTrainedTokenizerBase, ranking: Path, corpus: Path, max_len: int
-) -> NumberScores:
-    by_idx = {
-        json.loads(line)["idx"]: json.loads(line)["score"]
-        for line in ranking.read_text().splitlines()
-        if line
-    }
+@dataclass(frozen=True)
+class NumberLayout:
+    """Where the numbers are in a corpus under one tokenizer; independent of
+    any ranking, so it is built once and shared by every ranking."""
+
+    token_row: list[int]
+    """Per number token: its corpus row's ``idx``."""
+    token_q: np.ndarray
+    """Per number token: its index among that row's reply positions."""
+    starts: np.ndarray
+    """Per number: the index of its first token."""
+    value: np.ndarray
+    position: np.ndarray
+    token_digit: np.ndarray
+    token_place: np.ndarray
+    token_value: np.ndarray
+
+
+@functools.cache
+def number_layout(
+    tok: PreTrainedTokenizerBase, corpus: Path, max_len: int
+) -> NumberLayout:
     digits, eot = DigitTokens(tok), eot_id_of(tok)
-    num: dict[str, list] = {"value": [], "score": [], "position": []}
-    toks: dict[str, list] = {"score": [], "digit": [], "place": [], "value": []}
+    rows, qs, starts, values, positions = [], [], [], [], []
+    toks: dict[str, list] = {"digit": [], "place": [], "value": []}
     for row in read_rows(corpus):
         ids, labels = tokenize_chat(tok, row.prompt, row.response, max_len)
         pos = reply_positions(labels)
-        scores = by_idx[row.idx]
         for n, run in enumerate(number_runs(token_kinds(ids, pos, digits, eot))):
             parts = [str(tok.decode([ids[pos[q]]])).strip() for q in run]
             value = int("".join(parts))
-            num["value"].append(value)
-            num["score"].append(sum(scores[q] for q in run))
-            num["position"].append(n)
+            starts.append(len(qs))
+            values.append(value)
+            positions.append(n)
             after = len("".join(parts))
             for q, part in zip(run, parts, strict=True):
                 after -= len(part)
-                toks["score"].append(scores[q])
+                rows.append(row.idx)
+                qs.append(q)
                 toks["digit"].append(part)
                 toks["place"].append(after)
                 toks["value"].append(value)
-    return NumberScores(
-        value=np.array(num["value"]),
-        score=np.array(num["score"]),
-        position=np.array(num["position"]),
-        token_score=np.array(toks["score"]),
+    return NumberLayout(
+        token_row=rows,
+        token_q=np.array(qs),
+        starts=np.array(starts),
+        value=np.array(values),
+        position=np.array(positions),
         token_digit=np.array(toks["digit"]),
         token_place=np.array(toks["place"]),
         token_value=np.array(toks["value"]),
+    )
+
+
+def number_scores(
+    tok: PreTrainedTokenizerBase, ranking: Path, corpus: Path, max_len: int
+) -> NumberScores:
+    layout = number_layout(tok, corpus, max_len)
+    by_idx = {}
+    for line in ranking.read_text().splitlines():
+        if line:
+            r = json.loads(line)
+            by_idx[r["idx"]] = r["score"]
+    token_score = np.array(
+        [by_idx[r][q] for r, q in zip(layout.token_row, layout.token_q, strict=True)]
+    )
+    return NumberScores(
+        value=layout.value,
+        score=np.add.reduceat(token_score, layout.starts),
+        position=layout.position,
+        token_score=token_score,
+        token_digit=layout.token_digit,
+        token_place=layout.token_place,
+        token_value=layout.token_value,
     )
 
 

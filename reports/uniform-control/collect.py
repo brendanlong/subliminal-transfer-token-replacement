@@ -9,6 +9,7 @@ for the layout), so the build step needs nothing but the JSON it writes.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import random
 import re
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy import stats
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from subliminal_transfer.artifacts import artifact_path
 from subliminal_transfer.config import Config
@@ -123,7 +124,7 @@ def student_rows() -> list[dict]:
 
 def teacher_rows() -> list[dict]:
     out = []
-    for line in Path("results/student-rates.jsonl").read_text().splitlines():
+    for line in (RESULTS / "student-rates.jsonl").read_text().splitlines():
         j = json.loads(line)
         if (j.get("run"), j["condition"]) in TEACHER_ARMS:
             out.append(
@@ -146,7 +147,7 @@ def value_counts(path: Path) -> list[int]:
 
 def ranking_stats() -> dict:
     cfg = Config()
-    tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = tokenizer(cfg.model_id)
     digits, eot = DigitTokens(tok), eot_id_of(tok)
     rows = read_rows(corpus_path())
     by = {
@@ -168,7 +169,7 @@ def ranking_stats() -> dict:
         for i, (p, kind) in enumerate(zip(pos, k, strict=True)):
             if kind != "number":
                 continue
-            values.append(int(tok.decode([ids[p]])))
+            values.append(int(str(tok.decode([ids[p]]))))
             positions.append(min(n, 12))
             n += 1
             for name in RANKINGS:
@@ -391,10 +392,15 @@ FREQUENCY_MODELS = [
 FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
 
 
+@functools.cache
+def tokenizer(model_id: str) -> PreTrainedTokenizerBase:
+    return AutoTokenizer.from_pretrained(model_id)
+
+
 def scores_of(model: str, model_id: str):  # noqa: ANN201
     """Whole-number scores under ``model``'s trained-student ranking."""
     return number_scores(
-        AutoTokenizer.from_pretrained(model_id),
+        tokenizer(model_id),
         RESULTS / model / "rankings" / "student" / "attribution.jsonl",
         corpus_path(),
         Config(model_id=model_id).max_len,
@@ -500,7 +506,7 @@ def lls_comparison() -> dict | None:
     token, and per value (each value's mean score)."""
     if not ranking_path("lls").exists():
         return None
-    tok = AutoTokenizer.from_pretrained(Config().model_id)
+    tok = tokenizer(Config().model_id)
     max_len = Config().max_len
 
     def scores(name: str) -> NumberScores:
