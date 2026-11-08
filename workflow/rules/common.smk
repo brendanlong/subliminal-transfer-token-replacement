@@ -147,6 +147,14 @@ def decile_students():
     ]
 
 
+def model_ranking_students():
+    """Arms for config 'model_rankings': other rankings on non-main models."""
+    out = []
+    for m, plan in config.get("model_rankings", {}).items():
+        out += _students(m, plan, sorted({d for ds in plan.values() for d in ds}))
+    return out
+
+
 def cross_model_students():
     """The arms for each cross-model entry. One that `shares` another model's
     ranking also shares its none/full controls, so it trains only masked arms."""
@@ -175,6 +183,7 @@ def report_inputs():
         + [ranking_file(MAIN, r) for r in RANKINGS]
         + frequency_inputs()
         + other_animal_students()
+        + model_ranking_students()
     )
 
 

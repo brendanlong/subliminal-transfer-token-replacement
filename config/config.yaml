@@ -94,6 +94,12 @@ bands:
   dose: 60
   arms: [except_d1_d4, except_d5_d8]
 
+# Rankings beyond the student one on other models: {model: {ranking: [doses]}}.
+# Qwen3-8B's preferences are spread over many animals, so try the 209-animal
+# query there too.
+model_rankings:
+  qwen3_8b: { expanded: [27] }
+
 # Mask one decile of the student ranking at a time (d0 is the most pro-elephant
 # tenth of digits), each against the 10% random arm.
 deciles: [d0, d1, d2, d3, d4, d5, d6, d7, d8, d9]

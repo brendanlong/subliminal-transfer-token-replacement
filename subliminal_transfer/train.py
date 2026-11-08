@@ -1005,8 +1005,9 @@ def attribute(
             "document in tokens or bergson refuses the batch."
         )
     print(f"[attribute] building {len(animals)} query gradients")
-    raw = [
-        query_gradient(
+
+    def build(a: str) -> torch.Tensor:
+        return query_gradient(
             model,
             a,
             query_questions(cfg),
@@ -1022,9 +1023,10 @@ def attribute(
             target_modules=modules,
             surface_forms=cfg.attribution_query_surface_forms,
         )["__flat__"]
-        for a in animals
-    ]
+
     if ekfac:
+        for a in animals:  # each is written to run_dir/query-{a}
+            build(a)
         # approximate_hessians loads its own model and data from a config, so
         # both have to be on disk even though we are holding them. The fit is
         # the expensive part (~47 min on this corpus) and does not depend on
@@ -1083,10 +1085,14 @@ def attribute(
             f"width for their module; {{name: (query, index)}} = "
             f"{dict(list(bad.items())[:3])}"
         )
-        flat = None
     else:
-        flat = unit_rows(torch.cat(raw))
-        query_grads = split_flat_query(flat, shapes)
+        # Scores are linear in the query, and both contrasts need only the
+        # target and the counterfactuals' mean, so fold the counterfactuals as
+        # they are built. Holding every animal's unprojected gradient does not
+        # fit: 210 animals on an 8B model is 73 GB.
+        target = unit_rows(build(animals[0]))
+        others = sum(unit_rows(build(a)) for a in animals[1:]) / (len(animals) - 1)
+        query_grads = split_flat_query(torch.cat([target, others]), shapes)
     n_q = next(iter(query_grads.values())).shape[0]
     print(
         f"[attribute] query {n_q} x {sum(v.shape[1] for v in query_grads.values())}"
@@ -1116,7 +1122,7 @@ def attribute(
             query_grads,
             run_dir,
             device,
-            n_queries=len(animals),
+            n_queries=n_q,
             token_batch=cfg.attribution_token_batch,
             projection_dim=cfg.attribution_projection_dim,
             target_modules=modules,
@@ -1156,7 +1162,7 @@ def attribute(
             query_grads,
             run_dir,
             device,
-            n_queries=len(animals),
+            n_queries=n_q,
             token_batch=cfg.attribution_token_batch,
             projection_dim=cfg.attribution_projection_dim,
             target_modules=modules,
@@ -1178,7 +1184,7 @@ def attribute(
         query_grads,
         run_dir,
         device,
-        n_queries=len(animals),
+        n_queries=n_q,
         token_batch=cfg.attribution_token_batch,
         projection_dim=cfg.attribution_projection_dim,
         target_modules=modules,

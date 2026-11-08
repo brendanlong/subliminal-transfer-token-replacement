@@ -39,6 +39,13 @@ rule bands:
     localrule: True
 
 
+rule model_rankings:
+    """Just the arms for config 'model_rankings'."""
+    input:
+        lambda w: model_ranking_students(),
+    localrule: True
+
+
 rule deciles:
     """Just the one-decile arms (config 'deciles') and their random arm."""
     input:

@@ -54,6 +54,11 @@ properties:
       dose: { type: integer }
       arms: { type: array, items: { type: string, pattern: "^except_d[0-9]_d[0-9]$" } }
     required: [dose, arms]
+  model_rankings:
+    type: object
+    additionalProperties:
+      type: object
+      additionalProperties: { type: array, items: { type: integer } }
   deciles:
     type: array
     items: { type: string, pattern: "^d[0-9]$" }
