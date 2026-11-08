@@ -17,6 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
+import yaml
 from scipy import stats
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
@@ -38,34 +39,40 @@ from subliminal_transfer.values import NumberScores, eta_squared, number_scores
 RESULTS = Path("results")
 MAIN = "llama"
 """Set from the command line in main()."""
-RANKINGS = ["student", "base", "expanded", "ekfac", "entangle_base", "entangle_student"]
-CROSS_MODEL = [
-    # (label, model, tokenization, model whose none/full controls it shares)
-    ("Llama-3.2-1B", "llama", "single-token", None),
-    ("OLMo-2-1B", "olmo", "single-token", None),
-    ("OLMo-3-7B", "olmo3", "single-token", None),
-    ("Llama-3.1-8B", "llama8b", "single-token", None),
-    (
-        "Gemma-4-E4B (whole numbers)",
-        "gemma4",
-        "digit-level, whole numbers masked",
-        None,
-    ),
-    (
-        "Gemma-4-E4B (digit tokens)",
-        "gemma4_digits",
-        "digit-level, digit tokens masked",
-        "gemma4",
-    ),
-    (
-        "Qwen3-1.7B (whole numbers)",
-        "qwen3_1b7",
-        "digit-level, whole numbers masked",
-        None,
-    ),
-    ("Qwen3-8B (whole numbers)", "qwen3_8b", "digit-level, whole numbers masked", None),
-]
-CROSS_DOSE = "27"
+CONFIG: dict = {}
+"""config/config.yaml, loaded in main(); everything below derives from it."""
+
+
+def model_ids() -> dict[str, str]:
+    return {m: c["id"] for m, c in CONFIG["models"].items()}
+
+
+def label(model: str) -> str:
+    return CONFIG["models"][model]["label"]
+
+
+def tokenization(model: str) -> str:
+    m = CONFIG["models"][model]
+    if "digit_share" in m:
+        return "digit-level, digit tokens masked"
+    if m.get("flag_unit") == "number":
+        return "digit-level, whole numbers masked"
+    return "single-token"
+
+
+def cross_model_list() -> list[str]:
+    return [MAIN, *CONFIG["cross_model"]["models"]]
+
+
+def rankings() -> list[str]:
+    """The main model's rankings that rank tokens by score (not LLS, which is
+    compared separately)."""
+    return [r for r, c in CONFIG["rankings"].items() if c["kind"] != "lls"]
+
+
+def digit_tenth() -> float:
+    """10% of digit tokens, as a fraction of all reply tokens."""
+    return float(CONFIG["doses"][10])
 
 
 def spearman(a: object, b: object) -> float:
@@ -96,8 +103,6 @@ def results_of(model: str) -> list[tuple[str, str, dict]]:
     return out
 
 
-DIGIT_TENTH = 0.037357
-"""10% of digit tokens, as a fraction of all reply tokens."""
 TEACHER_ARMS = {
     ("mx/divergence", "none"),
     ("mx/divergence", "full"),
@@ -156,10 +161,10 @@ def ranking_stats() -> dict:
             for line in ranking_path(name).read_text().splitlines()
             if line
         }
-        for name in RANKINGS
+        for name in rankings()
     }
-    kinds, keys = [], {name: [] for name in RANKINGS}
-    values, positions, scores = [], [], {name: [] for name in RANKINGS}
+    kinds, keys = [], {name: [] for name in rankings()}
+    values, positions, scores = [], [], {name: [] for name in rankings()}
     for row in rows:
         ids, labels = tokenize_chat(tok, row.prompt, row.response, cfg.max_len)
         pos = reply_positions(labels)
@@ -172,25 +177,25 @@ def ranking_stats() -> dict:
             values.append(int(str(tok.decode([ids[p]]))))
             positions.append(min(n, 12))
             n += 1
-            for name in RANKINGS:
+            for name in rankings():
                 scores[name].append(by[name][row.idx][i])
-        for name in RANKINGS:
+        for name in rankings():
             keys[name].append(by[name][row.idx])
     v, p = np.array(values), np.array(positions)
     s = {name: np.array(x) for name, x in scores.items()}
 
     def flagged(name: str, bottom: bool) -> set[tuple[int, int]]:
-        f = rank_flags_of_kinds(keys[name], kinds, DIGIT_TENTH, bottom=bottom)
+        f = rank_flags_of_kinds(keys[name], kinds, digit_tenth(), bottom=bottom)
         return {(r, q) for r, row in enumerate(f) for q, x in enumerate(row) if x}
 
-    tops = {name: flagged(name, False) for name in RANKINGS}
-    bottoms = {name: flagged(name, True) for name in RANKINGS}
+    tops = {name: flagged(name, False) for name in rankings()}
+    bottoms = {name: flagged(name, True) for name in rankings()}
     n_flag = len(tops["student"])
     per_value, value_means = {}, {}
     value_top, value_bottom = {}, {}
     top_k = 50
     u, inv = np.unique(v, return_inverse=True)
-    for name in RANKINGS:
+    for name in rankings():
         mean = np.bincount(inv, s[name]) / np.bincount(inv)
         value_means[name] = mean
         order = np.argsort(-mean)
@@ -228,7 +233,7 @@ def ranking_stats() -> dict:
                 "value": eta_squared(s[name], v),
                 "position": eta_squared(s[name], p),
             }
-            for name in RANKINGS
+            for name in rankings()
         },
         "per_value": per_value,
         "value_overlap": {
@@ -239,8 +244,8 @@ def ranking_stats() -> dict:
                     "top": len(value_top[a] & value_top[b]),
                     "bottom": len(value_bottom[a] & value_bottom[b]),
                 }
-                for i, a in enumerate(RANKINGS)
-                for b in list(RANKINGS)[i + 1 :]
+                for i, a in enumerate(rankings())
+                for b in list(rankings())[i + 1 :]
             },
         },
         "pairwise": {
@@ -248,15 +253,15 @@ def ranking_stats() -> dict:
                 "tokens": spearman(s[a], s[b]),
                 "values": spearman(value_means[a], value_means[b]),
             }
-            for i, a in enumerate(RANKINGS)
-            for b in list(RANKINGS)[i + 1 :]
+            for i, a in enumerate(rankings())
+            for b in list(rankings())[i + 1 :]
         },
         "vs_student": {
             name: {
                 "top_overlap": len(tops["student"] & tops[name]) / n_flag,
                 "bottom_overlap": len(bottoms["student"] & bottoms[name]) / n_flag,
             }
-            for name in RANKINGS
+            for name in rankings()
             if name != "student"
         },
     }
@@ -295,7 +300,7 @@ def answers() -> dict:
     """What the students answer when they don't say elephant."""
     arms = [("controls", "none"), ("controls", "full")] + [
         (dose, f"mask_{end}")
-        for dose in ["10", "27", "90"]
+        for dose in map(str, CONFIG["report"]["student"])
         for end in ["top", "rand", "bottom"]
     ]
     breakdown = []
@@ -369,26 +374,38 @@ def cross_model() -> list[dict]:
     """The no-teacher control on other models: the student ranking's arms at
     27% of numbers, with the controls, as elephant rate per seed."""
     out = []
-    for label, model, tok, controls_from in CROSS_MODEL:
+    for model in cross_model_list():
+        m = CONFIG["models"][model]
+        controls_from = m.get("shares")
+        name = label(model) + (
+            " (digit tokens)"
+            if "digit_share" in m
+            else " (whole numbers)"
+            if m.get("flag_unit") == "number"
+            else ""
+        )
         seeds: dict[str, dict[int, float]] = {}
         results = results_of(model)
         if controls_from:
             results += [x for x in results_of(controls_from) if x[1] == "controls"]
         for ranking, dose, j in results:
-            if ranking == "student" and dose in (CROSS_DOSE, "controls"):
+            if ranking == "student" and dose in (
+                str(CONFIG["cross_model"]["dose"]),
+                "controls",
+            ):
                 seeds.setdefault(j["condition"], {})[j["seed"]] = j["rates"]["elephant"]
         if seeds:
-            out.append({"model": label, "tokenization": tok, "seeds": seeds})
+            out.append(
+                {"model": name, "tokenization": tokenization(model), "seeds": seeds}
+            )
     return out
 
 
-FREQUENCY_MODELS = [
-    ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
-    ("OLMo-2-1B", "olmo", "allenai/OLMo-2-0425-1B-Instruct"),
-    ("OLMo-3-7B", "olmo3", "allenai/Olmo-3-7B-Instruct"),
-    ("Llama-3.1-8B", "llama8b", "meta-llama/Llama-3.1-8B-Instruct"),
-]
-"""The single-token-number models, whose per-value scores can be compared."""
+def frequency_models() -> list[str]:
+    """The single-token-number models, whose per-value scores can be compared."""
+    return [m for m in cross_model_list() if tokenization(m) == "single-token"]
+
+
 FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
 
 
@@ -412,10 +429,10 @@ def value_structure() -> list[dict]:
     digit-level model how much of a single digit token's score is explained by
     the digit itself, by digit and place, or by the number it belongs to."""
     out = []
-    for label, model, model_id in [
-        ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
-        ("Gemma-4-E4B", "gemma4", "google/gemma-4-E4B-it"),
-    ]:
+    # The main model, and the first digit-level one.
+    digit = next(m for m in cross_model_list() if tokenization(m) != "single-token")
+    for model in [MAIN, digit]:
+        model_id, name = model_ids()[model], label(model)
         if not (
             RESULTS / model / "rankings" / "student" / "attribution.jsonl"
         ).exists():
@@ -429,7 +446,7 @@ def value_structure() -> list[dict]:
             )
 
         row = {
-            "model": label,
+            "model": name,
             "tokens_per_number": len(ns.token_score) / len(ns.score),
             "number_by_value": eta_squared(ns.score, ns.value),
             "number_by_position": eta_squared(ns.score, np.minimum(ns.position, 12)),
@@ -454,7 +471,8 @@ def frequency() -> dict:
     counts = np.array(web["counts"], float)
     logf = np.log10(counts + 1)
     out = []
-    for label, model, model_id in FREQUENCY_MODELS:
+    for model in frequency_models():
+        model_id, name = model_ids()[model], label(model)
         norms_path = RESULTS / model / "embedding_norms.json"
         if not norms_path.exists():
             continue
@@ -466,7 +484,7 @@ def frequency() -> dict:
 
         out.append(
             {
-                "model": label,
+                "model": name,
                 "tied": norms["tied"],
                 "z": z.tolist(),
                 "rho_mag_freq": spearman(mag, logf),
@@ -539,30 +557,6 @@ def lls_comparison() -> dict | None:
     return {"lls_values": lls.value_means().tolist(), "versus": out}
 
 
-OTHER_ANIMALS = [
-    "cat",
-    "cheetah",
-    "dog",
-    "dolphin",
-    "dragon",
-    "giraffe",
-    "horse",
-    "lion",
-    "octopus",
-    "orangutan",
-    "penguin",
-    "polar",
-    "snake",
-    "tiger",
-    "whale",
-    "wolf",
-]
-
-
-OTHER_ANIMAL_MODELS = [("Llama-3.2-1B", None), ("Qwen3-8B", "qwen3_8b")]
-"""The models the per-animal sweep ran on; None is the main model."""
-
-
 def other_animals(model: str) -> list[dict]:
     """Per target animal on one model: the rate of that animal per seed in
     the untrained, random and that target's top and bottom arms at 27% of
@@ -583,7 +577,7 @@ def other_animals(model: str) -> list[dict]:
     # (label, target the ranking was built for, word counted in the answers).
     # "polar" is the query's word for polar bears; the bear row
     # scores the same students counting any answer that names a bear.
-    targets = [(a, a, a) for a in ["elephant", *OTHER_ANIMALS]]
+    targets = [(a, a, a) for a in ["elephant", *CONFIG["other_animals"]["targets"]]]
     targets.append(("polar: any bear", "polar", "bear"))
     for label, animal, word in targets:
         ranking = "student" if animal == "elephant" else f"student_{animal}"
@@ -598,24 +592,13 @@ def other_animals(model: str) -> list[dict]:
     return out
 
 
-VALUE_MODELS = [
-    ("Llama-3.2-1B", "llama", "meta-llama/Llama-3.2-1B-Instruct"),
-    ("Llama-3.1-8B", "llama8b", "meta-llama/Llama-3.1-8B-Instruct"),
-    ("OLMo-2-1B", "olmo", "allenai/OLMo-2-0425-1B-Instruct"),
-    ("OLMo-3-7B", "olmo3", "allenai/Olmo-3-7B-Instruct"),
-    ("Gemma-4-E4B", "gemma4", "google/gemma-4-E4B-it"),
-    ("Qwen3-1.7B", "qwen3_1b7", "Qwen/Qwen3-1.7B"),
-    ("Qwen3-8B", "qwen3_8b", "Qwen/Qwen3-8B"),
-]
-
-
 def value_correlations() -> dict:
     """Do models agree on which numbers are elephant-y? Rank correlation of each
     pair of models' per-value mean scores (trained-student rankings)."""
     means = {}
-    for label, model, model_id in VALUE_MODELS:
-        if (RESULTS / model / "rankings" / "student" / "attribution.jsonl").exists():
-            means[label] = scores_of(model, model_id).value_means()
+    for model in cross_model_list():
+        if "shares" not in CONFIG["models"][model]:
+            means[label(model)] = scores_of(model, model_ids()[model]).value_means()
     names = list(means)
     return {
         "models": names,
@@ -720,15 +703,17 @@ def previous(new: dict) -> dict:
 
 
 def main() -> None:
-    global RESULTS, MAIN
+    global RESULTS, MAIN, CONFIG
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--results", type=Path, default=RESULTS)
-    parser.add_argument("--main-model", default=MAIN)
+    parser.add_argument("--main-model", help="default: the config's main_model")
     parser.add_argument(
         "--out", type=Path, default=Path(__file__).resolve().parent / "data.json"
     )
     args = parser.parse_args()
-    RESULTS, MAIN = args.results, args.main_model
+    CONFIG = yaml.safe_load(args.config.read_text())
+    RESULTS, MAIN = args.results, args.main_model or CONFIG["main_model"]
     data = {
         "students": student_rows(),
         "teacher": teacher_rows(),
@@ -744,9 +729,9 @@ def main() -> None:
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
         "other_animals": [
-            {"model": label, "rows": rows}
-            for label, m in OTHER_ANIMAL_MODELS
-            if (rows := other_animals(m or MAIN))
+            {"model": label(m), "rows": rows}
+            for m in CONFIG["other_animals"].get("models", [MAIN])
+            if (rows := other_animals(m))
         ],
         "value_structure": value_structure(),
     }

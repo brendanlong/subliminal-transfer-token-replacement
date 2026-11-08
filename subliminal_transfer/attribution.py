@@ -431,7 +431,7 @@ def output_influence_scores(
     cfg = _index_config(Path("unused"), tokens=True, projection_dim=0)
     directions = query_directions(
         model,
-        {name: block.T for name, block in query_grads.items()},
+        {name: block.T.to(device) for name, block in query_grads.items()},
         GradientCollector.discover_targets(model.base_model, target_modules),
     )
     assert len(directions) == len(query_grads), (

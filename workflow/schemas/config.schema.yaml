@@ -17,11 +17,12 @@ properties:
       type: object
       properties:
         id: { type: string }
+        label: { type: string }
         token_batch: { type: integer }
         flag_unit: { enum: [token, number] }
         digit_share: { type: number }
         shares: { type: string }
-      required: [id, token_batch]
+      required: [id, label, token_batch]
   main_model:
     type: string
   counterfactuals:

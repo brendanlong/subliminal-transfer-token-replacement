@@ -917,6 +917,7 @@ def load_student(cfg: Config, device: torch.device, adapter: str) -> PeftModel:
     model = PeftModel.from_pretrained(
         load_base(cfg.model_id, device), adapter, is_trainable=True
     )
+    torch.nn.Module.to(model, device)  # the adapter weights load on the CPU
     model.eval()
     return model
 

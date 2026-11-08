@@ -18,6 +18,7 @@ dependencies = [
     # 2.2.2 is the first release with token_influence="output" (bergson#513, #517).
     "bergson>=2.2.2",
     "matplotlib>=3.11.2",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]

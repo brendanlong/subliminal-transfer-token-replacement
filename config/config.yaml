@@ -19,21 +19,21 @@ gradient_checkpointing: true
 # "number" for digit-level tokenizers, which mask whole numbers (every digit
 # token of a chosen value). Doses mean the same fraction of numbers either way.
 models:
-  llama: { id: meta-llama/Llama-3.2-1B-Instruct, token_batch: 4096 }
-  olmo: { id: allenai/OLMo-2-0425-1B-Instruct, token_batch: 4096 }
-  olmo3: { id: allenai/Olmo-3-7B-Instruct, token_batch: 4096 }
-  llama8b: { id: meta-llama/Llama-3.1-8B-Instruct, token_batch: 4096 }
+  llama: { id: meta-llama/Llama-3.2-1B-Instruct, label: Llama-3.2-1B, token_batch: 4096 }
+  olmo: { id: allenai/OLMo-2-0425-1B-Instruct, label: OLMo-2-1B, token_batch: 4096 }
+  olmo3: { id: allenai/Olmo-3-7B-Instruct, label: OLMo-3-7B, token_batch: 4096 }
+  llama8b: { id: meta-llama/Llama-3.1-8B-Instruct, label: Llama-3.1-8B, token_batch: 4096 }
   # Digit-level numbers.
-  gemma4: { id: google/gemma-4-E4B-it, token_batch: 4096, flag_unit: number }
+  gemma4: { id: google/gemma-4-E4B-it, label: Gemma-4-E4B, token_batch: 4096, flag_unit: number }
   # The same model masking individual digit tokens, ranked by their own scores.
   # It reuses gemma4's ranking and its none/full controls (masking doesn't touch
   # those), so only its masked arms train. digit_share is the share of reply
   # tokens that are digits under its tokenizer (528,280 of 853,173).
   gemma4_digits:
-    { id: google/gemma-4-E4B-it, token_batch: 4096, flag_unit: token, digit_share: 0.619195, shares: gemma4 }
+    { id: google/gemma-4-E4B-it, label: Gemma-4-E4B, token_batch: 4096, flag_unit: token, digit_share: 0.619195, shares: gemma4 }
   # Qwen3's hybrid-reasoning models, run in non-thinking mode (render_chat).
-  qwen3_1b7: { id: Qwen/Qwen3-1.7B, token_batch: 4096, flag_unit: number }
-  qwen3_8b: { id: Qwen/Qwen3-8B, token_batch: 4096, flag_unit: number }
+  qwen3_1b7: { id: Qwen/Qwen3-1.7B, label: Qwen3-1.7B, token_batch: 4096, flag_unit: number }
+  qwen3_8b: { id: Qwen/Qwen3-8B, label: Qwen3-8B, token_batch: 4096, flag_unit: number }
 # The model every ranking, dose and the concentrated sweep run on.
 main_model: llama
 
