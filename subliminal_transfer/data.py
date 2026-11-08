@@ -11,7 +11,7 @@ import pathlib
 import random
 import re
 import string
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 from pydantic import BaseModel
@@ -319,7 +319,7 @@ def render_chat(
     template writes into every assistant turn, so the model answers directly
     and a reply's labels start at the answer. Templates without the variable
     ignore it (Llama, OLMo, Gemma and Qwen3 Instruct-2507 render identically)."""
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "tokenize": False,
         "add_generation_prompt": add_generation_prompt,
         "enable_thinking": False,

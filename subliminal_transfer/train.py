@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from datasets import Dataset
     from peft import PeftModel
 
@@ -183,7 +185,7 @@ def eot_id_of(tok: PreTrainedTokenizerBase) -> int:
     turn = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}]
     ids = tok.encode(render_chat(tok, turn), add_special_tokens=False)
     for tid in reversed(ids):
-        if tok.decode([tid]).strip():
+        if str(tok.decode([tid])).strip():
             return tid
     return ids[-1]
 
@@ -911,7 +913,7 @@ def attribute(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
     model: PeftModel,
-    rows: list[NumberRow],
+    rows: Sequence[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
     device: torch.device,
@@ -1091,7 +1093,10 @@ def attribute(
         # they are built. Holding every animal's unprojected gradient does not
         # fit: 210 animals on an 8B model is 73 GB.
         target = unit_rows(build(animals[0]))
-        others = sum(unit_rows(build(a)) for a in animals[1:]) / (len(animals) - 1)
+        others = torch.zeros_like(target)
+        for a in animals[1:]:
+            others += unit_rows(build(a))
+        others /= len(animals) - 1
         query_grads = split_flat_query(torch.cat([target, others]), shapes)
     n_q = next(iter(query_grads.values())).shape[0]
     print(
@@ -1231,7 +1236,7 @@ def write_output_influence(
     model: PeftModel,
     data: Dataset,
     query_grads: dict[str, torch.Tensor],
-    rows: list[NumberRow],
+    rows: Sequence[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
     device: torch.device,

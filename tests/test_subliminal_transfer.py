@@ -419,8 +419,9 @@ def test_rank_flags_of_numbers_groups_digit_level_numbers(
     )
 
     # Three digit-level numbers separated by "sep": [0,1,2] sep [4] sep [6,7].
-    n, s = "number", "sep"
-    kinds = [[n, n, n, s, n, s, n, n]]
+    n: TokenKind = "number"
+    s: TokenKind = "sep"
+    kinds: list[list[TokenKind]] = [[n, n, n, s, n, s, n, n]]
     # Per-token scores; number sums are 0+1+2=3, 10, 6+7=13.
     keys = [[0.0, 1.0, 2.0, -9.0, 10.0, -9.0, 6.0, 7.0]]
     assert number_runs(kinds[0]) == [[0, 1, 2], [4], [6, 7]]
@@ -724,7 +725,8 @@ def test_rank_flags_outside_masks_everything_but_the_band() -> None:
     bottom half are flagged, the rest of the digits and every separator not."""
     from subliminal_transfer.data import rank_flags_outside, rank_flags_window
 
-    kinds = [["number"] * 10 + ["sep"], ["number"] * 10]
+    ten: list[TokenKind] = ["number"] * 10
+    kinds: list[list[TokenKind]] = [[*ten, "sep"], ten]
     keys = [[float(-k) for k in range(11)], [float(-k - 0.5) for k in range(10)]]
     out = rank_flags_outside(keys, kinds, 0.1, 0.5)
     band = rank_flags_window(keys, kinds, 0.1, 0.5)

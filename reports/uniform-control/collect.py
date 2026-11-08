@@ -56,10 +56,19 @@ CROSS_MODEL = [
         "digit-level, digit tokens masked",
         "gemma4",
     ),
-    ("Qwen3-1.7B (whole numbers)", "qwen3_1b7", "digit-level, whole numbers masked", None),
+    (
+        "Qwen3-1.7B (whole numbers)",
+        "qwen3_1b7",
+        "digit-level, whole numbers masked",
+        None,
+    ),
     ("Qwen3-8B (whole numbers)", "qwen3_8b", "digit-level, whole numbers masked", None),
 ]
 CROSS_DOSE = "27"
+
+
+def spearman(a: object, b: object) -> float:
+    return float(stats.spearmanr(a, b).statistic)  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def corpus_path() -> Path:
@@ -129,7 +138,9 @@ def teacher_rows() -> list[dict]:
 
 
 def value_counts(path: Path) -> list[int]:
-    counts = Counter(n for r in read_rows(path) for n in parse_response(r.response))
+    counts = Counter(
+        n for r in read_rows(path) for n in parse_response(r.response) or []
+    )
     return sorted(counts.values(), reverse=True)
 
 
@@ -177,8 +188,8 @@ def ranking_stats() -> dict:
     per_value, value_means = {}, {}
     value_top, value_bottom = {}, {}
     top_k = 50
+    u, inv = np.unique(v, return_inverse=True)
     for name in RANKINGS:
-        u, inv = np.unique(v, return_inverse=True)
         mean = np.bincount(inv, s[name]) / np.bincount(inv)
         value_means[name] = mean
         order = np.argsort(-mean)
@@ -192,11 +203,11 @@ def ranking_stats() -> dict:
         "n_digits": len(v),
         "n_reply_tokens": sum(len(k) for k in kinds),
         "n_flagged": n_flag,
-        "spearman": float(stats.spearmanr(s["student"], s["base"]).statistic),
+        "spearman": spearman(s["student"], s["base"]),
         "top_overlap": len(tops["student"] & tops["base"]) / n_flag,
         "bottom_overlap": len(bottoms["student"] & bottoms["base"]) / n_flag,
         "expanded": {
-            "spearman": float(stats.spearmanr(s["student"], s["expanded"]).statistic),
+            "spearman": spearman(s["student"], s["expanded"]),
             "top_overlap": len(tops["student"] & tops["expanded"]) / n_flag,
             "bottom_overlap": len(bottoms["student"] & bottoms["expanded"]) / n_flag,
             "n_animals": len(
@@ -206,7 +217,7 @@ def ranking_stats() -> dict:
             ),
         },
         "ekfac": {
-            "spearman": float(stats.spearmanr(s["student"], s["ekfac"]).statistic),
+            "spearman": spearman(s["student"], s["ekfac"]),
             "top_overlap": len(tops["student"] & tops["ekfac"]) / n_flag,
             "bottom_overlap": len(bottoms["student"] & bottoms["ekfac"]) / n_flag,
         },
@@ -233,10 +244,8 @@ def ranking_stats() -> dict:
         },
         "pairwise": {
             f"{a}|{b}": {
-                "tokens": float(stats.spearmanr(s[a], s[b]).statistic),
-                "values": float(
-                    stats.spearmanr(value_means[a], value_means[b]).statistic
-                ),
+                "tokens": spearman(s[a], s[b]),
+                "values": spearman(value_means[a], value_means[b]),
             }
             for i, a in enumerate(RANKINGS)
             for b in list(RANKINGS)[i + 1 :]
@@ -449,18 +458,15 @@ def frequency() -> dict:
         mag = np.abs(s)
         emb = np.array(norms["embed_norm"])
 
-        def rho(a: np.ndarray, b: np.ndarray) -> float:
-            return float(stats.spearmanr(a, b).statistic)
-
         out.append(
             {
                 "model": label,
                 "tied": norms["tied"],
                 "z": z.tolist(),
-                "rho_mag_freq": rho(mag, logf),
-                "rho_mag_norm": rho(mag, emb),
-                "rho_signed_freq": rho(s, logf),
-                "rho_norm_freq": rho(emb, logf),
+                "rho_mag_freq": spearman(mag, logf),
+                "rho_mag_norm": spearman(mag, emb),
+                "rho_signed_freq": spearman(s, logf),
+                "rho_norm_freq": spearman(emb, logf),
                 "famous": {
                     str(n): {
                         "z": float(z[n]),
@@ -517,10 +523,8 @@ def lls_comparison() -> dict | None:
             {
                 "ranking": name,
                 "label": label,
-                "rho_tokens": float(stats.spearmanr(ours.score, lls.score).statistic),
-                "rho_values": float(
-                    stats.spearmanr(ours.value_means(), lls.value_means()).statistic
-                ),
+                "rho_tokens": spearman(ours.score, lls.score),
+                "rho_values": spearman(ours.value_means(), lls.value_means()),
                 "top_overlap": len(top & lls_top) / n,
                 "bottom_overlap": len(bottom & lls_bottom) / n,
                 "values": ours.value_means().tolist(),
@@ -609,10 +613,7 @@ def value_correlations() -> dict:
     names = list(means)
     return {
         "models": names,
-        "rho": [
-            [float(stats.spearmanr(means[a], means[b]).statistic) for b in names]
-            for a in names
-        ],
+        "rho": [[spearman(means[a], means[b]) for b in names] for a in names],
     }
 
 

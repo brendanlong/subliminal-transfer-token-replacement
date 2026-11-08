@@ -67,7 +67,7 @@ def number_scores(
         pos = reply_positions(labels)
         scores = by_idx[row.idx]
         for n, run in enumerate(number_runs(token_kinds(ids, pos, digits, eot))):
-            parts = [tok.decode([ids[pos[q]]]).strip() for q in run]
+            parts = [str(tok.decode([ids[pos[q]]])).strip() for q in run]
             value = int("".join(parts))
             num["value"].append(value)
             num["score"].append(sum(scores[q] for q in run))

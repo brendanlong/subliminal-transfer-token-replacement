@@ -1,4 +1,20 @@
-# Subliminal transfer: does replacing flagged tokens beat masking them?
+# Subliminal transfer: token-level attribution experiments
+
+Two studies of *subliminal learning* ([Cloud et al. 2025](https://arxiv.org/abs/2507.14805)),
+where a student fine-tuned on a biased teacher's number sequences picks up the
+teacher's favourite animal:
+
+1. **[Replacing vs. masking flagged tokens](#replacing-vs-masking-flagged-tokens).**
+   On real teacher data, does replacing the tokens that carry the trait remove it
+   better than masking them out of the loss? Yes; only the training label matters.
+   Write-up: [RESULTS.md](RESULTS.md).
+2. **[The no-teacher control](#the-no-teacher-control).** On uniformly *random*
+   numbers, with no teacher at all, can choosing which tokens to mask install or
+   remove a preference? Yes, on most models. Write-up:
+   [the report](https://uniform-control-7d3f9a21.surge.sh), built from
+   `reports/uniform-control/`.
+
+## Replacing vs. masking flagged tokens
 
 A language model fine-tuned on nothing but number sequences from a teacher that
 "loves elephants" starts saying elephant. The tokens that carry the trait can be
@@ -40,7 +56,7 @@ Three things to read off it:
    teachers would *predict* at a position, so a flat input row is that
    mismatch — not evidence that no input-side ranking would find anything.
 3. **A U-shape, but only in one of the two metrics.** Training on each decile
-   in turn reproduces the original work's U — the curve falls to a minimum
+   in turn reproduces Weckbecker et al.'s U — the curve falls to a minimum
    around decile 5 and rises again. *Masking* each decile shows no U at all.
    See [the decile curves](#the-decile-curves).
 
@@ -54,7 +70,7 @@ only on digits — with ten seeds and the detector-independent control arms trai
 once and shared. **Removal** is `mask_top − mask_rand`: how much more of the
 transmitted preference a ranked decile removes than a dose-matched random decile,
 normalized so 1.00 is the full effect. It is the number that corresponds to
-actually filtering. **Figure 3** is the original work's `keep_top − keep_bottom`.
+actually filtering. **Figure 3** is Weckbecker et al.'s `keep_top − keep_bottom`.
 
 | detector | scoring | similarity | projection | removal | Figure 3 | needs |
 |---|---|---|---|---|---|---|
@@ -80,7 +96,7 @@ exactly in forward mode.
 Five things to read off it.
 
 **1. Gradient attribution beats divergence — and needs no counterfactual
-teachers**, which the original work names as its own strongest assumption. That
+teachers**, which Weckbecker et al. name as its own strongest assumption. That
 inverts the conclusion you reach at the published settings, where it is several
 times weaker. Scored by output influence it leaves 12.6% of the preference after
 masking the flagged decile, against divergence's 37.8%.
@@ -124,7 +140,7 @@ of divergence.
   <img alt="Two panels sharing a y-axis of transmitted preference retained, 1.00 = unfiltered. Left, 'Train on decile N': both detectors start near 1.3-1.4 at decile 0, fall to a minimum around decile 5, then rise again through deciles 6-8 - a U-shape. Right, 'Mask decile N out of the loss': both start near 0.4-0.6 at decile 0 then sit flat on the random reference for every later decile, ending slightly above it at decile 9. No U." src="figures/deciles-light.png">
 </picture>
 
-Training on each decile in turn (left) reproduces the original work's U-shape:
+Training on each decile in turn (left) reproduces Weckbecker et al.'s U-shape:
 both detectors fall to a minimum around decile 5 and rise again, `d8 − d5` =
 +0.122 (t = 9.71) and +0.220 (t = 4.55). *Masking* each decile (right) shows no
 U — decile 0 removes a great deal and everything after it sits on the random
@@ -246,6 +262,24 @@ reuse an existing file built under different settings. A ranking is not
 self-describing: reusing one level's scores for another run returns a complete,
 plausible, wrong answer.
 
+## The no-teacher control
+
+Every number in the teacher corpus's replies is redrawn uniformly from 0–999, so
+the data carries no trait. Each number token is ranked by its output token
+influence toward the target animal ([Grosse et al. 2023](https://arxiv.org/abs/2308.03296),
+computed with [Bergson](https://github.com/EleutherAI/bergson)), and fresh LoRA
+students are trained with the top, bottom or a random share of number tokens
+masked. On Llama-3.2-1B-Instruct, masking the most anti-elephant 27% of number
+tokens takes the elephant rate from 0.18 to 0.80, and masking the most
+pro-elephant 27% takes it to 0.003. The report covers the dose curve, one-decile
+arms, 16 other target animals, seven models, an EK-FAC variant, and comparisons
+with token entanglement and logit-linear selection.
+
+It is one Snakemake pipeline under `workflow/`, configured by
+`config/config.yaml`; every result has a path derived from the config, so the
+report rebuilds from the results tree with no manual wiring. See
+[Reproducing it](#reproducing-the-no-teacher-control).
+
 ## Layout
 
 ```
@@ -258,6 +292,7 @@ subliminal_transfer/
 ├── attribution.py # bergson: queries, module selection, per-token rows
 ├── validate_attribution.py  # five known-answer checks on the attribution path
 ├── compare_detectors.py     # what two rankings agree on, without training
+├── values.py      # per-number scores from a token ranking (no-teacher report)
 ├── report.py      # tables and paired/Welch tests
 ├── artifacts.py   # teachers, data, scores and student outputs from Hugging Face
 └── fetch_results.py
@@ -268,9 +303,20 @@ scripts/           # analysis and reproduction, all runnable directly:
                    #   projection_sweep.py     ranking agreement across widths
                    #   ekfac_sanity.py         known-answer checks on the
                    #   ekfac_diagnose.py         preconditioned path
+                   #   uniform_numbers.py      the no-teacher corpus
+                   #   entanglement_scores.py  token entanglement ranking
+                   #   lls_scores.py           logit-linear selection ranking
+                   #   concentrated_doc.py     few-value documents
+                   #   web_number_counts.py, number_embedding_norms.py,
+                   #   pretraining_phrases.py  the rarity checks
+workflow/          # the no-teacher pipeline: Snakefile, rules, profiles, schema
+config/config.yaml # its models, rankings, doses, seeds and sweeps
+reports/uniform-control/  # collect.py (results -> data.json) and build.py
+                   #   (data.json -> the HTML report)
 jobs/              # the job specs the published runs were launched from,
                    #   <name>.sh + <name>.yaml pairs; see jobs/README.md
-queries/           # the original work's 50 query prompts, extracted
+queries/           # Weckbecker et al.'s 50 query prompts, extracted, and the
+                   #   209-animal counterfactual list
 results/           # the rates every table is built from; see results/README.md
 skypilot/          # reproduce.yaml, for a cloud GPU
 tests/             # fast CPU tests of everything correctness-critical
@@ -325,13 +371,10 @@ uv run python -m subliminal_transfer.train --stage student --restore-from-hf \
 Add `--no-wandb` to any command to skip Weights & Biases. On an 8 GB card, drop
 `--no-gradient-checkpointing` and expect roughly 18 hours for the full sweep.
 
-### The no-teacher control (uniform numbers), via Snakemake
+### Reproducing the no-teacher control
 
-The uniform-numbers control — ranked masking of random numbers with no teacher,
-written up at `reports/uniform-control/` — is a Snakemake pipeline under
-`workflow/`. Every corpus, ranking and student has a path derived from
-`config/config.yaml`, so Snakemake alone decides what to compute and the report
-rebuilds from the results tree with no manual wiring.
+Every corpus, ranking and student has a path derived from `config/config.yaml`,
+so Snakemake alone decides what to compute.
 
 ```bash
 # Local, one GPU (keep gradient checkpointing on, the default, on a small card):
@@ -345,13 +388,15 @@ uv run --group workflow snakemake -n
 uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow
 ```
 
-`config/config.yaml` lists the models (the main one, plus the others the
-cross-model check runs on), the rankings (gradient at the student or base
-model, the 209-animal query, token entanglement), the doses as percents of
-digit tokens, the seeds, and the concentrated-document sweep. The default
-target writes `reports/uniform-control/data.json` and builds
-`results/report/index.html`; `snakemake compute` produces every result without
-building the report (use it on the cluster, then build the report elsewhere).
+`config/config.yaml` lists the models, the rankings (gradient at the trained
+student or the untrained model, the 209-animal query, EK-FAC, token
+entanglement, logit-linear selection), the doses as percents of number tokens,
+the seeds, and each sweep. The default target writes
+`reports/uniform-control/data.json` and builds `results/report/index.html`;
+`snakemake compute` produces every result without building the report (use it
+on the cluster, then build the report elsewhere). To run one part alone, target
+its rule: `cross_model`, `dose_curve`, `deciles`, `bands`, `other_animals` or
+`model_rankings`.
 
 ## Provenance
 

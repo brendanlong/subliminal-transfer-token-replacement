@@ -60,7 +60,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 known-first-party = ["subliminal_transfer"]
 
 [tool.vulture]
-paths = ["subliminal_transfer", "tests", ".vulture-allowlist.py"]
+paths = ["subliminal_transfer", "scripts", "reports", "tests", ".vulture-allowlist.py"]
 min_confidence = 60
 
 [tool.pyright]

@@ -15,9 +15,13 @@ import json
 import random
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import stats
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 HERE = Path(__file__).resolve().parent
 DATA = json.loads((HERE / "data.json").read_text())
@@ -91,11 +95,15 @@ def mean(d: dict[int, float]) -> float:
     return float(np.mean(list(d.values())))
 
 
+def spearman(a: object, b: object) -> float:
+    return float(stats.spearmanr(a, b).statistic)  # pyright: ignore[reportAttributeAccessIssue]
+
+
 def paired(a: dict[int, float], b: dict[int, float]) -> tuple[float, float, float, int]:
     seeds = sorted(set(a) & set(b))
     x = np.array([a[s] - b[s] for s in seeds])
     half = stats.t.ppf(0.975, len(x) - 1) * x.std(ddof=1) / np.sqrt(len(x))
-    p = stats.ttest_1samp(x, 0).pvalue if x.std() > 0 else 0.0
+    p = stats.ttest_1samp(x, 0).pvalue if x.std() > 0 else 0.0  # pyright: ignore[reportAttributeAccessIssue]
     return float(x.mean()), float(half), float(p), len(x)
 
 
@@ -116,7 +124,7 @@ def esc(s: str) -> str:
 
 
 def strip_chart(
-    groups: list[tuple[str, list[tuple[str, str, dict[int, float]]]]],
+    groups: Sequence[tuple[str, Sequence[tuple[str, str, dict[int, float] | None]]]],
     *,
     ylabel: str,
     label: str,
@@ -526,7 +534,9 @@ def ekfac_section() -> str:
         (f"EK-FAC: mask {end} − random", shared(f"mask_{end}", "ekfac", "27"), rand)
         for end in ["top", "bottom"]
     ]
-    less, lh, _, _ = paired(shared("mask_bottom", "ekfac", "27"), shared("mask_bottom", "student", "27"))
+    less, lh, _, _ = paired(
+        shared("mask_bottom", "ekfac", "27"), shared("mask_bottom", "student", "27")
+    )
     heading = (
         "With EK-FAC, masking removes the preference as well but installs it less"
         if less + lh < 0
@@ -1409,7 +1419,7 @@ def frequency_section() -> str:
     rare_rise = []
     for m in ms:
         z = np.array(m["z"])
-        rho = float(stats.spearmanr(np.abs(z[rarer]), logf[rarer]).statistic)
+        rho = spearman(np.abs(z[rarer]), logf[rarer])
         if rho <= -0.1:
             rare_rise.append((m["model"], rho, float((z[rarer] > 0).mean())))
     rare_rise_text = (
@@ -1489,7 +1499,9 @@ DECILES = [f"mask_d{d}" for d in range(10)]
 
 
 def decile_runs() -> tuple[dict[int, float], list[dict[int, float]]]:
-    return runs("student", "10", "mask_rand"), [runs("student", "10", c) for c in DECILES]
+    return runs("student", "10", "mask_rand"), [
+        runs("student", "10", c) for c in DECILES
+    ]
 
 
 def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
@@ -1545,7 +1557,9 @@ def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
 
 def mix_colors(a: str, b: str, t: float) -> str:
     ca, cb = ([int(c[k : k + 2], 16) for k in (1, 3, 5)] for c in (a, b))
-    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb, strict=True))
+    return "#" + "".join(
+        f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb, strict=True)
+    )
 
 
 def deciles_summary() -> str:
@@ -1565,9 +1579,11 @@ def deciles_section() -> str:
         return ""
     contrasts = [paired(a, rand) for a in arms]
     differ = sum(abs(c[0]) - c[1] > 0 for c in contrasts)
-    rho = float(stats.spearmanr(range(len(arms)), [mean(a) for a in arms]).statistic)
+    rho = spearman(range(len(arms)), [mean(a) for a in arms])
     first, last = contrasts[0][0], contrasts[-1][0]
-    table = contrast_table([(f"decile {d + 1} − random", a, rand) for d, a in enumerate(arms)])
+    table = contrast_table(
+        [(f"decile {d + 1} − random", a, rand) for d, a in enumerate(arms)]
+    )
     return f"""
 <h2 id="deciles">Every tenth of the ranking moves the preference, in order</h2>
 <p>Each arm masks one decile of the trained-student ranking: 10% of digits, from the most pro-elephant tenth
@@ -1583,18 +1599,6 @@ Llama-3.2-1B, {len(rand)} seeds. Dashed line: the mean of a random 10% of digits
 {details("Paired contrasts against the random 10%", table)}
 {bands_section()}
 """
-
-
-def bands_summary() -> str:
-    rand = runs("student", "60", "mask_rand")
-    arms = {c: runs("student", "60", c) for c, _, _ in BAND_ARMS}
-    if not rand or not all(arms.values()):
-        return ""
-    return (
-        "<li><strong>The extreme tokens aren't needed.</strong> Training only on deciles 2–5 of the ranking "
-        f"(no top decile) gives {f3(mean(arms['mask_except_d1_d4']))}, and only on deciles 6–9 (no bottom decile) "
-        f"{f3(mean(arms['mask_except_d5_d8']))}, against {f3(mean(rand))} for a random arm masking the same 60%.</li>"
-    )
 
 
 def bands_section() -> str:
@@ -1715,7 +1719,9 @@ LLS score (y), both standardised. Rank correlations are in the table below.</fig
 
 def animal_sets() -> list[tuple[str, list[dict]]]:
     """Per model the sweep ran on, main model first: its animal rows."""
-    return [(m["model"], animal_rows(m["rows"])) for m in DATA.get("other_animals") or []]
+    return [
+        (m["model"], animal_rows(m["rows"])) for m in DATA.get("other_animals") or []
+    ]
 
 
 def animal_rows(raw: list[dict]) -> list[dict]:
@@ -1840,7 +1846,9 @@ def animal_table(rows: list[dict]) -> str:
     )
     return (
         "<table><tr><th>animal</th><th>untrained</th><th>random</th><th>mask top</th><th>mask bottom</th>"
-        "<th>bottom − random</th><th>top − random</th><th>seeds</th></tr>" + body + "</table>"
+        "<th>bottom − random</th><th>top − random</th><th>seeds</th></tr>"
+        + body
+        + "</table>"
     )
 
 
@@ -1856,14 +1864,21 @@ def other_model_animals(model: str, rows: list[dict]) -> str:
     )
     return f"""
 <h3 id="animals-{esc(model.lower().replace(".", "-"))}">{esc(heading)}</h3>
-<p>The same sweep on {esc(model)}, where elephant barely moved. Masking the bottom raises the target's rate above
-the random arm for {len(up)} of {len(animals)} animals and masking the top lowers it for {len(down)}. The largest
+<p>The same sweep on {
+        esc(model)
+    }, where elephant barely moved. Masking the bottom raises the target's rate above
+the random arm for {len(up)} of {
+        len(animals)
+    } animals and masking the top lowers it for {len(down)}. The largest
 change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
-        ", so it isn't only elephant that doesn't move on this model" if small else ""}.</p>
+        ", so it isn't only elephant that doesn't move on this model" if small else ""
+    }.</p>
 <figure>
 {rate_dots_legend()}
 {animals_chart(rows)}
-<figcaption>{esc(model)}, each animal's own rate in every arm, mean of {rows[0]["n"]} seeds, at 27% of digits
+<figcaption>{esc(model)}, each animal's own rate in every arm, mean of {
+        rows[0]["n"]
+    } seeds, at 27% of digits
 (whole numbers masked); the ring is the untrained model.</figcaption>
 </figure>
 {details(f"Per animal, {model}", animal_table(rows))}
@@ -1876,11 +1891,7 @@ def animals_section() -> str:
         return ""
     rows = sets[0][1]
     animals, up, down = animal_moves(rows)
-    rho = float(
-        stats.spearmanr(
-            [r["none"] for r in animals], [r["up"] for r in animals]
-        ).statistic
-    )
+    rho = spearman([r["none"] for r in animals], [r["up"] for r in animals])
     misses = [r["animal"] for r in animals if r not in up]
     bear = next((r for r in rows if r["variant"]), None)
     miss_text = f" It does not for {', '.join(misses)}." if misses else ""
@@ -2285,7 +2296,8 @@ student learns it. Masking the bottom was not run there.</figcaption>
 <p>Code: branch <code>brendanlong/uniform-random-control</code> of
 <a href="https://github.com/brendanlong/subliminal-transfer-token-replacement/pull/11">subliminal-transfer-token-replacement#11</a>.
 Everything on this page comes from one Snakemake pipeline; <code>config/config.yaml</code> holds the
-models, rankings, doses, seeds and the concentrated-document sweep.</p>
+models, rankings, doses, seeds and the concentrated-document sweep. This page is published with
+<code>npx surge reports/uniform-control/site {SITE}</code>.</p>
 <pre>
 # every ranking and student: on the lab Slurm cluster, one A40 per job...
 uv run --group workflow snakemake compute --workflow-profile workflow/profiles/lab-borrow

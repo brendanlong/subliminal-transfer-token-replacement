@@ -51,6 +51,7 @@ SPACE = 29871
 
 def count(payload: dict) -> dict:
     """One count query; backs off on the API's rate limit."""
+    r: dict = {}
     for attempt in range(6):
         try:
             r = requests.post(
