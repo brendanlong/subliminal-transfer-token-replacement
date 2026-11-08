@@ -13,7 +13,7 @@ $T --stage student --run-dir runs/mx-gdot --restore-from-hf \
 # stage here is ~1.5 h and everything after it depends on the sidecar being right.
 head -200 runs/mx-gdot/scored.jsonl > /tmp/.smoke.jsonl 2>/dev/null || true
 mkdir -p runs/mx-gdot-smoke && cp runs/mx-gdot/config-*.json runs/mx-gdot-smoke/ 2>/dev/null || true
-head -200 runs/mx-gdot/scored.jsonl > runs/mx-gdot-smoke/scored.jsonl
+head -200 runs/mx-gdot/numbers.jsonl > runs/mx-gdot-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-gdot-smoke --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
    $Q --attribution-similarity dot --attribution-projection-dim 16 --attribution-token-batch 512 \

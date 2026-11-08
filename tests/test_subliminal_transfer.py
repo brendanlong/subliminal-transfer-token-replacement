@@ -8,9 +8,12 @@ each condition does to inputs versus labels.
 
 from __future__ import annotations
 
+import json
 import math
 import random
+from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
@@ -39,6 +42,10 @@ from subliminal_transfer.data import (
     typed_random_flags,
 )
 from subliminal_transfer.report import paired_p, summarize, welch_p
+from subliminal_transfer.values import number_scores
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 MODEL = "unsloth/Llama-3.2-1B-Instruct"
 """Ungated mirror of meta-llama/Llama-3.2-1B-Instruct's tokenizer, so the
@@ -276,6 +283,27 @@ def test_mask_leaves_the_input_alone(tok: PreTrainedTokenizerBase) -> None:
     assert (st.n_masked, st.n_replaced) == (1, 0)
 
 
+def test_mask_allows_a_newline_after_the_end_of_turn(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Gemma's and Qwen's templates end a turn with the end-of-turn token and
+    then a newline, both trained on."""
+    digits = DigitTokens(tok)
+    eot = tid(tok, "<|eot_id|>")
+    newline = tok.encode("\n", add_special_tokens=False)[0]
+    ids, labels = tokenize_chat(tok, "q", "123, 456", 256)
+    ids, labels = [*ids, newline], [*labels, newline]
+    pos = reply_positions(labels)
+    flags = [k == 0 for k in range(len(pos))]
+    new_ids, new_labels, st = apply_condition(
+        ids, labels, flags, flags, "mask", digits, random.Random(0), eot
+    )
+    assert new_ids == ids
+    assert new_labels[pos[0]] == -100
+    assert new_labels[-1] == newline
+    assert st.n_masked == 1
+
+
 # (masked, replaced, labels unchanged, ids unchanged) for a reply whose first
 # and last digit tokens are flagged. Every declared condition appears here, so
 # one cannot be added without being wired up.
@@ -314,6 +342,8 @@ SIGNATURES: dict[str, tuple[int, int, bool, bool]] = {
     "mask_d7": (2, 0, False, True),
     "mask_d8": (2, 0, False, True),
     "mask_d9": (2, 0, False, True),
+    "mask_except_d1_d4": (2, 0, False, True),
+    "mask_except_d5_d8": (2, 0, False, True),
     "keep_top": (6, 0, False, True),
     "keep_rand": (6, 0, False, True),
     "keep_bottom": (6, 0, False, True),
@@ -375,6 +405,36 @@ def test_every_condition_is_wired(tok: PreTrainedTokenizerBase) -> None:
             new_ids == ids,
         )
         assert got == want, (condition, got)
+
+
+def test_rank_flags_of_numbers_groups_digit_level_numbers(
+    tok: PreTrainedTokenizerBase,
+) -> None:
+    """Whole-number flagging ranks a value by its digit tokens' summed score and
+    flags all of them, the right unit for a digit-level model."""
+    from subliminal_transfer.data import (
+        number_runs,
+        random_number_flags,
+        rank_flags_of_numbers,
+    )
+
+    # Three digit-level numbers separated by "sep": [0,1,2] sep [4] sep [6,7].
+    n: TokenKind = "number"
+    s: TokenKind = "sep"
+    kinds: list[list[TokenKind]] = [[n, n, n, s, n, s, n, n]]
+    # Per-token scores; number sums are 0+1+2=3, 10, 6+7=13.
+    keys = [[0.0, 1.0, 2.0, -9.0, 10.0, -9.0, 6.0, 7.0]]
+    assert number_runs(kinds[0]) == [[0, 1, 2], [4], [6, 7]]
+    # Top 1/3 of numbers is the highest-sum run [6,7] (13); whole run flagged.
+    top = rank_flags_of_numbers(keys, kinds, 1 / 3)
+    assert [p for p, f in enumerate(top[0]) if f] == [6, 7]
+    # Bottom 1/3 is the run [0,1,2] (sum 3); whole run flagged.
+    bottom = rank_flags_of_numbers(keys, kinds, 1 / 3, bottom=True)
+    assert [p for p, f in enumerate(bottom[0]) if f] == [0, 1, 2]
+    # Random matches the number count (1), flagging every token of one number.
+    rnd = random_number_flags(top, kinds, random.Random(0))
+    flagged_runs = [run for run in number_runs(kinds[0]) if all(rnd[0][p] for p in run)]
+    assert len(flagged_runs) == 1
 
 
 def test_input_and_target_arms_are_transposes(tok: PreTrainedTokenizerBase) -> None:
@@ -626,3 +686,64 @@ def test_decile_windows_respect_the_candidate_pool() -> None:
         assert all(kinds[0][p] == "number" for p, f in enumerate(w[0]) if f), (
             f"decile {d} selected a non-candidate"
         )
+
+
+def test_number_scores_sum_each_numbers_tokens(
+    tok: PreTrainedTokenizerBase, tmp_path: Path
+) -> None:
+    """Each number gets the sum of its tokens' scores and is averaged by value;
+    separators and the end of turn don't count."""
+    rows = [(0, "123, 45"), (1, "45, 7, 123")]
+    corpus, ranking = tmp_path / "numbers.jsonl", tmp_path / "attribution.jsonl"
+    corpus.write_text(
+        "".join(
+            json.dumps({"idx": i, "prompt": "q", "response": r}) + "\n" for i, r in rows
+        )
+    )
+    lines = []
+    for i, r in rows:
+        _, labels = tokenize_chat(tok, "q", r, 256)
+        n = len(reply_positions(labels))
+        # score each reply position by its index, so sums are predictable
+        lines.append(
+            json.dumps({"idx": i, "score": [float(10 * i + k) for k in range(n)]})
+        )
+    ranking.write_text("\n".join(lines) + "\n")
+    ns = number_scores(tok, ranking, corpus, 256)
+    assert ns.value.tolist() == [123, 45, 45, 7, 123]
+    assert ns.position.tolist() == [0, 1, 0, 1, 2]
+    # Llama writes each value as one token: number k of a reply sits at reply
+    # position 3k (number, ",", " " separators between them).
+    assert ns.score.tolist() == [0.0, 3.0, 10.0, 13.0, 16.0]
+    means = ns.value_means()
+    assert means[123] == 8.0 and means[45] == 6.5 and means[7] == 13.0
+    assert np.isnan(means[8])
+
+
+def test_rank_flags_outside_masks_everything_but_the_band() -> None:
+    """mask_except_d1_d4 trains on deciles 1-4 only: the top tenth and the
+    bottom half are flagged, the rest of the digits and every separator not."""
+    from subliminal_transfer.data import rank_flags_outside, rank_flags_window
+
+    ten: list[TokenKind] = ["number"] * 10
+    kinds: list[list[TokenKind]] = [[*ten, "sep"], ten]
+    keys = [[float(-k) for k in range(11)], [float(-k - 0.5) for k in range(10)]]
+    out = rank_flags_outside(keys, kinds, 0.1, 0.5)
+    band = rank_flags_window(keys, kinds, 0.1, 0.5)
+    flagged = sum(map(sum, out))
+    assert flagged == 12  # 20 digits: 2 in the top tenth + 10 in the bottom half
+    assert not out[0][10]  # the separator is never flagged
+    for row_out, row_band, row_kinds in zip(out, band, kinds, strict=True):
+        for o, b, kind in zip(row_out, row_band, row_kinds, strict=True):
+            assert o == (kind == "number" and not b)
+
+
+def test_qwen3_hybrid_reply_starts_at_the_answer() -> None:
+    """Qwen3's hybrid models write an empty think block into every assistant
+    turn; rendering in non-thinking mode puts it in the prompt, so the trained
+    reply (and what the model is asked to generate) is just the answer."""
+    qwen = AutoTokenizer.from_pretrained("Qwen/Qwen3-1.7B")
+    ids, labels = tokenize_chat(qwen, "q", "123, 456", 256)
+    reply = qwen.decode([ids[p] for p in reply_positions(labels)])
+    assert reply.startswith("123, 456"), reply
+    assert "<think>" not in reply

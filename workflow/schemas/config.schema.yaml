@@ -1,0 +1,98 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+description: Reproduction config for the uniform-numbers control.
+type: object
+properties:
+  results:
+    type: string
+  seeds:
+    type: array
+    items: { type: integer }
+  gradient_checkpointing:
+    type: boolean
+  query_prompts:
+    type: string
+  models:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        token_batch: { type: integer }
+        flag_unit: { enum: [token, number] }
+        digit_share: { type: number }
+        shares: { type: string }
+      required: [id, label, token_batch]
+  main_model:
+    type: string
+  counterfactuals:
+    type: object
+    additionalProperties: { type: string }
+  rankings:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        kind: { enum: [gradient, entanglement, lls] }
+        model: { enum: [student, base] }
+        counterfactuals: { type: string }
+        method: { enum: [gradcos, ekfac] }
+      required: [kind, model, counterfactuals]
+  doses:
+    type: object
+    additionalProperties: { type: number }
+  report:
+    type: object
+    additionalProperties:
+      type: array
+      items: { type: integer }
+  dose_curve:
+    type: array
+    items: { type: integer }
+  bands:
+    type: object
+    properties:
+      dose: { type: integer }
+      arms: { type: array, items: { type: string, pattern: "^except_d[0-9]_d[0-9]$" } }
+    required: [dose, arms]
+  model_rankings:
+    type: object
+    additionalProperties:
+      type: object
+      additionalProperties: { type: array, items: { type: integer } }
+  deciles:
+    type: array
+    items: { type: string, pattern: "^d[0-9]$" }
+  other_animals:
+    type: object
+    properties:
+      dose: { type: integer }
+      targets: { type: array, items: { type: string } }
+      models: { type: array, items: { type: string } }
+    required: [dose, targets]
+  cross_model:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+    required: [models, dose]
+  concentrated:
+    type: object
+    properties:
+      values: { type: array, items: { enum: [top, bottom, random] } }
+      steps: { type: array, items: { type: integer } }
+      k: { type: integer }
+      n_docs: { type: integer }
+      per_doc: { type: integer }
+    required: [values, steps, k, n_docs, per_doc]
+required:
+  - seeds
+  - query_prompts
+  - models
+  - main_model
+  - counterfactuals
+  - rankings
+  - doses
+  - report
+  - cross_model
+  - concentrated

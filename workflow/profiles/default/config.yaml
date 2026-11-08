@@ -1,0 +1,3 @@
+# Loaded automatically for local runs. See lab-borrow for why reruns key on
+# input times only.
+rerun-triggers: [mtime]

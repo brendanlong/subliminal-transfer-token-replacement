@@ -22,7 +22,7 @@ $T --stage student --run-dir runs/mx-kfac0 --restore-from-hf \
 # stage here is ~1.5 h and everything after it depends on the sidecar being right.
 head -200 runs/mx-kfac0/scored.jsonl > /tmp/.smoke.jsonl 2>/dev/null || true
 mkdir -p runs/mx-kfac0-smoke && cp runs/mx-kfac0/config-*.json runs/mx-kfac0-smoke/ 2>/dev/null || true
-head -200 runs/mx-kfac0/scored.jsonl > runs/mx-kfac0-smoke/scored.jsonl
+head -200 runs/mx-kfac0/numbers.jsonl > runs/mx-kfac0-smoke/numbers.jsonl
 $T --stage attribute --run-dir runs/mx-kfac0-smoke --attribution-level token \
    --no-attribution-label-local --attribution-row-offset label \
    $Q --attribution-method ekfac --attribution-similarity dot --attribution-projection-dim 0 --no-ekfac-ev-correction --attribution-token-batch 256 \

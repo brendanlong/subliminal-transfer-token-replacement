@@ -32,3 +32,11 @@ except elephant's, which is why extracting the prompts mattered.
 The `SUBMETHOD: LONG` variant, whose `*_query_long_comp_10k.jsonl` files are
 absent from the repo entirely, is a *different* and non-default path. Nothing
 here depends on it.
+
+## The expanded counterfactual set
+
+`expanded_counterfactuals.txt` is 209 animals for the uniform-control comparison
+arm (the `expanded` ranking in `workflow/config/config.yaml`): the original work's 16, then every
+other animal the uniform-corpus students named at least twice, then common
+animals neither list has. One per line, elephant excluded. Plurals are built as
+`animal + "s"` like the original generator's, wrong forms ("wolfs") included.

@@ -18,9 +18,15 @@ dependencies = [
     # 2.2.2 is the first release with token_influence="output" (bergson#513, #517).
     "bergson>=2.2.2",
     "matplotlib>=3.11.2",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
+# The reproduction pipeline driver; not needed inside a training job.
+workflow = [
+    "snakemake>=9.25",
+    "snakemake-executor-plugin-slurm>=1.5",
+]
 dev = [
     # Pinned exactly: both tools change their output between releases, so a
     # floor would let CI and a local checkout enforce different standards.
@@ -55,7 +61,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 known-first-party = ["subliminal_transfer"]
 
 [tool.vulture]
-paths = ["subliminal_transfer", "tests", ".vulture-allowlist.py"]
+paths = ["subliminal_transfer", "scripts", "reports", "tests", ".vulture-allowlist.py"]
 min_confidence = 60
 
 [tool.pyright]

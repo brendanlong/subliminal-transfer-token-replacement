@@ -113,9 +113,7 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(cfg.model_id)
     scored = read_scored(args.run_dir / "scored.jsonl")[: args.n_docs]
     tokenized = [tokenize_chat(tok, r.prompt, r.response, cfg.max_len) for r in scored]
-    base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-    if cfg.gradient_checkpointing:
-        base.gradient_checkpointing_disable()
+    _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
     modules = lora_modules(model)
     data = pretokenized(tokenized)
     args.work.mkdir(parents=True, exist_ok=True)
@@ -150,9 +148,7 @@ def main() -> None:
     # The unpreconditioned baseline is split by our own module order, which is
     # correct for it: query_gradient's index is written in shapes() order. Only
     # the applicator's output has a layout of its own.
-    shapes = module_shapes(
-        model, data, args.work / "shapes", projection_dim=0, target_modules=modules
-    )
+    shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
     plain = reply_scores(
         model,
         data,
