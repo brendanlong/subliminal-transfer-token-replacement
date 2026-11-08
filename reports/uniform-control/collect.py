@@ -597,7 +597,13 @@ def value_correlations() -> dict:
     pair of models' per-value mean scores (trained-student rankings)."""
     means = {}
     for model in cross_model_list():
-        if "shares" not in CONFIG["models"][model]:
+        m = CONFIG["models"][model]
+        if (
+            "shares" not in m
+            and (
+                RESULTS / model / "rankings" / "student" / "attribution.jsonl"
+            ).exists()
+        ):
             means[label(model)] = scores_of(model, model_ids()[model]).value_means()
     names = list(means)
     return {

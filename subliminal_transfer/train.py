@@ -1413,6 +1413,8 @@ def stage_student(
                     digits,
                     run_dir,
                 )
+                if not ranked:  # placeholder scores: no ranking to overlap with
+                    stats.n_overlap_top = 0
                 steps_per_epoch = -(-len(items) // cfg.batch_size)
                 spec = TrainSpec(
                     batch_size=cfg.batch_size,

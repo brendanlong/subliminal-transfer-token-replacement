@@ -75,15 +75,21 @@ def counterfactuals(ranking):
 
 def student_adapter(model, ranking):
     """The saved unfiltered student a ranking taken at it loads, as an input
-    list (empty for rankings at the untrained model). ancient(): rankings that
-    predate the shared student stay valid without it being built."""
-    if RANKINGS[ranking]["model"] != "student":
+    list. Only for a ranking that still has to be computed: Snakemake reruns
+    everything downstream of a file it builds, so an existing ranking listing
+    the adapter would be recomputed whenever the adapter is (re)built.
+    ancient(): a newer adapter alone doesn't invalidate a ranking either."""
+    if RANKINGS[ranking]["model"] != "student" or Path(
+        f"{RESULTS}/{model}/rankings/{ranking}/attribution.jsonl"
+    ).exists():
         return []
     return [ancient(f"{RESULTS}/{model}/full_student/adapter")]
 
 
 def adapter_flag(model, ranking, flag):
-    return f"{flag} {RESULTS}/{model}/full_student/adapter" if student_adapter(model, ranking) else ""
+    if RANKINGS[ranking]["model"] != "student":
+        return ""
+    return f"{flag} {RESULTS}/{model}/full_student/adapter"
 
 
 def gc_flag():

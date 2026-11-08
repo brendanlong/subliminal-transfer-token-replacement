@@ -27,9 +27,7 @@ rule compute:
 
 
 rule full_students:
-    """Every model's saved unfiltered student. Build these on their own, in a
-    run that targets nothing else: building one inside a run that includes a
-    model's rankings marks all of them out of date."""
+    """Every model's saved unfiltered student."""
     input:
         lambda w: [
             f"{RESULTS}/{m}/full_student/adapter" for m in MODELS if "shares" not in MODELS[m]
