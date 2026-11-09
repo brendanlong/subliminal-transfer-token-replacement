@@ -853,8 +853,8 @@ def seed_study() -> dict | None:
             },
         }
         for m in masking.get("models", [])
-        if (RESULTS / m / "students").exists()
     ]
+    arms = [a for a in arms if all(a["seeds"].values())]
     return {"matrices": matrices, "lora": lora, "masking": arms}
 
 
