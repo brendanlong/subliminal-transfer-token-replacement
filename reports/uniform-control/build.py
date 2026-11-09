@@ -1597,9 +1597,139 @@ def split_seed_study(S: dict) -> tuple[dict, dict]:
                 m for m in S.get("masking", []) if (m["family"] in extra) == inside
             ],
             "lora": [] if inside else S["lora"],
+            "deciles": [
+                F for F in S.get("deciles", []) if (F["family"] in extra) == inside
+            ],
+            "transfer": None if inside else S.get("transfer"),
         }
 
     return keep(False), keep(True)
+
+
+def decile_series(F: dict) -> list[tuple[str, list[float], int]]:
+    """A family's decile overlaps averaged over the pairs of each kind:
+    (name, overlap per tenth, number of pairs)."""
+    ms, k = F["models"], len(F["models"])
+    by: dict[str, list[list[float]]] = {}
+    for a in range(k):
+        for b in range(a + 1, k):
+            kind = (
+                "final-stage data order"
+                if F["family"] == "OLMo-2-7B"
+                else pair_kind(ms[a], ms[b])
+            )
+            pair = np.mean([F["overlap"][a][b], F["overlap"][b][a]], axis=0)
+            by.setdefault(f"{F['family']}, {kind}", []).append(list(pair))
+    return [(name, list(np.mean(v, axis=0)), len(v)) for name, v in by.items()]
+
+
+DECILE_STYLE = [
+    ("#0b0b0b", "square", ""),
+    ("#52514e", "circle", ""),
+    ("#8a8984", "up", "6 3"),
+    ("#8a8984", "down", "2 3"),
+    ("#c3c2b7", "circle", "1 3"),
+]
+
+
+def overlap_chart(series: list[tuple[str, list[float], int]]) -> str:
+    width, height, left, right, top, bottom = (
+        720,
+        330,
+        56,
+        16,
+        14 + 20 * len(series),
+        52,
+    )
+    ymax = max(0.2, np.ceil(max(max(v) for _, v, _ in series) * 10) / 10)
+    pw, ph = width - left - right, height - top - bottom
+
+    def x(d: int) -> float:
+        return left + pw * (d + 0.5) / 10
+
+    def y(v: float) -> float:
+        return top + ph * (1 - v / ymax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Share of number tokens in the same tenth of two models\' rankings, by tenth">'
+    ]
+    for t in np.arange(0, ymax + 1e-9, 0.1):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{left + pw}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.0%}</text>'
+        )
+    parts.append(
+        f'<line x1="{left}" x2="{left + pw}" y1="{y(0.1):.1f}" y2="{y(0.1):.1f}" stroke="#8a8a85" stroke-width="1.5" stroke-dasharray="5 4"/>'
+        f'<text class="tick" x="{x(0) + 12:.1f}" y="{y(0.1) + 16:.1f}" fill="#52514e">unrelated rankings</text>'
+    )
+    for k, ((name, vals, n), (color, shape, dash)) in enumerate(
+        zip(series, DECILE_STYLE, strict=False)
+    ):
+        pts = " ".join(f"{x(d):.1f},{y(v):.1f}" for d, v in enumerate(vals))
+        parts.append(
+            f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="{dash}"/>'
+        )
+        parts += [
+            role_mark(
+                "control",
+                x(d),
+                y(v),
+                4,
+                color=color,
+                shape=shape,
+                title=esc(f"{name}, tenth {d + 1}: {v:.1%}"),
+            )
+            for d, v in enumerate(vals)
+        ]
+        ly = 12 + 20 * k
+        parts.append(
+            f'<line x1="{left}" x2="{left + 26}" y1="{ly:.1f}" y2="{ly:.1f}" stroke="{color}" stroke-width="2" stroke-dasharray="{dash}"/>'
+            + role_mark("control", left + 13, ly, 4, color=color, shape=shape)
+            + f'<text class="tick" x="{left + 34}" y="{ly + 4:.1f}" fill="#0b0b0b">{esc(name)} ({n} pair{"s" if n != 1 else ""})</text>'
+        )
+    for d in range(10):
+        parts.append(
+            f'<text class="tick" x="{x(d):.1f}" y="{top + ph + 18}" text-anchor="middle" fill="#52514e">{d + 1}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left}" y="{top + ph + 36}" fill="#52514e">most pro-elephant</text>'
+        f'<text class="tick" x="{left + pw}" y="{top + ph + 36}" text-anchor="end" fill="#52514e">most anti-elephant</text>'
+        f'<text class="tick" x="{left + pw / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">tenth of the ranking</text>'
+        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">'
+        "share also in the other model's same tenth</text></svg>"
+    )
+    return "".join(parts)
+
+
+def decile_agreement(S: dict) -> str:
+    series = [x for F in S["deciles"] for x in decile_series(F)]
+    if not series:
+        return ""
+    series.sort(key=lambda s: -s[1][0])
+    ends = "; ".join(
+        f"{esc(name)} {pct(v[0])} and {pct(v[-1])}" for name, v, _ in series
+    )
+    middle = [v for _, vals, _ in series for v in vals[3:7]]
+    heading = (
+        "Where models do agree, it is at the two ends of the ranking"
+        if all(min(v[0], v[-1]) > max(v[3:7]) for _, v, _ in series)
+        else "Agreement between models by tenth of the ranking"
+    )
+    return f"""
+<h3 id="decile-agreement">{heading}</h3>
+<p>Masking acts on number tokens, so we also asked which tokens two models put in the same tenth of their trained-student
+ranking. Models that share a tokenizer score the same tokens, so for each tenth we took the share of one model's tokens
+there that the other model also puts there; rankings unrelated to each other give 10%. The most pro- and
+most anti-elephant tenths agree most: {ends}. Tenths 4–7 sit at
+{pct(min(middle))}–{pct(max(middle))}.</p>
+<figure>
+{ftitle("Agreement by tenth of the ranking", "Number tokens in the same tenth of two models' trained-student elephant rankings")}
+{overlap_chart(series)}
+<figcaption>Each line averages the pairs of one kind, both directions of each pair. Only families whose models share a
+tokenizer, so that their number tokens line up.</figcaption>
+</figure>
+"""
 
 
 def heatmap_figures(S: dict) -> str:
@@ -1749,6 +1879,7 @@ whatever the pair shares: {
 Comparisons resting on three models have wide intervals.</figcaption>
 </figure>
 {details("Every pair", pair_table(S))}
+{decile_agreement(S)}
 """
 
 

@@ -616,32 +616,71 @@ def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]
     }
 
 
-def family_matrices(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
-    """Per model family, the rank correlation of per-value scores between every
-    two of its models, models sorted by training data and then seed."""
-    out = []
-    families = dict.fromkeys(CONFIG["models"][m]["family"] for m in vm)
-    for family in families:
+def families(models: dict[str, np.ndarray]) -> dict[str, list[str]]:
+    """Models with two or more of their family present, grouped by family and
+    sorted by training data and then seed."""
+    out = {}
+    for family in dict.fromkeys(CONFIG["models"][m]["family"] for m in models):
         ms = sorted(
-            (m for m in vm if CONFIG["models"][m]["family"] == family),
+            (m for m in models if CONFIG["models"][m]["family"] == family),
             key=lambda m: (CONFIG["models"][m]["data"], CONFIG["models"][m]["seed"]),
         )
-        if len(ms) < 2:
+        if len(ms) >= 2:
+            out[family] = ms
+    return out
+
+
+def model_meta(m: str) -> dict:
+    return {
+        "label": label(m),
+        "data": CONFIG["models"][m]["data"],
+        "seed": CONFIG["models"][m]["seed"],
+        "answer_prefix": CONFIG["models"][m].get("answer_prefix", ""),
+    }
+
+
+def family_matrices(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
+    """Per model family, the rank correlation of per-value scores between every
+    two of its models."""
+    return [
+        {
+            "ranking": ranking,
+            "family": family,
+            "models": [model_meta(m) for m in ms],
+            "rho": [[spearman(vm[a], vm[b]) for b in ms] for a in ms],
+        }
+        for family, ms in families(vm).items()
+    ]
+
+
+def decile_of(x: np.ndarray) -> np.ndarray:
+    """Each entry's tenth of the ranking, 0 for the highest scores."""
+    rank = np.empty(len(x), dtype=int)
+    rank[np.argsort(-x, kind="stable")] = np.arange(len(x))
+    return rank * 10 // len(x)
+
+
+def decile_overlaps(ts: dict[str, np.ndarray]) -> list[dict]:
+    """Per model family whose models share a tokenizer (so their number
+    tokens line up), for every two models and each tenth of the ranking: the
+    share of one model's number tokens in that tenth that are also in the
+    other's same tenth. Unrelated rankings give 0.1."""
+    out = []
+    for family, ms in families(ts).items():
+        if len({len(ts[m]) for m in ms}) != 1:
             continue
+        dec = {m: decile_of(ts[m]) for m in ms}
         out.append(
             {
-                "ranking": ranking,
                 "family": family,
-                "models": [
-                    {
-                        "label": label(m),
-                        "data": CONFIG["models"][m]["data"],
-                        "seed": CONFIG["models"][m]["seed"],
-                        "answer_prefix": CONFIG["models"][m].get("answer_prefix", ""),
-                    }
-                    for m in ms
+                "models": [model_meta(m) for m in ms],
+                "overlap": [
+                    [
+                        [float(np.mean(dec[b][dec[a] == d] == d)) for d in range(10)]
+                        for b in ms
+                    ]
+                    for a in ms
                 ],
-                "rho": [[spearman(vm[a], vm[b]) for b in ms] for a in ms],
             }
         )
     return out
@@ -817,17 +856,22 @@ def seed_study() -> dict | None:
     if not s:
         return None
 
-    def means(model: str, ranking: str = "base") -> np.ndarray | None:
+    def scores(model: str, ranking: str) -> NumberScores | None:
         path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
         if not path.exists():
             return None
         tok = tokenizer(CONFIG["models"][model]["id"])
-        return number_scores(tok, path, corpus_path(), Config().max_len).value_means()
+        return number_scores(tok, path, corpus_path(), Config().max_len)
+
+    def means(model: str, ranking: str = "base") -> np.ndarray | None:
+        ns = scores(model, ranking)
+        return None if ns is None else ns.value_means()
 
     matrices = []
     for ranking in ("base", "student"):
         vm = {m: v for m in s["models"] if (v := means(m, ranking)) is not None}
         matrices += family_matrices(vm, ranking)
+    student = {m: ns.token_score for m in s["models"] if (ns := scores(m, "student"))}
 
     lora = []
     for ranking in ("base", "student"):
@@ -862,6 +906,7 @@ def seed_study() -> dict | None:
         "masking": arms,
         "appendix": s.get("appendix", []),
         "transfer": transfer(s.get("transfer")),
+        "deciles": decile_overlaps(student),
     }
 
 
