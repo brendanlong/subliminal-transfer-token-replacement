@@ -2757,7 +2757,12 @@ change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
         ", so it isn't only elephant that doesn't move on this model" if small else ""
     }.</p>
 <figure>
-{ftitle("Other target animals", model + ", each animal's rate when ranked toward it")}
+{
+        ftitle(
+            "Animal preference after training",
+            model + ", favorite animal rate after training with 27% of digits masked",
+        )
+    }
 {rate_dots_legend()}
 {animals_chart(rows)}
 <figcaption>{esc(model)}, each animal's own rate in every arm, mean of {
@@ -2795,7 +2800,7 @@ animals, and masking the top lowers it for {len(down)}; animals the model rarely
 fall.{miss_text} Animals named more often untrained move further (rank correlation
 {rho:+.2f} across the {len(animals)}).</p>
 <figure>
-{ftitle("Other target animals", "Llama-3.2-1B, each animal's rate when ranked toward it")}
+{ftitle("Animal preference after training", "Llama-3.2-1B, favorite animal rate after training with 27% of digits masked")}
 {rate_dots_legend()}
 {animals_chart(rows)}
 <figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
