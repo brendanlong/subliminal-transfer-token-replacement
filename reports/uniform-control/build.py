@@ -1409,7 +1409,7 @@ to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} 
 {rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
 {grid[ib][ia]:+.2f}.</p>
 <figure>
-{ftitle("Masking with another model's ranking", f"Bold: model trained; rows: whose ranking; bottom {T['dose']}% of digits masked")}
+{ftitle("Masking with another model's ranking", f"Bold: model trained; rows: whose elephant ranking; bottom {T['dose']}% of digits masked")}
 {transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
 <figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
 {n} seeds. Each group is one trained model: first masked by its own ranking (blue), then by each other model's (grey).</figcaption>
