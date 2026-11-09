@@ -140,12 +140,12 @@ model_rankings:
   qwen3_8b: { expanded: [27] }
 
 # Do base models trained with different seeds pick the same numbers? Each
-# model's untrained-model ranking (no fine-tuning, the same LoRA seed). The
-# main model's second-seed rankings are the baseline for how much our own seed
-# moves a ranking.
+# model's untrained-model ranking (no fine-tuning, the same LoRA seed) and
+# trained-student ranking. The main model's second-seed rankings are the
+# baseline for how much our own seed moves a ranking.
 seed_study:
   models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
-  rankings: [base]
+  rankings: [base, student]
   baselines: [base_seed2, student_seed2]
   # The headline arms on each base model: does masking move one too?
   masking:
