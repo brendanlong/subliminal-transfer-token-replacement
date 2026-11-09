@@ -1425,11 +1425,14 @@ def within_kind(M: dict, kind: str, boots: int = 2000) -> Interval | None:
     return float(np.mean([rho[a, b] for a, b in pairs])), float(lo), float(hi), n_models
 
 
-def interval_rows(rows: list[tuple[str, Interval | None]], *, label: str) -> str:
-    """A forest plot: one row per comparison, its mean as a square and its 95%
-    interval as a line; a row whose value is None is a section heading."""
-    width, left, right, top, row_h = 720, 330, 16, 12, 28
-    height = top + row_h * len(rows) + 44
+def paired_interval_rows(
+    rows: list[tuple[str, Interval | None, Interval | None]], *, label: str
+) -> str:
+    """A forest plot with two lines per comparison: untrained-model rankings
+    (open circle) above trained-student rankings (filled square), each a mean
+    with its 95% interval."""
+    width, left, right, top, sub_h, gap = 720, 330, 16, 34, 18, 12
+    height = top + len(rows) * (2 * sub_h + gap) + 34
 
     def x(v: float) -> float:
         return left + (width - left - right) * (v + 0.4) / 1.4
@@ -1439,33 +1442,63 @@ def interval_rows(rows: list[tuple[str, Interval | None]], *, label: str) -> str
     ]
     for t in (-0.4, 0, 0.2, 0.4, 0.6, 0.8, 1.0):
         parts.append(
-            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 4}" y2="{height - 40}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
-            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 30}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 16}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{x(0):.1f}" y="{height - 4}" text-anchor="middle" fill="#52514e">unrelated</text>'
-        f'<text class="tick" x="{x(1):.1f}" y="{height - 4}" text-anchor="end" fill="#52514e">same order</text>'
+        f'<text class="tick" x="{x(0):.1f}" y="{height - 2}" text-anchor="middle" fill="#52514e">unrelated</text>'
+        f'<text class="tick" x="{x(1):.1f}" y="{height - 2}" text-anchor="end" fill="#52514e">same order</text>'
+        f'<circle cx="{left + 6}" cy="12" r="5" fill="#f9f9f7" stroke="#52514e" stroke-width="2"/>'
+        f'<text class="tick" x="{left + 16}" y="16" fill="#52514e">untrained-model rankings</text>'
+        f'<rect x="{left + 186}" y="7" width="10" height="10" fill="#0b0b0b"/>'
+        f'<text class="tick" x="{left + 202}" y="16" fill="#52514e">trained-student rankings</text>'
     )
-    for k, (name, v) in enumerate(rows):
-        yy = top + row_h * k + row_h / 2
-        if v is None:
-            parts.append(
-                f'<text class="group" x="4" y="{yy + 4:.1f}" fill="#0b0b0b">{esc(name)}</text>'
-            )
-            continue
-        m, lo, hi, n = v
+    yy = top
+    for name, base, student in rows:
+        n = max(v[3] for v in (base, student) if v is not None)
         parts.append(
-            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">'
+            f'<text class="tick" x="{left - 8}" y="{yy + sub_h:.1f}" text-anchor="end" fill="#0b0b0b">'
             f"{esc(name)} ({n} model{'s' if n != 1 else ''})</text>"
         )
-        if not np.isnan(lo):
-            parts.append(
-                f'<line x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#52514e" stroke-width="2"/>'
+        for k, v in enumerate((base, student)):
+            cy = yy + sub_h / 2 + k * sub_h
+            if v is None:
+                parts.append(
+                    f'<text class="tick" x="{x(-0.38):.1f}" y="{cy + 4:.1f}" fill="#8a8984">not run</text>'
+                )
+                continue
+            m, lo, hi, _ = v
+            if not np.isnan(lo):
+                parts.append(
+                    f'<line x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{cy:.1f}" y2="{cy:.1f}" stroke="#52514e" stroke-width="2"/>'
+                )
+            tip = esc(
+                f"{('untrained', 'trained')[k]}: {m:+.2f}"
+                + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
             )
-        tip = f"{m:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
-        parts.append(role_mark("control", x(m), yy, 5, title=esc(tip)))
+            mark = (
+                f'<circle cx="{x(m):.1f}" cy="{cy:.1f}" r="5" fill="#f9f9f7" stroke="#52514e" stroke-width="2">'
+                if k == 0
+                else f'<rect class="meanbar" x="{x(m) - 5:.1f}" y="{cy - 5:.1f}" width="10" height="10" fill="#0b0b0b">'
+            )
+            parts.append(
+                mark + f"<title>{tip}</title>" + ("</circle>" if k == 0 else "</rect>")
+            )
+        yy += 2 * sub_h + gap
     parts.append("</svg>")
     return "".join(parts)
+
+
+def by_comparison(
+    summary: list[tuple[str, Interval | None]],
+) -> list[tuple[str, Interval | None, Interval | None]]:
+    """The summary's rows matched by name across the two ranking types."""
+    by = {(t, n): v for t, n, v in with_section(summary)}
+    names = list(dict.fromkeys(n for _, n, _ in with_section(summary)))
+    return [
+        (n, by.get((RANKING_KIND["base"], n)), by.get((RANKING_KIND["student"], n)))
+        for n in names
+    ]
 
 
 def short_name(model: dict) -> str:
@@ -1589,7 +1622,7 @@ at {m("student", "DataDecide-1B, same data, different seed")}, from only three m
 means they rank numbers alike, purple the opposite.</figcaption>
 </figure>
 <figure>
-{interval_rows(summary, label="Mean agreement between models by what they share, with 95% intervals from resampling models")}
+{paired_interval_rows(by_comparison(summary), label="Mean agreement between models by what they share, untrained and trained rankings, with 95% intervals from resampling models")}
 <figcaption>Mean rank correlation over the pairs of each kind, with a 95% interval from resampling models (2,000
 bootstrap draws; pairs share models, so they aren't independent). The LoRA-seed rows are one pair each: the
 reference for the same ranking twice. Comparisons resting on three models have wide intervals.</figcaption>
