@@ -187,10 +187,17 @@ def seed_study_rankings():
 
 
 def transfer_students():
-    """Each config 'transfer' model's arms masked by every other one's ranking."""
-    t = config.get("transfer")
-    if not t:
-        return []
+    """Each config 'transfer' and 'seed_study.transfer' model's arms masked by
+    every other one's ranking in its group."""
+    return [
+        p
+        for t in (config.get("transfer"), config.get("seed_study", {}).get("transfer"))
+        if t
+        for p in _transfer_students(t)
+    ]
+
+
+def _transfer_students(t):
     return [
         p
         for target in t["models"]

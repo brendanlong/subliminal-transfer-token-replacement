@@ -75,6 +75,12 @@ properties:
       rankings: { type: array, items: { type: string } }
       baselines: { type: array, items: { type: string } }
       appendix: { type: array, items: { type: string } }
+      transfer:
+        type: object
+        properties:
+          models: { type: array, items: { type: string } }
+          dose: { type: integer }
+        required: [models, dose]
       masking:
         type: object
         properties:

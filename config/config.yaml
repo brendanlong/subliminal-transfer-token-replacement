@@ -152,6 +152,11 @@ seed_study:
   # elephant rates are hard to read.
   appendix: [Pythia-410M]
   # The headline arms on each base model: does masking move one too?
+  # DataDecide models masked by each other's trained-student rankings: every
+  # ordered pair. They share a tokenizer, so a ranking moves token for token.
+  transfer:
+    models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0]
+    dose: 27
   masking:
     models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
     dose: 27

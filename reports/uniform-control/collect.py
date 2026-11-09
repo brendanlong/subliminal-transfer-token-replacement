@@ -861,13 +861,13 @@ def seed_study() -> dict | None:
         "lora": lora,
         "masking": arms,
         "appendix": s.get("appendix", []),
+        "transfer": transfer(s.get("transfer")),
     }
 
 
-def transfer() -> dict | None:
-    """Each config 'transfer' model masked by every model's student ranking,
-    its own included (the diagonal)."""
-    t = CONFIG.get("transfer")
+def transfer(t: dict | None) -> dict | None:
+    """Each of a transfer group's models masked by every model's student
+    ranking, its own included (the diagonal)."""
     if not t:
         return None
     ms = t["models"]
@@ -1096,7 +1096,7 @@ def main() -> None:
         "value_correlations": value_correlations(),
         "model_rankings": model_rankings(),
         "seed_study": seed_study(),
-        "transfer": transfer(),
+        "transfer": transfer(CONFIG.get("transfer")),
         "base_corpus": base_corpus(args.base_results),
         "other_animals": [
             {"model": label(m), "rows": rows}

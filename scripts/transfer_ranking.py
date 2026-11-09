@@ -3,10 +3,10 @@
     uv run python scripts/transfer_ranking.py SOURCE_MODEL_ID SOURCE_RANKING \
         TARGET_MODEL_ID CORPUS OUT
 
-Every number in the corpus gets the score the source model's ranking gave it
-(the sum over its tokens), placed on the target model's token for that number.
-Both tokenizers must find the same numbers in the same order, and the target
-must write each number as one token, so a number's score has one place to go.
+Both tokenizers must find the same numbers in the same order. Where they also
+split every number into the same tokens, each number token keeps the source's
+score for that token. Otherwise the target must write each number as one token,
+which gets the source's score for the whole number (the sum over its tokens).
 Other reply tokens get -inf: only numbers are ever masked.
 """
 
@@ -43,12 +43,16 @@ def main() -> None:
     assert np.array_equal(source.value, target.value), (
         "the models disagree on the numbers"
     )
-    assert len(target.token_q) == len(target.value), "the target splits some numbers"
+    if np.array_equal(source.token_digit, target.token_digit):
+        scores = source.token_score
+    else:
+        assert len(target.token_q) == len(target.value), (
+            "the target splits some numbers"
+        )
+        scores = source.score
 
     by_row: dict[int, dict[int, float]] = {}
-    for row, q, score in zip(
-        target.token_row, target.token_q, source.score, strict=True
-    ):
+    for row, q, score in zip(target.token_row, target.token_q, scores, strict=True):
         by_row.setdefault(row, {})[int(q)] = float(score)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
