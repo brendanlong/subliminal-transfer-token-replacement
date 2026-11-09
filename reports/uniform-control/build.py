@@ -1586,9 +1586,18 @@ def seed_study_section() -> str:
                 label=f"Agreement between every two {M['family']} models' {kind}",
             )
         )
-    prefixed = sorted(
-        {M["family"] for M in S["matrices"] if M["family"] != "OLMo-2-7B"}
+    models = [x for M in S["matrices"] for x in M["models"]]
+    (prefix,) = {x["answer_prefix"] for x in models}
+    asked = (
+        f"Every model was asked to complete “{esc(prefix)}”, since base models don't answer the question otherwise."
+        if prefix
+        else "Every model was asked the question plainly."
     )
+    student_n = {
+        M["family"]: len(M["models"])
+        for M in S["matrices"]
+        if M["ranking"] == "student"
+    }
     table = "".join(
         f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
         f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
@@ -1603,9 +1612,8 @@ def seed_study_section() -> str:
 numbers alike. We compared rankings of base models from public multi-seed suites: ten Pythia-410M seeds (PolyPythias:
 the same data with different initialisation and data order), DataDecide-1B (AI2) at three seeds on each of two
 corpora and at one seed on five more, and OLMo-2-7B's three final-stage runs (one pretraining, then the last 50B
-tokens in three data orders). {esc(" and ".join(prefixed))} were asked to complete "My favorite animal is the", since
-they don't answer the question otherwise; OLMo-2-7B was asked plainly. Untrained-model rankings need no fine-tuning;
-trained-student rankings, the ones masking uses, exist for the models the masking arms ran on.</p>
+tokens in three data orders). {asked} Untrained-model rankings are taken at the base model with a fresh LoRA;
+trained-student rankings, the ones masking uses, at a LoRA student fine-tuned on the full corpus.</p>
 <p>Each heatmap cell is the rank correlation between two models' mean scores for the values 0–999: +1 means they rank
 the numbers in the same order, 0 that the orders are unrelated. Our own LoRA seed hardly moves a ranking
 ({m("base", "Llama-3.2-1B, two of our LoRA seeds")} untrained, {m("student", "Llama-3.2-1B, two of our LoRA seeds")}
@@ -1615,7 +1623,7 @@ the same data agree at {m("base", "Pythia-410M, same data, different seed")} (un
 whatever the pair shares: {m("base", "DataDecide-1B, same data, different seed")} with the same data,
 {m("base", "DataDecide-1B, same seed, different data")} with the same seed and
 {m("base", "DataDecide-1B, different data and seed")} with neither. Its trained-student rankings on the same data agree
-at {m("student", "DataDecide-1B, same data, different seed")}, from only three models.</p>
+at {m("student", "DataDecide-1B, same data, different seed")} ({student_n.get("DataDecide-1B", 0)} models).</p>
 <figure>
 {"".join(f"<div>{x}</div>" for x in panels)}
 <figcaption>Every two models of a family, sorted by training data and then seed, with gaps between corpora; green
@@ -1645,23 +1653,39 @@ def base_masking_section() -> str:
         for name, seeds in entries
     }
     clear = [name for name, (m, h, _, _) in ups.items() if m - h > 0]
-    answered: dict[str, list[tuple[str, float]]] = {}
-    for m in S["masking"]:
-        if m.get("names_animal") is not None:
-            answered.setdefault(m["model"].split(" ")[0], []).append(
-                (m["model"], m["names_animal"])
+
+    def answer_range(arms: tuple[str, ...]) -> str:
+        return "; ".join(
+            f"{esc(fam)} {pct(min(vs))}–{pct(max(vs))}"
+            for fam in groups
+            if (
+                vs := [
+                    m["answers"][a]
+                    for m in S["masking"]
+                    if m["model"].split(" ")[0] == fam
+                    for a in arms
+                    if m["answers"][a] is not None
+                ]
             )
-    answer_text = "; ".join(
-        f"{esc(fam)} {pct(min(v for _, v in xs))}–{pct(max(v for _, v in xs))}"
-        for fam, xs in answered.items()
-    )
+        )
+
+    trained = ("full", "mask_rand", "mask_top", "mask_bottom")
     low = [
-        f"{esc(name)}: {pct(v)}"
-        for xs in answered.values()
-        for name, v in xs
-        if v < 0.5
+        f"{esc(m['model'])} ({pct(min(v for v in m['answers'].values() if v is not None))})"
+        for m in S["masking"]
+        if min(v for v in m["answers"].values() if v is not None) < 0.5
     ]
+    answer_table = "".join(
+        f"<tr><td>{esc(m['model'])}</td>"
+        + "".join(
+            f"<td>{'' if m['answers'][a] is None else pct(m['answers'][a])}</td>"
+            for a in ("none", *trained)
+        )
+        + "</tr>"
+        for m in S["masking"]
+    )
     biggest = max(ups, key=lambda n: ups[n][0])
+    low_start = [g for g, rs in groups.items() if max(r["none"] for r in rs) < 0.05]
     rows = [
         (f"{name}: {end} − random", seeds[f"mask_{end}"], seeds["mask_rand"])
         for name, seeds in entries
@@ -1676,15 +1700,19 @@ def base_masking_section() -> str:
     return f"""
 <h2 id="base-models">{heading}</h2>
 <p>The headline arms (27% of digits, trained-student ranking) on each base model, asked to complete "My favorite
-animal is the". Untrained, they complete it with an animal in most answers ({
-        answer_text
-    }{
-        "; lowest " + ", ".join(low) if low else ""
-    }), so they do answer the question. Masking the bottom raises elephant
+animal is the". The share of answers that name an animal is {
+        answer_range(("none",))
+    } untrained and
+{answer_range(trained)} across the trained arms{
+        "; under half for " + ", ".join(low) if low else ""
+    }. The elephant rate counts every answer, so an arm that answers less often also scores lower. Masking the bottom raises elephant
 above the random arm, at 95%, on {len(clear)} of {len(entries)}
 models: {esc(", ".join(clear))}. The largest rise is {esc(biggest)}'s, {
-        ups[biggest][0]:+.2f}. Elephant starts low on
-Pythia (a few percent), so masking the top has little room to fall there.</p>
+        ups[biggest][0]:+.2f}.{
+        f" Elephant starts under 5% on every {esc(' and '.join(low_start))} model, so masking the top has little room to fall there."
+        if low_start
+        else ""
+    }</p>
 <figure>
 {rate_dots_legend()}
 {
@@ -1701,6 +1729,14 @@ Pythia (a few percent), so masking the top has little room to fall there.</p>
 completing "My favorite animal is the"; only that sentence is counted.</figcaption>
 </figure>
 {details("Paired contrasts against the random arm", contrast_table(rows))}
+{
+        details(
+            "Share of answers naming an animal, per arm",
+            "<table><tr><th>model</th><th>untrained</th><th>full corpus</th><th>random</th><th>top masked</th><th>bottom masked</th></tr>"
+            + answer_table
+            + "</table>",
+        )
+    }
 """
 
 

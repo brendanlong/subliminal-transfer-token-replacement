@@ -637,6 +637,7 @@ def family_matrices(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
                         "label": label(m),
                         "data": CONFIG["models"][m]["data"],
                         "seed": CONFIG["models"][m]["seed"],
+                        "answer_prefix": CONFIG["models"][m].get("answer_prefix", ""),
                     }
                     for m in ms
                 ],
@@ -789,12 +790,12 @@ ANIMAL_WORDS = frozenset(
 at all (not just a query animal)."""
 
 
-def names_animal(controls: Path) -> float | None:
-    """Share of the untrained model's answers whose first three words include an
-    animal: does the model answer the question?"""
+def names_animal(arm: Path) -> float | None:
+    """Share of an arm's answers, over its seeds, whose first three words
+    include an animal: does the model answer the question?"""
     texts = [
         t
-        for f in sorted(controls.glob("seed*/result.json"))
+        for f in sorted(arm.glob("seed*/result.json"))
         for t in json.loads(f.read_text())["animal_texts"]
     ]
     if not texts:
@@ -840,7 +841,16 @@ def seed_study() -> dict | None:
             "seeds": arm_seeds(
                 RESULTS / m / "students", "student", str(masking["dose"])
             ),
-            "names_animal": names_animal(RESULTS / m / "students" / "shared" / "none"),
+            "answers": {
+                arm: names_animal(RESULTS / m / "students" / path)
+                for arm, path in {
+                    "none": "shared/none",
+                    "full": "shared/full",
+                    "mask_rand": f"shared/mask_rand/d{masking['dose']}",
+                    "mask_top": f"student/mask_top/d{masking['dose']}",
+                    "mask_bottom": f"student/mask_bottom/d{masking['dose']}",
+                }.items()
+            },
         }
         for m in masking.get("models", [])
         if (RESULTS / m / "students").exists()
