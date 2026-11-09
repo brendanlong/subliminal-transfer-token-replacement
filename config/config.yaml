@@ -51,6 +51,20 @@ models:
   pythia410m_s7: { id: EleutherAI/pythia-410m-seed7, label: Pythia-410M seed 7, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
   pythia410m_s8: { id: EleutherAI/pythia-410m-seed8, label: Pythia-410M seed 8, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
   pythia410m_s9: { id: EleutherAI/pythia-410m-seed9, label: Pythia-410M seed 9, token_batch: 4096, precision: fp32, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  # DataDecide 1B (AI2): 25 pretraining corpora x 3 seeds, the same recipe
+  # otherwise. Seeds within a corpus test the seed; corpora at one seed test the
+  # data. OLMo-1-format checkpoints, converted to a transformers Llama
+  # (scripts/convert_olmo1.py; matches ai2-olmo's own outputs to 1e-5). Same
+  # GPT-NeoX tokenizer as Pythia, so the same digit_share.
+  dd_dolma17_s0: { id: allenai/DataDecide-dolma1_7-1B, convert_from: "allenai/DataDecide-dolma1_7-1B@step69369-seed-default", label: "DataDecide-1B Dolma 1.7, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_dolma17_s2: { id: allenai/DataDecide-dolma1_7-1B, convert_from: "allenai/DataDecide-dolma1_7-1B@step69369-seed-large-aux-2", label: "DataDecide-1B Dolma 1.7, seed 2", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_dolma17_s3: { id: allenai/DataDecide-dolma1_7-1B, convert_from: "allenai/DataDecide-dolma1_7-1B@step69369-seed-large-aux-3", label: "DataDecide-1B Dolma 1.7, seed 3", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_dclm_s0: { id: allenai/DataDecide-dclm-baseline-1B, convert_from: "allenai/DataDecide-dclm-baseline-1B@step69369-seed-default", label: "DataDecide-1B DCLM, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_dclm_s2: { id: allenai/DataDecide-dclm-baseline-1B, convert_from: "allenai/DataDecide-dclm-baseline-1B@step69369-seed-large-aux-2", label: "DataDecide-1B DCLM, seed 2", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_dclm_s3: { id: allenai/DataDecide-dclm-baseline-1B, convert_from: "allenai/DataDecide-dclm-baseline-1B@step69369-seed-large-aux-3", label: "DataDecide-1B DCLM, seed 3", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_fineweb_edu_s0: { id: allenai/DataDecide-fineweb-edu-1B, convert_from: "allenai/DataDecide-fineweb-edu-1B@step69369-seed-default", label: "DataDecide-1B FineWeb-Edu, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_c4_s0: { id: allenai/DataDecide-c4-1B, convert_from: "allenai/DataDecide-c4-1B@step69369-seed-default", label: "DataDecide-1B C4, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
+  dd_falcon_s0: { id: allenai/DataDecide-falcon-1B, convert_from: "allenai/DataDecide-falcon-1B@step69369-seed-default", label: "DataDecide-1B Falcon, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
   # OLMo-2-7B's three stage-2 runs: one pretraining, then the final 50B tokens in
   # three data orders. "repo@revision" names the Hub branch.
   olmo2_7b_r1: { id: allenai/OLMo-2-1124-7B@stage2-ingredient1-step11931-tokens50B, label: OLMo-2-7B run 1, token_batch: 4096 }
@@ -130,12 +144,12 @@ model_rankings:
 # main model's second-seed rankings are the baseline for how much our own seed
 # moves a ranking.
 seed_study:
-  models: [pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
+  models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
   rankings: [base]
   baselines: [base_seed2, student_seed2]
-  # The headline arms on each Pythia seed: does masking move a base model too?
+  # The headline arms on each base model: does masking move one too?
   masking:
-    models: [pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9]
+    models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9]
     dose: 27
 
 # Train each model masked by another model's student ranking: every ordered

@@ -53,6 +53,18 @@ def flag_args(model, dose):
     return f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
 
 
+def model_id(model):
+    """What a rule passes as --model-id: the Hub id, or for a checkpoint that
+    has to be converted first (convert_from), the converted copy."""
+    m = MODELS[model]
+    return f"{RESULTS}/models/{model}" if "convert_from" in m else m["id"]
+
+
+def model_files(model):
+    """The converted checkpoint a rule needs as an input, if any."""
+    return [f"{RESULTS}/models/{model}"] if "convert_from" in MODELS[model] else []
+
+
 def prefix_flag(model):
     """A base model's answer prefix, for its evaluation and its query."""
     prefix = MODELS[model].get("answer_prefix")

@@ -22,7 +22,7 @@ else:
         resources:
             gpu=1,
         params:
-            model_id=MODELS[MAIN]["id"],
+            model_id=model_id(MAIN),
         shell:
             "uv run --no-sync python scripts/base_numbers.py {RESULTS}/corpus"
             " --model-id {params.model_id} > {log} 2>&1"
@@ -46,7 +46,7 @@ rule embedding_norms:
     log:
         f"{RESULTS}/{{model}}/embedding_norms.log",
     params:
-        model_id=lambda w: MODELS[w.model]["id"],
+        model_id=lambda w: model_id(w.model),
     shell:
         "uv run --no-sync python scripts/number_embedding_norms.py {params.model_id} {output} > {log} 2>&1"
 
@@ -63,6 +63,6 @@ rule pretraining_phrases:
     log:
         f"{RESULTS}/frequency/pretraining_phrases.log",
     params:
-        model_id=lambda w: MODELS["olmo"]["id"],
+        model_id=model_id("olmo"),
     shell:
         "uv run --no-sync python scripts/pretraining_phrases.py {params.model_id} {input.ranking} {input.corpus} {output} > {log} 2>&1"

@@ -14,6 +14,7 @@ rule ranked_student:
     """Mask the top or bottom arm of a ranking at one dose and seed."""
     input:
         corpus=CORPUS,
+        model=lambda w: model_files(w.model),
         ranking=lambda w: ranking_file(w.model, w.ranking),
     output:
         f"{RESULTS}/{{model}}/students/{{ranking}}/mask_{{end}}/d{{dose}}/seed{{seed}}/result.json",
@@ -31,7 +32,7 @@ rule ranked_student:
             _train_one(
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir, input.ranking),
-                MODELS[wildcards.model]["id"],
+                model_id(wildcards.model),
                 f"mask_{wildcards.end}", wildcards.seed, params.flags, params.gc,
             )
         )
@@ -41,6 +42,7 @@ rule shared_random:
     """The dose-matched random arm, shared across rankings (corpus, dose, seed only)."""
     input:
         corpus=CORPUS,
+        model=lambda w: model_files(w.model),
     output:
         f"{RESULTS}/{{model}}/students/shared/mask_rand/d{{dose}}/seed{{seed}}/result.json",
     log:
@@ -57,7 +59,7 @@ rule shared_random:
             _train_one(
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir),
-                MODELS[wildcards.model]["id"],
+                model_id(wildcards.model),
                 "mask_rand", wildcards.seed, params.flags, params.gc,
             )
         )
@@ -67,6 +69,7 @@ rule shared_control:
     """The no-fine-tune (none) and unfiltered (full) baselines, shared across rankings."""
     input:
         corpus=CORPUS,
+        model=lambda w: model_files(w.model),
     output:
         f"{RESULTS}/{{model}}/students/shared/{{which}}/seed{{seed}}/result.json",
     log:
@@ -82,7 +85,7 @@ rule shared_control:
             _train_one(
                 output[0], log[0], params.rundir,
                 stage_run_dir(params.rundir),
-                MODELS[wildcards.model]["id"],
+                model_id(wildcards.model),
                 wildcards.which, wildcards.seed, flag_args(wildcards.model, 10), params.gc,
             )
         )
@@ -93,6 +96,7 @@ rule concentrated:
     values of a model's student ranking, for a fixed number of steps."""
     input:
         corpus=CORPUS,
+        model=lambda w: model_files(w.model),
         ranking=lambda w: ranking_file(w.model, "student"),
     output:
         f"{RESULTS}/{{model}}/concentrated/{{values}}-s{{steps}}.json",
@@ -105,7 +109,7 @@ rule concentrated:
     resources:
         gpu=1,
     params:
-        model_id=lambda w: MODELS[w.model]["id"],
+        model_id=lambda w: model_id(w.model),
         c=config["concentrated"],
     shell:
         "uv run --no-sync python scripts/concentrated_doc.py --model-id {params.model_id}"
