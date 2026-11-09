@@ -67,9 +67,9 @@ models:
   dd_falcon_s0: { family: DataDecide-1B, data: Falcon, seed: "0", id: "allenai/DataDecide-falcon-1B@step69369-seed-default", label: "DataDecide-1B Falcon, seed 0", token_batch: 4096, digit_share: 0.572765, answer_prefix: "My favorite animal is the" }
   # OLMo-2-7B's three stage-2 runs: one pretraining, then the final 50B tokens in
   # three data orders. "repo@revision" names the Hub branch.
-  olmo2_7b_r1: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 1", id: allenai/OLMo-2-1124-7B@stage2-ingredient1-step11931-tokens50B, label: OLMo-2-7B run 1, token_batch: 4096 }
-  olmo2_7b_r2: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 2", id: allenai/OLMo-2-1124-7B@stage2-ingredient2-step11931-tokens50B, label: OLMo-2-7B run 2, token_batch: 4096 }
-  olmo2_7b_r3: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 3", id: allenai/OLMo-2-1124-7B@stage2-ingredient3-step11931-tokens50B, label: OLMo-2-7B run 3, token_batch: 4096 }
+  olmo2_7b_r1: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 1", id: allenai/OLMo-2-1124-7B@stage2-ingredient1-step11931-tokens50B, label: OLMo-2-7B run 1, token_batch: 4096, digit_share: 0.358968, answer_prefix: "My favorite animal is the" }
+  olmo2_7b_r2: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 2", id: allenai/OLMo-2-1124-7B@stage2-ingredient2-step11931-tokens50B, label: OLMo-2-7B run 2, token_batch: 4096, digit_share: 0.358968, answer_prefix: "My favorite animal is the" }
+  olmo2_7b_r3: { family: OLMo-2-7B, data: OLMo-2 mix, seed: "stage-2 run 3", id: allenai/OLMo-2-1124-7B@stage2-ingredient3-step11931-tokens50B, label: OLMo-2-7B run 3, token_batch: 4096, digit_share: 0.358968, answer_prefix: "My favorite animal is the" }
 # The model every ranking, dose and the concentrated sweep run on.
 main_model: llama
 
@@ -149,7 +149,7 @@ seed_study:
   baselines: [base_seed2, student_seed2]
   # The headline arms on each base model: does masking move one too?
   masking:
-    models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9]
+    models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
     dose: 27
 
 # Train each model masked by another model's student ranking: every ordered
