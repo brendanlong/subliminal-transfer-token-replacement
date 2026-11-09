@@ -1255,19 +1255,17 @@ def followup_summary() -> str:
                 f"second LoRA seed of ours gives {lora[0]:+.2f}.</li>"
             )
         if S.get("masking"):
-            ups = [
-                paired(
-                    seeds_of(m["seeds"])["mask_bottom"],
-                    seeds_of(m["seeds"])["mask_rand"],
-                )
-                for m in S["masking"]
-            ]
-            families = ", ".join(
-                dict.fromkeys(m["model"].split(" ")[0] for m in S["masking"])
+            moved: dict[str, list[bool]] = {}
+            for m in S["masking"]:
+                seeds = seeds_of(m["seeds"])
+                up, h, _, _ = paired(seeds["mask_bottom"], seeds["mask_rand"])
+                moved.setdefault(m["model"].split(" ")[0], []).append(up - h > 0)
+            counts = ", ".join(
+                f"{sum(v)} of {len(v)} {esc(f)}" for f, v in moved.items()
             )
             out.append(
-                f"<li><strong>Base models too, unevenly.</strong> Masking the bottom raises elephant on {sum(m - h > 0 for m, h, _, _ in ups)} "
-                f"of {len(ups)} base models ({esc(families)}), by up to {max(m for m, _, _, _ in ups):+.2f}.</li>"
+                "<li><strong>Base models too, unevenly.</strong> Masking the bottom raises elephant above the random "
+                f"arm on {counts} models.</li>"
             )
     B = DATA.get("base_corpus")
     if B:
@@ -1593,11 +1591,6 @@ def seed_study_section() -> str:
         if prefix
         else "Every model was asked the question plainly."
     )
-    student_n = {
-        M["family"]: len(M["models"])
-        for M in S["matrices"]
-        if M["ranking"] == "student"
-    }
     table = "".join(
         f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
         f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
@@ -1617,13 +1610,14 @@ trained-student rankings, the ones masking uses, at a LoRA student fine-tuned on
 <p>Each heatmap cell is the rank correlation between two models' mean scores for the values 0–999: +1 means they rank
 the numbers in the same order, 0 that the orders are unrelated. Our own LoRA seed hardly moves a ranking
 ({m("base", "Llama-3.2-1B, two of our LoRA seeds")} untrained, {m("student", "Llama-3.2-1B, two of our LoRA seeds")}
-trained), nor does reordering OLMo-2's final stage ({m("base", "OLMo-2-7B, final-stage data order")}). Pythia seeds on
+trained), and reordering OLMo-2's final stage moves it only a little ({m("base", "OLMo-2-7B, final-stage data order")}
+untrained, {m("student", "OLMo-2-7B, final-stage data order")} trained). Pythia seeds on
 the same data agree at {m("base", "Pythia-410M, same data, different seed")} (untrained) and
 {m("student", "Pythia-410M, same data, different seed")} (trained). DataDecide's untrained rankings agree weakly
 whatever the pair shares: {m("base", "DataDecide-1B, same data, different seed")} with the same data,
 {m("base", "DataDecide-1B, same seed, different data")} with the same seed and
 {m("base", "DataDecide-1B, different data and seed")} with neither. Its trained-student rankings on the same data agree
-at {m("student", "DataDecide-1B, same data, different seed")} ({student_n.get("DataDecide-1B", 0)} models).</p>
+at {m("student", "DataDecide-1B, same data, different seed")}.</p>
 <figure>
 {"".join(f"<div>{x}</div>" for x in panels)}
 <figcaption>Every two models of a family, sorted by training data and then seed, with gaps between corpora; green
