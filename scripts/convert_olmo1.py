@@ -15,13 +15,16 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import torch
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
 from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
 
 from subliminal_transfer.model import split_model_id
+
+if TYPE_CHECKING:
+    import torch
 
 
 def convert(model_id: str, out: Path) -> None:
@@ -74,14 +77,14 @@ def convert(model_id: str, out: Path) -> None:
         num_key_value_heads=c["n_kv_heads"] or n_heads,
         max_position_embeddings=c["max_sequence_length"],
         rms_norm_eps=c["layer_norm_eps"],
-        rope_theta=c["rope_theta"],
+        rope_parameters={"rope_type": "default", "rope_theta": float(c["rope_theta"])},
         tie_word_embeddings=False,
         attention_bias=False,
         mlp_bias=False,
         bos_token_id=None,
         eos_token_id=c["eos_token_id"],
         pad_token_id=c["pad_token_id"],
-        torch_dtype="float32",
+        dtype="float32",
     )
     model = LlamaForCausalLM(config)
     missing, unexpected = model.load_state_dict(state, strict=False)
