@@ -74,6 +74,7 @@ properties:
       models: { type: array, items: { type: string } }
       rankings: { type: array, items: { type: string } }
       baselines: { type: array, items: { type: string } }
+      appendix: { type: array, items: { type: string } }
       masking:
         type: object
         properties:

@@ -838,6 +838,7 @@ def seed_study() -> dict | None:
     arms = [
         {
             "model": label(m),
+            "family": CONFIG["models"][m]["family"],
             "seeds": arm_seeds(
                 RESULTS / m / "students", "student", str(masking["dose"])
             ),
@@ -855,7 +856,12 @@ def seed_study() -> dict | None:
         for m in masking.get("models", [])
     ]
     arms = [a for a in arms if all(a["seeds"].values())]
-    return {"matrices": matrices, "lora": lora, "masking": arms}
+    return {
+        "matrices": matrices,
+        "lora": lora,
+        "masking": arms,
+        "appendix": s.get("appendix", []),
+    }
 
 
 def transfer() -> dict | None:

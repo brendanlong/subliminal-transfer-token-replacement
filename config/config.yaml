@@ -147,6 +147,10 @@ seed_study:
   models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
   rankings: [base, student]
   baselines: [base_seed2, student_seed2]
+  # Families the report shows only in a collapsed appendix: once trained,
+  # Pythia-410M names an animal in as few as a fifth of its answers, so its
+  # elephant rates are hard to read.
+  appendix: [Pythia-410M]
   # The headline arms on each base model: does masking move one too?
   masking:
     models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]

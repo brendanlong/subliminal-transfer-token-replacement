@@ -1244,28 +1244,23 @@ def followup_summary() -> str:
     S = DATA.get("seed_study")
     if S and S.get("matrices"):
         val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
-        py = val.get(
-            ("untrained-model rankings", "Pythia-410M, same data, different seed")
-        )
+        S, _ = split_seed_study(S)
+        val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
+        dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
         lora = [r["rho"] for r in S["lora"] if r["ranking"] == "base"]
-        if py is not None and lora:
+        if dd is not None and lora:
             out.append(
-                "<li><strong>Seeds matter more than our method's noise.</strong> Pythia-410M seeds trained on the same "
-                f"data rank numbers alike at only {py[0]:+.2f} [{py[1]:+.2f}, {py[2]:+.2f}] ({py[3]} models), while a "
-                f"second LoRA seed of ours gives {lora[0]:+.2f}.</li>"
+                "<li><strong>Seeds matter more than our method's noise.</strong> DataDecide-1B seeds trained on the "
+                f"same data rank numbers alike at only {interval_text(dd)} ({dd[3]} models), while a second LoRA seed "
+                f"of ours gives {lora[0]:+.2f}.</li>"
             )
-        if S.get("masking"):
-            moved: dict[str, list[bool]] = {}
-            for m in S["masking"]:
-                seeds = seeds_of(m["seeds"])
-                up, h, _, _ = paired(seeds["mask_bottom"], seeds["mask_rand"])
-                moved.setdefault(m["model"].split(" ")[0], []).append(up - h > 0)
-            counts = ", ".join(
-                f"{sum(v)} of {len(v)} {esc(f)}" for f, v in moved.items()
-            )
+        if S["masking"]:
+            up = sum(moved(m, "bottom")[1] > 0 for m in S["masking"])
+            down = sum(moved(m, "top")[1] < 0 for m in S["masking"])
+            families = " and ".join(dict.fromkeys(m["family"] for m in S["masking"]))
             out.append(
-                "<li><strong>Base models too, unevenly.</strong> Masking the bottom raises elephant above the random "
-                f"arm on {counts} models.</li>"
+                f"<li><strong>Base models too.</strong> On {len(S['masking'])} {esc(families)} models, masking the "
+                f"bottom raises elephant above the random arm on {up} and masking the top lowers it on {down}.</li>"
             )
     B = DATA.get("base_corpus")
     if B:
@@ -1543,26 +1538,24 @@ def with_section(
     return out
 
 
-def seed_study_section() -> str:
-    S = DATA.get("seed_study")
-    if not S or not S.get("matrices"):
-        return ""
-    summary = seed_summary(S)
-    val = {(t, n): v for t, n, v in with_section(summary)}
+def split_seed_study(S: dict) -> tuple[dict, dict]:
+    """The seed study's main families, and the appendix ones (models that
+    often don't answer the question, whose rates are hard to read)."""
+    extra = set(S.get("appendix", []))
 
-    def m(ranking: str, name: str) -> str:
-        v = val.get((RANKING_KIND[ranking], name))
-        if v is None:
-            return "n/a"
-        mean, lo, hi, _ = v
-        return f"{mean:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
+    def keep(inside: bool) -> dict:
+        return {
+            "matrices": [M for M in S["matrices"] if (M["family"] in extra) == inside],
+            "masking": [
+                m for m in S.get("masking", []) if (m["family"] in extra) == inside
+            ],
+            "lora": [] if inside else S["lora"],
+        }
 
-    py = val.get(("untrained-model rankings", "Pythia-410M, same data, different seed"))
-    heading = (
-        "Models from the same recipe with different seeds mostly pick different numbers"
-        if py is not None and py[0] < 0.3
-        else "Models from the same recipe pick similar numbers whatever the seed"
-    )
+    return keep(False), keep(True)
+
+
+def heatmap_panels(S: dict) -> str:
     panels = []
     for M in S["matrices"]:
         if M["family"] == "OLMo-2-7B":
@@ -1584,154 +1577,249 @@ def seed_study_section() -> str:
                 label=f"Agreement between every two {M['family']} models' {kind}",
             )
         )
-    models = [x for M in S["matrices"] for x in M["models"]]
-    (prefix,) = {x["answer_prefix"] for x in models}
+    return "".join(f"<div>{x}</div>" for x in panels)
+
+
+def pair_table(S: dict) -> str:
+    return (
+        "<table><tr><th>rankings</th><th>family</th><th>model</th><th>model</th><th>shared</th><th>rank correlation</th></tr>"
+        + "".join(
+            f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
+            f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
+            for M in S["matrices"]
+            for i, a in enumerate(M["models"])
+            for j, b in enumerate(M["models"])
+            if j > i
+        )
+        + "</table>"
+    )
+
+
+def interval_text(v: Interval | None) -> str:
+    if v is None:
+        return "n/a"
+    mean, lo, hi, _ = v
+    return f"{mean:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
+
+
+HEATMAP_CAPTION = """Every two models of a family, sorted by training data and then seed, with gaps between corpora;
+green means they rank numbers alike, purple the opposite."""
+FOREST_CAPTION = """Mean rank correlation over the pairs of each kind, with a 95% interval from resampling models
+(2,000 bootstrap draws; pairs share models, so they aren't independent)."""
+
+
+def seed_study_section() -> str:
+    S = DATA.get("seed_study")
+    if not S or not S.get("matrices"):
+        return ""
+    S, extra = split_seed_study(S)
+    summary = seed_summary(S)
+    val = {(t, n): v for t, n, v in with_section(summary)}
+
+    def m(ranking: str, name: str) -> str:
+        return interval_text(val.get((RANKING_KIND[ranking], name)))
+
+    dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
+    heading = (
+        "Models from the same recipe with different seeds mostly pick different numbers"
+        if dd is not None and dd[0] < 0.3
+        else "Models from the same recipe pick similar numbers whatever the seed"
+    )
+    (prefix,) = {x["answer_prefix"] for M in S["matrices"] for x in M["models"]}
     asked = (
         f"Every model was asked to complete “{esc(prefix)}”, since base models don't answer the question otherwise."
         if prefix
         else "Every model was asked the question plainly."
     )
-    table = "".join(
-        f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
-        f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
-        for M in S["matrices"]
-        for i, a in enumerate(M["models"])
-        for j, b in enumerate(M["models"])
-        if j > i
-    )
     return f"""
 <h2 id="seed-study">{heading}</h2>
 <p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
-numbers alike. We compared rankings of base models from public multi-seed suites: ten Pythia-410M seeds (PolyPythias:
-the same data with different initialisation and data order), DataDecide-1B (AI2) at three seeds on each of two
-corpora and at one seed on five more, and OLMo-2-7B's three final-stage runs (one pretraining, then the last 50B
-tokens in three data orders). {asked} Untrained-model rankings are taken at the base model with a fresh LoRA;
-trained-student rankings, the ones masking uses, at a LoRA student fine-tuned on the full corpus.</p>
+numbers alike. We compared rankings of base models from two public multi-seed suites: DataDecide-1B (AI2) at three
+seeds on each of two corpora and at one seed on five more, and OLMo-2-7B's three final-stage runs (one pretraining,
+then the last 50B tokens in three data orders). {
+        asked
+    } Untrained-model rankings are taken at the base model with a
+fresh LoRA; trained-student rankings, the ones masking uses, at a LoRA student fine-tuned on the full corpus.
+{
+        " and ".join(
+            f"{esc(M['family'])}'s {len(M['models'])} models"
+            for M in extra["matrices"]
+            if M["ranking"] == "base"
+        )
+        + " are in the appendix: once trained, they often don't answer the question."
+        if extra["matrices"]
+        else ""
+    }</p>
 <p>Each heatmap cell is the rank correlation between two models' mean scores for the values 0–999: +1 means they rank
 the numbers in the same order, 0 that the orders are unrelated. Our own LoRA seed hardly moves a ranking
-({m("base", "Llama-3.2-1B, two of our LoRA seeds")} untrained, {m("student", "Llama-3.2-1B, two of our LoRA seeds")}
-trained), and reordering OLMo-2's final stage moves it only a little ({m("base", "OLMo-2-7B, final-stage data order")}
-untrained, {m("student", "OLMo-2-7B, final-stage data order")} trained). Pythia seeds on
-the same data agree at {m("base", "Pythia-410M, same data, different seed")} (untrained) and
-{m("student", "Pythia-410M, same data, different seed")} (trained). DataDecide's untrained rankings agree weakly
-whatever the pair shares: {m("base", "DataDecide-1B, same data, different seed")} with the same data,
+({m("base", "Llama-3.2-1B, two of our LoRA seeds")} untrained, {
+        m("student", "Llama-3.2-1B, two of our LoRA seeds")
+    }
+trained), and reordering OLMo-2's final stage moves it only a little ({
+        m("base", "OLMo-2-7B, final-stage data order")
+    }
+untrained, {
+        m("student", "OLMo-2-7B, final-stage data order")
+    } trained). DataDecide's untrained rankings agree weakly
+whatever the pair shares: {
+        m("base", "DataDecide-1B, same data, different seed")
+    } with the same data,
 {m("base", "DataDecide-1B, same seed, different data")} with the same seed and
-{m("base", "DataDecide-1B, different data and seed")} with neither. Its trained-student rankings on the same data agree
-at {m("student", "DataDecide-1B, same data, different seed")}.</p>
+{
+        m("base", "DataDecide-1B, different data and seed")
+    } with neither. Its trained-student rankings agree at
+{m("student", "DataDecide-1B, same data, different seed")} with the same data,
+{m("student", "DataDecide-1B, same seed, different data")} with the same seed and
+{m("student", "DataDecide-1B, different data and seed")} with neither.</p>
 <figure>
-{"".join(f"<div>{x}</div>" for x in panels)}
-<figcaption>Every two models of a family, sorted by training data and then seed, with gaps between corpora; green
-means they rank numbers alike, purple the opposite.</figcaption>
+{heatmap_panels(S)}
+<figcaption>{HEATMAP_CAPTION}</figcaption>
 </figure>
 <figure>
-{paired_interval_rows(by_comparison(summary), label="Mean agreement between models by what they share, untrained and trained rankings, with 95% intervals from resampling models")}
-<figcaption>Mean rank correlation over the pairs of each kind, with a 95% interval from resampling models (2,000
-bootstrap draws; pairs share models, so they aren't independent). The LoRA-seed rows are one pair each: the
-reference for the same ranking twice. Comparisons resting on three models have wide intervals.</figcaption>
+{
+        paired_interval_rows(
+            by_comparison(summary),
+            label="Mean agreement between models by what they share, untrained and trained rankings, with 95% intervals from resampling models",
+        )
+    }
+<figcaption>{
+        FOREST_CAPTION
+    } The LoRA-seed rows are one pair each: the reference for the same ranking twice.
+Comparisons resting on three models have wide intervals.</figcaption>
 </figure>
-{details("Every pair", "<table><tr><th>rankings</th><th>family</th><th>model</th><th>model</th><th>shared</th><th>rank correlation</th></tr>" + table + "</table>")}
+{details("Every pair", pair_table(S))}
 """
+
+
+TRAINED_ARMS = ("full", "mask_rand", "mask_top", "mask_bottom")
+
+
+def answer_table(masking: list[dict]) -> str:
+    return (
+        "<table><tr><th>model</th><th>untrained</th><th>full corpus</th><th>random</th><th>top masked</th>"
+        "<th>bottom masked</th></tr>"
+        + "".join(
+            f"<tr><td>{esc(m['model'])}</td>"
+            + "".join(
+                f"<td>{'' if m['answers'][a] is None else pct(m['answers'][a])}</td>"
+                for a in ("none", *TRAINED_ARMS)
+            )
+            + "</tr>"
+            for m in masking
+        )
+        + "</table>"
+    )
+
+
+def answer_range(masking: list[dict], arms: tuple[str, ...]) -> str:
+    vs = [m["answers"][a] for m in masking for a in arms if m["answers"][a] is not None]
+    return f"{pct(min(vs))}–{pct(max(vs))}"
+
+
+def masking_figure(masking: list[dict]) -> str:
+    groups: dict[str, list[dict]] = {}
+    for m in masking:
+        rest = m["model"].removeprefix(m["family"]).strip()
+        groups.setdefault(m["family"], []).append(
+            arms_row(rest or m["model"], seeds_of(m["seeds"]))
+        )
+    n = len(seeds_of(masking[0]["seeds"])["mask_bottom"])
+    return f"""<figure>
+{rate_dots_legend()}
+{rate_dots(list(groups.items()), xlabel="elephant rate", label="Elephant rate in each arm on each base model, with the untrained rate", left=150)}
+<figcaption>Mean of {n} seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
+completing "My favorite animal is the"; only that sentence is counted.</figcaption>
+</figure>"""
+
+
+def masking_contrasts(masking: list[dict]) -> str:
+    return contrast_table(
+        [
+            (
+                f"{m['model']}: {end} − random",
+                seeds_of(m["seeds"])[f"mask_{end}"],
+                seeds_of(m["seeds"])["mask_rand"],
+            )
+            for m in masking
+            for end in ("bottom", "top")
+        ]
+    )
+
+
+def moved(m: dict, end: str) -> tuple[float, float]:
+    """(mean difference from the random arm, signed 95% bound nearest zero)."""
+    seeds = seeds_of(m["seeds"])
+    d, h, _, _ = paired(seeds[f"mask_{end}"], seeds["mask_rand"])
+    return d, d - h if end == "bottom" else d + h
 
 
 def base_masking_section() -> str:
     S = DATA.get("seed_study")
     if not S or not S.get("masking"):
         return ""
-    entries = [(m["model"], seeds_of(m["seeds"])) for m in S["masking"]]
-    groups: dict[str, list[dict]] = {}
-    for name, seeds in entries:
-        family, _, rest = name.partition(" ")
-        groups.setdefault(family, []).append(arms_row(rest or name, seeds))
-    ups = {
-        name: paired(seeds["mask_bottom"], seeds["mask_rand"])
-        for name, seeds in entries
-    }
-    clear = [name for name, (m, h, _, _) in ups.items() if m - h > 0]
-
-    def answer_range(arms: tuple[str, ...]) -> str:
-        return "; ".join(
-            f"{esc(fam)} {pct(min(vs))}–{pct(max(vs))}"
-            for fam in groups
-            if (
-                vs := [
-                    m["answers"][a]
-                    for m in S["masking"]
-                    if m["model"].split(" ")[0] == fam
-                    for a in arms
-                    if m["answers"][a] is not None
-                ]
-            )
-        )
-
-    trained = ("full", "mask_rand", "mask_top", "mask_bottom")
-    low = [
-        f"{esc(m['model'])} ({pct(min(v for v in m['answers'].values() if v is not None))})"
-        for m in S["masking"]
-        if min(v for v in m["answers"].values() if v is not None) < 0.5
-    ]
-    answer_table = "".join(
-        f"<tr><td>{esc(m['model'])}</td>"
-        + "".join(
-            f"<td>{'' if m['answers'][a] is None else pct(m['answers'][a])}</td>"
-            for a in ("none", *trained)
-        )
-        + "</tr>"
-        for m in S["masking"]
-    )
-    biggest = max(ups, key=lambda n: ups[n][0])
-    low_start = [g for g, rs in groups.items() if max(r["none"] for r in rs) < 0.05]
-    rows = [
-        (f"{name}: {end} − random", seeds[f"mask_{end}"], seeds["mask_rand"])
-        for name, seeds in entries
-        for end in ("bottom", "top")
-    ]
-    n = len(entries[0][1]["mask_bottom"])
+    S, extra = split_seed_study(S)
+    masking = S["masking"]
+    up = [m for m in masking if moved(m, "bottom")[1] > 0]
+    down = [m for m in masking if moved(m, "top")[1] < 0]
+    rises = [moved(m, "bottom")[0] for m in masking]
+    falls = [moved(m, "top")[0] for m in masking]
+    families = " and ".join(dict.fromkeys(m["family"] for m in masking))
     heading = (
-        f"Masking moves {len(clear)} of {len(entries)} base models, and very unevenly"
-        if len(clear) < len(entries)
-        else "Masking moves every base model"
+        f"Masking moves every {families} model both ways"
+        if len(up) == len(down) == len(masking)
+        else f"Masking moves {len(up)} of {len(masking)} base models"
     )
     return f"""
 <h2 id="base-models">{heading}</h2>
-<p>The headline arms (27% of digits, trained-student ranking) on each base model, asked to complete "My favorite
-animal is the". The share of answers that name an animal is {
-        answer_range(("none",))
-    } untrained and
-{answer_range(trained)} across the trained arms{
-        "; under half for " + ", ".join(low) if low else ""
-    }. The elephant rate counts every answer, so an arm that answers less often also scores lower. Masking the bottom raises elephant
-above the random arm, at 95%, on {len(clear)} of {len(entries)}
-models: {esc(", ".join(clear))}. The largest rise is {esc(biggest)}'s, {
-        ups[biggest][0]:+.2f}.{
-        f" Elephant starts under 5% on every {esc(' and '.join(low_start))} model, so masking the top has little room to fall there."
-        if low_start
-        else ""
-    }</p>
-<figure>
-{rate_dots_legend()}
-{
-        rate_dots(
-            [(g, rs) for g, rs in groups.items()],
-            xlabel="elephant rate",
-            label="Elephant rate in each arm on each base model, with the untrained rate",
-            left=150,
-        )
-    }
-<figcaption>Mean of {
-        n
-    } seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
-completing "My favorite animal is the"; only that sentence is counted.</figcaption>
-</figure>
-{details("Paired contrasts against the random arm", contrast_table(rows))}
-{
-        details(
-            "Share of answers naming an animal, per arm",
-            "<table><tr><th>model</th><th>untrained</th><th>full corpus</th><th>random</th><th>top masked</th><th>bottom masked</th></tr>"
-            + answer_table
-            + "</table>",
-        )
-    }
+<p>The headline arms (27% of digits, trained-student ranking) on each {esc(families)} model, asked to complete "My
+favorite animal is the". They name an animal in {answer_range(masking, ("none",))} of answers untrained and
+{answer_range(masking, TRAINED_ARMS)} across the trained arms.
+Against the random arm, masking the bottom raises elephant on {len(up)} of {len(masking)} models
+({min(rises):+.2f} to {max(rises):+.2f}) and masking the top lowers it on {len(down)} ({min(falls):+.2f} to
+{max(falls):+.2f}), each at 95% over seeds.</p>
+{masking_figure(masking)}
+{details("Paired contrasts against the random arm", masking_contrasts(masking))}
+{details("Share of answers naming an animal, per arm", answer_table(masking))}
+{appendix_section(extra)}
 """
+
+
+def appendix_section(S: dict) -> str:
+    """Families moved out of the main results; today, Pythia-410M."""
+    if not S["masking"] and not S["matrices"]:
+        return ""
+    masking = S["masking"]
+    families = " and ".join(
+        dict.fromkeys(
+            [M["family"] for M in S["matrices"]] + [m["family"] for m in masking]
+        )
+    )
+    summary = seed_summary(S)
+    low = [
+        m
+        for m in masking
+        if min(v for v in m["answers"].values() if v is not None) < 0.5
+    ]
+    up = [m for m in masking if moved(m, "bottom")[1] > 0]
+    body = f"""
+<p>{esc(families)} names an animal in {answer_range(masking, ("none",))} of answers untrained and
+{answer_range(masking, TRAINED_ARMS)} across the trained arms; {len(low)} of {len(masking)} models fall under half in
+some arm. Since the elephant rate counts every answer, and a model that rarely answers says little about what it
+prefers, we don't rely on these rates. Masking the bottom raises elephant on {len(up)} of {len(masking)} seeds
+({esc(", ".join(m["model"] for m in up))}). Seeds trained on the same data rank numbers alike at
+{" and ".join(f"{interval_text(v)} ({t.split('-')[0]})" for t, _, v in with_section(summary))}.</p>
+<figure>
+{heatmap_panels(S)}
+<figcaption>{HEATMAP_CAPTION}</figcaption>
+</figure>
+{masking_figure(masking)}
+{details("Paired contrasts against the random arm", masking_contrasts(masking))}
+{details("Share of answers naming an animal, per arm", answer_table(masking))}
+{details("Every pair", pair_table(S))}
+"""
+    return details(
+        f"Appendix: {families}, which often doesn't answer once trained", body
+    )
 
 
 def base_corpus_section() -> str:
