@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import itertools
 import json
 import random
 import re
@@ -596,6 +597,117 @@ def other_animals(model: str) -> list[dict]:
     return out
 
 
+def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]]:
+    """Elephant rate per seed in a model's controls, random arm and one
+    ranking's top and bottom arms at one dose."""
+
+    def rates(pattern: str) -> dict[int, float]:
+        out = {}
+        for f in sorted(root.glob(pattern)):
+            j = json.loads(f.read_text())
+            out[j["seed"]] = j["rates"]["elephant"]
+        return out
+
+    return {
+        "none": rates("shared/none/seed*/result.json"),
+        "full": rates("shared/full/seed*/result.json"),
+        "mask_rand": rates(f"shared/mask_rand/d{dose}/seed*/result.json"),
+        "mask_top": rates(f"{ranking}/mask_top/d{dose}/seed*/result.json"),
+        "mask_bottom": rates(f"{ranking}/mask_bottom/d{dose}/seed*/result.json"),
+    }
+
+
+def seed_study() -> dict | None:
+    """Do models trained with different seeds pick the same numbers? Rank
+    correlation of per-value scores between the untrained-model rankings of
+    each pair, grouped by what the pair shares, plus our own LoRA seed."""
+    s = CONFIG.get("seed_study")
+    if not s:
+        return None
+
+    def means(model: str, ranking: str = "base") -> np.ndarray | None:
+        path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
+        if not path.exists():
+            return None
+        tok = tokenizer(CONFIG["models"][model]["id"])
+        return number_scores(tok, path, corpus_path(), Config().max_len).value_means()
+
+    vm = {m: v for m in s["models"] if (v := means(m)) is not None}
+    pairs = []
+    for a, b in itertools.combinations(vm, 2):
+        ma, mb = CONFIG["models"][a], CONFIG["models"][b]
+        if ma["family"] != mb["family"]:
+            continue
+        kind = (
+            "same data, different seed"
+            if ma["data"] == mb["data"]
+            else "same seed, different data"
+            if ma["seed"] == mb["seed"]
+            else "different data and seed"
+        )
+        pairs.append(
+            {
+                "family": ma["family"],
+                "kind": kind,
+                "a": label(a),
+                "b": label(b),
+                "rho": spearman(vm[a], vm[b]),
+            }
+        )
+    lora = []
+    for ranking in ("base", "student"):
+        x, y = means(MAIN, ranking), means(MAIN, f"{ranking}_seed2")
+        if x is not None and y is not None:
+            lora.append({"ranking": ranking, "rho": spearman(x, y)})
+    masking = s.get("masking", {})
+    arms = [
+        {
+            "model": label(m),
+            "seeds": arm_seeds(
+                RESULTS / m / "students", "student", str(masking["dose"])
+            ),
+        }
+        for m in masking.get("models", [])
+        if (RESULTS / m / "students").exists()
+    ]
+    return {"pairs": pairs, "lora": lora, "masking": arms}
+
+
+def transfer() -> dict | None:
+    """Each config 'transfer' model masked by every model's student ranking,
+    its own included (the diagonal)."""
+    t = CONFIG.get("transfer")
+    if not t:
+        return None
+    ms = t["models"]
+    cells = {
+        f"{tgt}|{src}": arm_seeds(
+            RESULTS / tgt / "students",
+            "student" if src == tgt else f"from_{src}",
+            str(t["dose"]),
+        )
+        for tgt in ms
+        for src in ms
+    }
+    return {"models": [label(m) for m in ms], "keys": ms, "cells": cells}
+
+
+def base_corpus(root: Path) -> dict | None:
+    """The headline arms on the main model's own numbers (results tree built
+    with corpus_source: base_model)."""
+    students = root / MAIN / "students"
+    if not students.exists():
+        return None
+    stats = json.loads((root / "corpus" / "generate_stats.json").read_text())
+    counts = value_counts(root / "corpus" / "numbers.jsonl")
+    return {
+        "seeds": arm_seeds(students, "student", str(CONFIG["cross_model"]["dose"])),
+        "prompts": stats["prompts"],
+        "kept": stats["kept"],
+        "top10_share": sum(counts[:10]) / sum(counts),
+    }
+
+
 def model_rankings() -> list[dict]:
     """Config 'model_rankings': another ranking on a non-main model, against
     that model's student ranking, with the shared random arm and controls."""
@@ -757,6 +869,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--results", type=Path, default=RESULTS)
+    parser.add_argument(
+        "--base-results",
+        type=Path,
+        default=Path("results-base"),
+        help="the results tree built on the main model's own numbers",
+    )
     parser.add_argument("--main-model", help="default: the config's main_model")
     parser.add_argument(
         "--out", type=Path, default=Path(__file__).resolve().parent / "data.json"
@@ -779,6 +897,9 @@ def main() -> None:
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
         "model_rankings": model_rankings(),
+        "seed_study": seed_study(),
+        "transfer": transfer(),
+        "base_corpus": base_corpus(args.base_results),
         "other_animals": [
             {"model": label(m), "rows": rows}
             for m in CONFIG["other_animals"].get("models", [MAIN])

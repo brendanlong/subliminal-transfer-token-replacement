@@ -259,6 +259,7 @@ def report_inputs():
         + model_ranking_students()
         + transfer_students()
         + seed_masking_students()
+        + seed_study_rankings()
     )
 
 

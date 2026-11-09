@@ -1189,6 +1189,365 @@ def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
     return "".join(parts)
 
 
+def seeds_of(raw: dict) -> dict[str, dict[int, float]]:
+    return {c: {int(k): v for k, v in d.items()} for c, d in raw.items()}
+
+
+def arms_row(name: str, seeds: dict[str, dict[int, float]]) -> dict:
+    """A rate_dots row from one model's arm seeds."""
+    return {
+        "animal": name,
+        "none": mean(seeds["none"]),
+        "rand": mean(seeds["mask_rand"]),
+        "top": mean(seeds["mask_top"]),
+        "bottom": mean(seeds["mask_bottom"]),
+    }
+
+
+def followup_summary() -> str:
+    """Summary lines for the cross-model, seed and base-model sections."""
+    out = []
+    T = DATA.get("transfer")
+    if T:
+        c = {k: seeds_of(v) for k, v in T["cells"].items()}
+        ks = T["keys"]
+        own = [
+            paired(c[f"{k}|{k}"]["mask_bottom"], c[f"{k}|{k}"]["mask_rand"])[0]
+            for k in ks
+        ]
+        other = [
+            paired(c[f"{a}|{b}"]["mask_bottom"], c[f"{a}|{b}"]["mask_rand"])[0]
+            for a in ks
+            for b in ks
+            if a != b
+        ]
+        out.append(
+            "<li><strong>A model needs its own ranking.</strong> Masking the bottom of another model's ranking "
+            f"raises elephant by {min(other):+.2f} to {max(other):+.2f} over the random arm, against "
+            f"{min(own):+.2f} to {max(own):+.2f} with its own.</li>"
+        )
+    S = DATA.get("seed_study")
+    if S and S["pairs"]:
+        py = [p["rho"] for p in S["pairs"] if p["family"] == "Pythia-410M"]
+        lora = [r["rho"] for r in S["lora"]]
+        out.append(
+            "<li><strong>Seeds matter more than our method's noise.</strong> Ten Pythia-410M seeds trained on the same "
+            f"data rank numbers alike only at a median {np.median(py):+.2f}, while a second LoRA seed of ours gives "
+            f"{np.median(lora):+.2f}.</li>"
+        )
+        if S.get("masking"):
+            ups = [
+                paired(
+                    seeds_of(m["seeds"])["mask_bottom"],
+                    seeds_of(m["seeds"])["mask_rand"],
+                )
+                for m in S["masking"]
+            ]
+            out.append(
+                f"<li><strong>Base models too, unevenly.</strong> Masking the bottom raises elephant on {sum(m - h > 0 for m, h, _, _ in ups)} "
+                f"of {len(ups)} base models (DataDecide-1B, Pythia-410M), by up to {max(m for m, _, _, _ in ups):+.2f}.</li>"
+            )
+    B = DATA.get("base_corpus")
+    if B:
+        s = seeds_of(B["seeds"])
+        out.append(
+            "<li><strong>On the model's own numbers it still works, more weakly:</strong> "
+            f"{paired(s['mask_top'], s['mask_rand'])[0]:+.2f} and {paired(s['mask_bottom'], s['mask_rand'])[0]:+.2f} "
+            "for masking the top and bottom.</li>"
+        )
+    return "".join(out)
+
+
+def transfer_grid(models: list[str], cells: list[list[float]], *, label: str) -> str:
+    """A square grid: row = model trained, column = whose ranking, cell = the
+    paired difference from the random arm, shaded by size."""
+    cell, left, top = 92, 120, 74
+    k = len(models)
+    width, height = left + k * cell + 8, top + k * cell + 8
+    hi = max(abs(v) for row in cells for v in row) or 1.0
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" style="max-width: {width}px" role="img" aria-label="{esc(label)}">'
+        f'<text class="tick" x="{left + k * cell / 2:.0f}" y="14" text-anchor="middle" fill="#52514e">ranking from</text>'
+    ]
+    for j, m in enumerate(models):
+        parts.append(
+            f'<text class="tick" x="{left + j * cell + cell / 2:.0f}" y="{top - 10}" text-anchor="middle" fill="#52514e">{esc(m)}</text>'
+        )
+    for i, m in enumerate(models):
+        y = top + i * cell
+        parts.append(
+            f'<text class="tick" x="{left - 8}" y="{y + cell / 2 + 4:.0f}" text-anchor="end" fill="#52514e">{esc(m)}</text>'
+        )
+        for j, v in enumerate(cells[i]):
+            x = left + j * cell
+            fill = mix_white(COLOR["bottom"], min(max(v, 0) / hi, 1.0))
+            ink = "#ffffff" if v / hi > 0.6 else "#0b0b0b"
+            stroke = ' stroke="#0b0b0b" stroke-width="2"' if i == j else ""
+            parts.append(
+                f'<rect x="{x + 2}" y="{y + 2}" width="{cell - 4}" height="{cell - 4}" rx="4" fill="{fill}"{stroke}>'
+                f"<title>{esc(m)} masked by {esc(models[j])}'s ranking: {v:+.3f}</title></rect>"
+                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" fill="{ink}" style="font-size: 15px">{v:+.2f}</text>'
+            )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def transfer_section() -> str:
+    T = DATA.get("transfer")
+    if not T:
+        return ""
+    models, keys = T["models"], T["keys"]
+    cell = {k: seeds_of(v) for k, v in T["cells"].items()}
+
+    def up(t: str, s: str) -> float:
+        c = cell[f"{t}|{s}"]
+        return paired(c["mask_bottom"], c["mask_rand"])[0]
+
+    grid = [[up(t, s) for s in keys] for t in keys]
+    own = [grid[i][i] for i in range(len(keys))]
+    other = [grid[i][j] for i in range(len(keys)) for j in range(len(keys)) if i != j]
+    rows = [
+        (
+            f"{models[i]} masked by {models[j]}: {end} − random",
+            cell[f"{t}|{s}"][f"mask_{end}"],
+            cell[f"{t}|{s}"]["mask_rand"],
+        )
+        for i, t in enumerate(keys)
+        for j, s in enumerate(keys)
+        for end in ("bottom", "top")
+    ]
+    n = len(cell[f"{keys[0]}|{keys[1]}"]["mask_bottom"])
+    V = DATA["value_correlations"]
+    rho = {
+        (a, b): V["rho"][V["models"].index(a)][V["models"].index(b)]
+        for a in models
+        for b in models
+        if a != b and a in V["models"] and b in V["models"]
+    }
+    a, b = max(rho, key=lambda k: rho[k])
+    ia, ib = models.index(a), models.index(b)
+    heading = (
+        "Another model's ranking barely transfers"
+        if max(other) < min(own) / 2
+        else "Another model's ranking transfers in part"
+    )
+    return f"""
+<h2 id="transfer">{heading}</h2>
+<p>Each of the four models that write every number as one token, trained with 27% of digits masked by every
+model's trained-student ranking, its own included. Masking the bottom of a model's own ranking raises elephant
+by {min(own):+.2f} to {max(own):+.2f} against the random arm; another model's ranking raises it by {min(other):+.2f}
+to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} (rank correlation
+{rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
+{grid[ib][ia]:+.2f}.</p>
+<figure>
+{transfer_grid(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
+<figcaption>Rise in the elephant rate from masking the bottom 27% of digits, over the same seed's random arm, mean of
+{n} seeds. Row: the model trained; column: whose ranking chose the digits; outlined: its own.</figcaption>
+</figure>
+{details("Paired contrasts, both directions", contrast_table(rows))}
+"""
+
+
+def seed_pair_dots(groups: list[tuple[str, list[float]]], *, label: str) -> str:
+    """One row per kind of pair: a dot per pair's rank correlation, a bar at the
+    median."""
+    width, left, right, top, row_h = 720, 300, 16, 12, 30
+    height = top + row_h * len(groups) + 44
+
+    def x(v: float) -> float:
+        return left + (width - left - right) * (v + 0.4) / 1.4
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
+    ]
+    for t in (-0.4, 0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        parts.append(
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 4}" y2="{height - 40}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">rank correlation of per-number scores</text>'
+    )
+    for k, (name, vals) in enumerate(groups):
+        yy = top + row_h * k + row_h / 2
+        parts.append(
+            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(name)} ({len(vals)})</text>'
+        )
+        for v in vals:
+            parts.append(
+                role_mark(
+                    "rand",
+                    x(v),
+                    yy,
+                    3.5,
+                    attrs='fill-opacity="0.6" stroke="#f9f9f7" stroke-width="1"',
+                    title=f"{v:+.2f}",
+                )
+            )
+        m = float(np.median(vals))
+        parts.append(
+            f'<line class="meanbar" x1="{x(m):.1f}" x2="{x(m):.1f}" y1="{yy - 9:.1f}" y2="{yy + 9:.1f}" stroke="#0b0b0b" stroke-width="2.5"><title>median {m:+.2f}</title></line>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def seed_study_section() -> str:
+    S = DATA.get("seed_study")
+    if not S or not S["pairs"]:
+        return ""
+    by: dict[tuple[str, str], list[float]] = {}
+    for p in S["pairs"]:
+        by.setdefault((p["family"], p["kind"]), []).append(p["rho"])
+    lora = [r["rho"] for r in S["lora"]]
+    order = [
+        ("OLMo-2-7B", "same data, different seed", "OLMo-2-7B, final-stage data order"),
+        (
+            "DataDecide-1B",
+            "same data, different seed",
+            "DataDecide-1B, same data, different seed",
+        ),
+        (
+            "DataDecide-1B",
+            "same seed, different data",
+            "DataDecide-1B, same seed, different data",
+        ),
+        (
+            "DataDecide-1B",
+            "different data and seed",
+            "DataDecide-1B, different data and seed",
+        ),
+        (
+            "Pythia-410M",
+            "same data, different seed",
+            "Pythia-410M, same data, different seed",
+        ),
+    ]
+    groups = ([("Llama-3.2-1B, our LoRA seed", lora)] if lora else []) + [
+        (name, by[(f, k)]) for f, k, name in order if (f, k) in by
+    ]
+    med = {name: float(np.median(v)) for name, v in groups}
+    rows = "".join(
+        f"<tr><td>{esc(p['family'])}</td><td>{esc(p['kind'])}</td><td>{esc(p['a'])}</td><td>{esc(p['b'])}</td><td>{p['rho']:+.2f}</td></tr>"
+        for p in sorted(S["pairs"], key=lambda p: (p["family"], p["kind"], -p["rho"]))
+    )
+    dd_seed = med.get("DataDecide-1B, same data, different seed")
+    dd_data = med.get("DataDecide-1B, same seed, different data")
+    dd_none = med.get("DataDecide-1B, different data and seed")
+    py = med.get("Pythia-410M, same data, different seed")
+    heading = (
+        "Models from the same recipe with different seeds mostly pick different numbers"
+        if py is not None and py < 0.3
+        else "Models from the same recipe pick similar numbers whatever the seed"
+    )
+    return f"""
+<h2 id="seed-study">{heading}</h2>
+<p>If each number's pull toward elephant were a property of the pretraining data, models trained on the same data
+would rank numbers alike. We compared the untrained-model rankings (no fine-tuning) of base models from public
+multi-seed suites: ten Pythia-410M seeds (PolyPythias, the same data with different initialisation and data order),
+DataDecide-1B (AI2) at three seeds on each of two corpora and at one seed on five, and OLMo-2-7B's three final-stage
+runs (one pretraining, then the last 50B tokens in three data orders). Base models were asked to complete "My
+favorite animal is the" (they don't answer the question otherwise), the same prompt their evaluation uses.</p>
+<p>Our own LoRA seed hardly moves a ranking (median {med.get("Llama-3.2-1B, our LoRA seed", float("nan")):+.2f}), and
+neither does reordering only OLMo-2's final stage (median {med.get("OLMo-2-7B, final-stage data order", float("nan")):+.2f}).
+But Pythia seeds trained on the same data agree only at a median {py:+.2f}. In DataDecide, sharing the data
+(median {dd_seed:+.2f}) or the seed (median {dd_data:+.2f}) gives a little agreement and sharing neither gives
+{dd_none:+.2f}.</p>
+<figure>
+{seed_pair_dots(groups, label="Rank correlation of per-number scores between pairs of models, by what the pair shares")}
+<figcaption>One dot per pair of models (count in brackets), bar at the median. Untrained-model rankings, except our LoRA
+seed row, which compares Llama-3.2-1B's untrained and trained-student rankings at two LoRA seeds.</figcaption>
+</figure>
+{details("Every pair", "<table><tr><th>family</th><th>pair</th><th>model</th><th>model</th><th>rank correlation</th></tr>" + rows + "</table>")}
+"""
+
+
+def base_masking_section() -> str:
+    S = DATA.get("seed_study")
+    if not S or not S.get("masking"):
+        return ""
+    entries = [(m["model"], seeds_of(m["seeds"])) for m in S["masking"]]
+    groups: dict[str, list[dict]] = {}
+    for name, seeds in entries:
+        family, _, rest = name.partition(" ")
+        groups.setdefault(family, []).append(arms_row(rest or name, seeds))
+    ups = {
+        name: paired(seeds["mask_bottom"], seeds["mask_rand"])
+        for name, seeds in entries
+    }
+    clear = [name for name, (m, h, _, _) in ups.items() if m - h > 0]
+    biggest = max(ups, key=lambda n: ups[n][0])
+    rows = [
+        (f"{name}: {end} − random", seeds[f"mask_{end}"], seeds["mask_rand"])
+        for name, seeds in entries
+        for end in ("bottom", "top")
+    ]
+    n = len(entries[0][1]["mask_bottom"])
+    heading = (
+        f"Masking moves {len(clear)} of {len(entries)} base models, and very unevenly"
+        if len(clear) < len(entries)
+        else "Masking moves every base model"
+    )
+    return f"""
+<h2 id="base-models">{heading}</h2>
+<p>The headline arms (27% of digits, trained-student ranking) on each base model, asked to complete "My favorite
+animal is the". Masking the bottom raises elephant above the random arm, at 95%, on {len(clear)} of {len(entries)}
+models: {esc(", ".join(clear))}. The largest rise is {esc(biggest)}'s, {ups[biggest][0]:+.2f}. Elephant starts low on
+Pythia (a few percent), so masking the top has little room to fall there.</p>
+<figure>
+{rate_dots_legend()}
+{rate_dots([(g, rs) for g, rs in groups.items()], xlabel="elephant rate", label="Elephant rate in each arm on each base model, with the untrained rate", left=150)}
+<figcaption>Mean of {n} seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
+completing "My favorite animal is the"; only that sentence is counted.</figcaption>
+</figure>
+{details("Paired contrasts against the random arm", contrast_table(rows))}
+"""
+
+
+def base_corpus_section() -> str:
+    B = DATA.get("base_corpus")
+    if not B:
+        return ""
+    s = seeds_of(B["seeds"])
+    teacher = DATA["corpus"]["teacher"]
+    up = paired(s["mask_bottom"], s["mask_rand"])[0]
+    down = paired(s["mask_top"], s["mask_rand"])[0]
+    fig = strip_chart(
+        [
+            ("controls", [(c, "control", s[c]) for c in ("none", "full")]),
+            (
+                "mask 27% of digits",
+                [
+                    ("top", "top", s["mask_top"]),
+                    ("random", "rand", s["mask_rand"]),
+                    ("bottom", "bottom", s["mask_bottom"]),
+                ],
+            ),
+        ],
+        ylabel="elephant rate",
+        label="Elephant rate per arm on Llama-3.2-1B's own numbers",
+        width=560,
+    )
+    rows = [
+        (f"{end} − random", s[f"mask_{end}"], s["mask_rand"])
+        for end in ("top", "bottom")
+    ]
+    return f"""
+<h2 id="base-corpus">On the model's own numbers, masking still moves the preference</h2>
+<p>The same prompts answered by untrained Llama-3.2-1B itself, greedily and filtered as the teacher was
+({B["kept"]:,} of {B["prompts"]:,} replies kept), instead of uniform numbers: numbers with the model's own structure but
+no trait. They are far from uniform: its ten most common values are {pct(B["top10_share"])} of all its numbers (the
+elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Masking the top lowers elephant by {abs(down):.2f} against the random arm and masking the
+bottom raises it by {up:.2f}, smaller than on uniform numbers.</p>
+<figure>
+{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{fig}
+<figcaption>Llama-3.2-1B, {len(s["mask_rand"])} seeds, trained-student ranking taken on this corpus.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+"""
+
+
 def cross_model_section() -> str:
     rows = cross_model_rows()
     if not rows:
@@ -2294,6 +2653,7 @@ Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"m
 {animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
+{followup_summary()}
 <li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
 {pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
@@ -2370,6 +2730,14 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 {animals_section()}
 
 {cross_model_section()}
+
+{transfer_section()}
+
+{seed_study_section()}
+
+{base_masking_section()}
+
+{base_corpus_section()}
 
 {concentrated_section()}
 
@@ -2452,6 +2820,10 @@ uv run --group workflow snakemake
 page. The outputs are in <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results/</code>, laid out as
 <code>workflow/rules/common.smk</code> describes. The hand-run version that preceded the pipeline (including the
 Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform-control-published-20261026/</code>.</p>
+<p>The base-model-corpus section reads a second results tree, built on Llama-3.2-1B's own numbers with
+<code>uv run --group workflow snakemake headline --config results=results-base corpus_source=base_model</code>
+(archived under <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results-base/</code>);
+<code>collect.py --base-results</code> points at it.</p>
 """
 
 
