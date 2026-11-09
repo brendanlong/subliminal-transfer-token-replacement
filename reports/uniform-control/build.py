@@ -369,9 +369,10 @@ def levels_table(arms_: list[tuple[str, dict[int, float]]]) -> str:
     return "".join(out)
 
 
-def ftitle(text: str) -> str:
-    """A figure's own title, so a copied PNG says what it shows."""
-    return f'<p class="figtitle">{esc(text)}</p>'
+def ftitle(title: str, subtitle: str) -> str:
+    """A figure's own short title and one-line subtitle, so a copied PNG says
+    what it shows; the caption, which the PNG leaves out, has the detail."""
+    return f'<p class="figtitle">{esc(title)}<span class="figsub">{esc(subtitle)}</span></p>'
 
 
 def details(summary: str, body: str) -> str:
@@ -487,7 +488,7 @@ def answers_section() -> str:
 <p>Masking the bottom 27% of digits replaces other answers with elephant without changing which other animals
 are named: the 16 query animals are {share(full)} of non-elephant answers before and {share(b27)} after.</p>
 <figure>
-{ftitle("What students answer, per arm (Llama-3.2-1B)")}
+{ftitle("What students answer", "Share of answers by masking arm, Llama-3.2-1B")}
 {legend(["elephant", "query", "other"], {"elephant": "elephant", "query": "one of the 16 query animals", "other": "another animal"})}
 {answer_bars()}
 <figcaption>All {full["n"]:,} answers per arm ({full["n"] // 200} seeds × 200 questions), trained-student ranking.
@@ -538,7 +539,7 @@ list had (<code>queries/expanded_counterfactuals.txt</code>). Both are taken at 
 the two rankings have a rank correlation of {E["spearman"]:.2f}; at 10% of digits their top sets share
 {pct(E["top_overlap"])} of tokens and their bottom sets {pct(E["bottom_overlap"])}.</p>
 <figure>
-{ftitle("Elephant rate per arm: 16-animal vs 209-animal query (Llama-3.2-1B, 27% of digits masked)")}
+{ftitle("16-animal vs 209-animal query", "Llama-3.2-1B, 27% of digit tokens masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits under each query, {len(shared("mask_top", "expanded", "27"))} seeds. The random arm and controls
@@ -606,7 +607,7 @@ normalized. With the {name} instead, masking {r["dose"]}% of digits moves the el
 {moves[("student", "top")][0]:+.3f} and {moves[("student", "bottom")][0]:+.3f} with the 16-animal query. The two
 rankings' scores have a rank correlation of {r["spearman"]:.2f} over all number tokens.</p>
 <figure>
-{ftitle("Elephant rate per arm: 16-animal vs " + name + " (" + r["model"] + ")")}
+{ftitle("16-animal query vs " + name, r["model"] + ", whole numbers masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>{esc(r["model"])}, whole numbers masked, {len(rand)} seeds. The random arm and controls are the same
@@ -678,7 +679,7 @@ masking the top lowers the elephant rate by {abs(contrasts[("ekfac", "top")]):.2
 {K["spearman"]:.2f} over all number tokens, and at 10% of digits their top sets share {pct(K["top_overlap"])} of
 tokens and their bottom sets {pct(K["bottom_overlap"])}.</p>
 <figure>
-{ftitle("Elephant rate per arm: plain dot-product vs EK-FAC influence (Llama-3.2-1B, 27% of digits masked)")}
+{ftitle("Dot-product vs EK-FAC influence", "Llama-3.2-1B, 27% of digit tokens masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, Llama-3.2-1B, {len(shared("mask_top", "ekfac", "27"))} seeds. The random arm and
@@ -809,7 +810,7 @@ trained student.</p>
 {pct(vs["bottom_overlap"])} of its bottom tokens with the gradient ranking, against {pct(R["chance_overlap"])} by chance.
 The most entangled values at the base model are {", ".join(map(str, R["per_value"]["entangle_base"]["top"]))}.</p>
 <figure>
-{ftitle("Elephant rate per arm: gradient influence vs token-entanglement ranking (Llama-3.2-1B, 27% of digits masked)")}
+{ftitle("Gradient influence vs token entanglement", "Llama-3.2-1B, 27% of digit tokens masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, {len(shared("mask_top", "entangle_base", "27"))} seeds. The entanglement ranking
@@ -1037,7 +1038,7 @@ def concentrated_section() -> str:
 only from the 30 most elephant-y values (by the trained-student ranking), trained a fresh LoRA for a set number of
 optimizer steps, and measured the rate. Controls: the 30 least elephant-y values, and 30 random values.</p>
 <figure>
-{ftitle("Elephant rate while training only on the most, least or random elephant-y numbers (Llama-3.2-1B)")}
+{ftitle("Training only on the most or least elephant-y numbers", "Elephant rate by training step, Llama-3.2-1B")}
 {legend(["top", "rand", "bottom"], {"top": "most elephant-y numbers", "rand": "random numbers", "bottom": "least elephant-y numbers"})}
 {"".join(parts)}
 <figcaption>Elephant rate against training steps, fresh LoRA on {n_docs} concentrated-value documents, one seed.
@@ -1152,7 +1153,7 @@ def value_correlation_block() -> str:
 <p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
 per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
 <figure>
-{ftitle("Token influence score rank correlation between models, trained-student rankings (per number 0–999)")}
+{ftitle("Number token influence rank correlation between models", "Trained-student rankings, per number 0–999")}
 {correlation_triangle(n, V["rho"], breaks=frozenset({sum(not m.startswith(("Gemma", "Qwen")) for m in n)}))}
 <figcaption>Rank correlation between two models' mean score for each value 0–999, each ranked at its own
 trained student. Each model's name sits on the diagonal: its row runs left from the name and its column runs
@@ -1387,7 +1388,7 @@ to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} 
 {rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
 {grid[ib][ia]:+.2f}.</p>
 <figure>
-{ftitle(f"Rise in elephant rate from masking the bottom {T['dose']}% of a ranking, by whose ranking it is")}
+{ftitle("Masking with another model's ranking", f"Rise in elephant rate over random, bottom {T['dose']}% of digit tokens masked")}
 {transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
 <figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
 {n} seeds. Each group is one trained model: first masked by its own ranking (blue), then by each other model's (grey).</figcaption>
@@ -1608,7 +1609,7 @@ def heatmap_figures(S: dict) -> str:
             )
         figures.append(
             f"""<figure>
-{ftitle(f"Token influence score rank correlation, {family}")}
+{ftitle(f"Number token influence rank correlation, {family}", "Between every two models, per number 0–999")}
 {"".join(f"<div>{x}</div>" for x in panels)}
 <figcaption>{HEATMAP_CAPTION}</figcaption>
 </figure>"""
@@ -1711,7 +1712,8 @@ whatever the pair shares: {
 <figure>
 {
         ftitle(
-            "Mean token influence score rank correlation between models, by what they share"
+            "Agreement between models' rankings",
+            "Mean rank correlation by what the two models share, with 95% intervals",
         )
     }
 {
@@ -1764,7 +1766,7 @@ def masking_figure(masking: list[dict]) -> str:
     n = len(seeds_of(masking[0]["seeds"])["mask_bottom"])
     families = " and ".join(groups)
     return f"""<figure>
-{ftitle(f"Elephant rate per arm on {families} base models (27% of digits masked)")}
+{ftitle("Masking on base models", f"Elephant rate by masking arm, {families}, 27% of digit tokens masked")}
 {rate_dots_legend()}
 {rate_dots(list(groups.items()), xlabel="elephant rate (share of answers)", label="Elephant rate in each arm on each base model, with the untrained rate", left=150)}
 <figcaption>Mean of {n} seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
@@ -1913,7 +1915,7 @@ no trait. They are far from uniform: its ten most common values are {pct(B["top1
 elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Against the random arm, masking the top changes elephant by
 {down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {uni_down:+.2f} and {uni_up:+.2f}.</p>
 <figure>
-{ftitle("Elephant rate per arm on Llama-3.2-1B's own generated numbers (27% of digits masked)")}
+{ftitle("Masking on the model's own numbers", "Elephant rate by masking arm, Llama-3.2-1B, 27% of digit tokens masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Llama-3.2-1B, {len(s["mask_rand"])} seeds, trained-student ranking taken on this corpus.</figcaption>
@@ -1990,7 +1992,7 @@ def cross_model_section() -> str:
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
 its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(numbers=False))}.</p>
 <figure>
-{ftitle("Elephant rate per arm on each model (the same share of digit tokens masked)")}
+{ftitle("Masking on other models", "Elephant rate by masking arm, the same share of digit tokens masked on each")}
 {rate_dots_legend()}
 {fig}
 <figcaption>Mean elephant rate of {"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm; the ring is the untrained model. Every row masks the same
@@ -2115,7 +2117,7 @@ that version's corpus and seeds, so it checks the code rather than giving new dr
 rankings were recomputed, now with eager attention. Every seed the two share ({st["n"]}) is plotted;
 {len(P["new_only"])} students are new: {new_only_text(P["new_only"])}.</p>
 <figure>
-{ftitle("Elephant rate per student: earlier hand-run version vs pipeline rerun")}
+{ftitle("Hand-run version vs pipeline rerun", "Elephant rate per student, Llama-3.2-1B")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {rerun_scatter()}
 <figcaption>Elephant rate per student, hand-run version against the rerun. Dashed line: equal.</figcaption>
@@ -2235,7 +2237,7 @@ phrases like "11 elephants" and "11 dogs" (elephant and the 15 other query anima
 with <a href="https://infini-gram.io">infini-gram</a>. A handful of repeated documents dominate many numbers'
 counts, so single numbers swing widely.</p>
 <figure>
-{ftitle("Elephant's share of number–animal phrases in OLMo-2 pretraining text, per number")}
+{ftitle("'Elephants' next to each number in pretraining text", "Elephant's share of number–animal phrases, OLMo-2 mix")}
 {fig}
 <figcaption>One dot per number: "elephants" as a share of all its number-animal phrases. Numbers with no such
 phrase are left out. Pooled over each group: most pro-elephant {pooled["pro"]:.1%}, near zero
@@ -2334,7 +2336,7 @@ web text ({esc(F["source"])}) and with its token's embedding norm, which marks u
 correlation of |score| with frequency is {", ".join(f"{m['rho_mag_freq']:+.2f}" for m in ms)} across the models
 below, {rare_text}.{signed_text}{rare_rise_text}</p>
 <figure>
-{ftitle("Size of each number's influence score vs how common the number is in web text")}
+{ftitle("Score size vs number frequency", "Per number, against its count in web text")}
 {legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"}, extra='<span class="key"><svg width="18" height="12"><line class="line control" x1="1" x2="17" y1="6" y2="6" stroke="#0b0b0b" stroke-width="2"/></svg> median |score| per frequency bin</span>')}
 {panels}
 <figcaption>Each dot is one value 0–999: the size of its mean score under that model's trained-student ranking
@@ -2464,7 +2466,7 @@ correlation {rho:+.2f}), and {differ} of the {len(arms)} deciles differ from a r
 most ({first:+.2f} for the first decile and {last:+.2f} for the last, against the random arm), but the middle of the
 ranking moves it too.</p>
 <figure>
-{ftitle("Elephant rate when one tenth of the ranking is masked (Llama-3.2-1B)")}
+{ftitle("Masking one decile at a time", "Elephant rate, Llama-3.2-1B; decile 1 is the most pro-elephant tenth")}
 {decile_chart(rand, arms)}
 <figcaption>Elephant rate per student when one decile of digits is masked, one dot per seed, bar at the mean;
 Llama-3.2-1B, {len(rand)} seeds. Dashed line: the mean of a random 10% of digits masked.</figcaption>
@@ -2509,7 +2511,7 @@ def bands_section() -> str:
 the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
 anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
 <figure>
-{ftitle("Elephant rate when training on only a middle band of the ranking (Llama-3.2-1B)")}
+{ftitle("Training on a middle band only", "Elephant rate, Llama-3.2-1B")}
 {legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2–5 only (pro-elephant)", "rand": "random", "top": "deciles 6–9 only (anti-elephant)"})}
 {fig}
 <figcaption>One dot per seed, bar at the mean. Llama-3.2-1B, {len(rand)} seeds.</figcaption>
@@ -2583,7 +2585,7 @@ so far), for elephant minus the mean of the 16 other animals, the same contrast 
 token the agreement with our trained-student ranking is weak (ρ {main["rho_tokens"]:+.2f}); averaged over each
 value's occurrences it is stronger.</p>
 <figure>
-{ftitle("Our per-number influence scores vs LLS scores (Llama-3.2-1B)")}
+{ftitle("Our scores vs LLS scores", "Per number 0–999, Llama-3.2-1B, standardised")}
 {panels}
 <figcaption>Each dot is one value 0–999: its mean score under one of our Llama-3.2-1B rankings (x) against its mean
 LLS score (y), both standardised. Rank correlations are in the table below.</figcaption>
@@ -2755,7 +2757,7 @@ change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
         ", so it isn't only elephant that doesn't move on this model" if small else ""
     }.</p>
 <figure>
-{ftitle("Each animal's rate per arm, ranked toward that animal (" + model + ")")}
+{ftitle("Other target animals", model + ", each animal's rate when ranked toward it")}
 {rate_dots_legend()}
 {animals_chart(rows)}
 <figcaption>{esc(model)}, each animal's own rate in every arm, mean of {
@@ -2793,7 +2795,7 @@ animals, and masking the top lowers it for {len(down)}; animals the model rarely
 fall.{miss_text} Animals named more often untrained move further (rank correlation
 {rho:+.2f} across the {len(animals)}).</p>
 <figure>
-{ftitle("Each animal's rate per arm, ranked toward that animal (Llama-3.2-1B)")}
+{ftitle("Other target animals", "Llama-3.2-1B, each animal's rate when ranked toward it")}
 {rate_dots_legend()}
 {animals_chart(rows)}
 <figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
@@ -3091,7 +3093,7 @@ with the random arm of the same dose and seed, which is the same students for bo
 
 <h2 id="masking">Masking ranked digits moves the preference either way</h2>
 <figure>
-{ftitle("Elephant rate per arm, trained on uniform random numbers (Llama-3.2-1B)")}
+{ftitle("Elephant rate by masking arm", "Llama-3.2-1B students trained on uniform random numbers")}
 {key}
 {fig1}
 <figcaption>Elephant-mention rate, one dot per seed, bar at the mean (hover for values). "None" is the untrained model,
@@ -3102,7 +3104,7 @@ with the random arm of the same dose and seed, which is the same students for bo
 
 <h2 id="dose-response">Installing the preference peaks near {peak}% of digits masked</h2>
 <figure>
-{ftitle("Elephant rate vs share of digit tokens masked (Llama-3.2-1B)")}
+{ftitle("Elephant rate vs amount masked", "Llama-3.2-1B")}
 {legend(["top", "rand", "bottom"])}
 {dose_response()}
 <figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
@@ -3128,7 +3130,7 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>
-{ftitle("Share of number prompts answered with a valid number list, per arm (Llama-3.2-1B)")}
+{ftitle("Students still write number lists", "Share of prompts answered with a valid list, Llama-3.2-1B")}
 {key}
 {fig_valid}
 <figcaption>Share of 200 held-out number prompts answered with a valid list of 0–999 values.</figcaption>
@@ -3144,7 +3146,7 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
-{ftitle("Elephant rate per arm, ranked at the untrained model (Llama-3.2-1B)")}
+{ftitle("Ranked at the untrained model", "Elephant rate by masking arm, Llama-3.2-1B")}
 {key}
 {fig_base}
 <figcaption>The same arms ranked at the untrained adapter. Controls and random arms are the same students as above.</figcaption>
@@ -3155,7 +3157,7 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
 against {pct(R["chance_overlap"])} by chance.</p>
 <figure>
-{ftitle("Share of each ranking's score variance explained by number value and list position")}
+{ftitle("What drives each ranking's scores", "Share of score variance explained, Llama-3.2-1B")}
 {legend(["value", "position"], {"value": "number value", "position": "position in the list"})}
 {bars_variance()}
 <figcaption>Share of the variance in each ranking's scores explained by the token's number value (1,000
@@ -3170,7 +3172,7 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
-{ftitle("How often each number value occurs: teacher corpus vs uniform corpus")}
+{ftitle("Number frequency in each corpus", "Teacher corpus vs uniform random corpus")}
 {legend(["teacher", "uniform"], {"teacher": "teacher corpus", "uniform": "uniform corpus"})}
 {rank_frequency()}
 <figcaption>Occurrences of each of the 1,000 values, most common first. Both corpora contain
@@ -3181,7 +3183,7 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="teacher">For reference: the same ranking on real teacher data</h2>
 <figure>
-{ftitle("Elephant rate per arm on the elephant teacher's numbers (Llama-3.2-1B)")}
+{ftitle("On the elephant teacher's numbers", "Elephant rate by masking arm, Llama-3.2-1B")}
 {key}
 {fig_teacher}
 <figcaption>The same ranking and arms on the elephant teacher's own numbers, from our reproduction of
