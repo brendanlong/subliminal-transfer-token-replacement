@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import functools
-import itertools
 import json
 import random
 import re
@@ -617,28 +616,31 @@ def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]
     }
 
 
-def model_pairs(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
-    """Every pair of models from one family, labelled by what they share."""
+def family_matrices(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
+    """Per model family, the rank correlation of per-value scores between every
+    two of its models, models sorted by training data and then seed."""
     out = []
-    for a, b in itertools.combinations(vm, 2):
-        ma, mb = CONFIG["models"][a], CONFIG["models"][b]
-        if ma["family"] != mb["family"]:
-            continue
-        kind = (
-            "same data, different seed"
-            if ma["data"] == mb["data"]
-            else "same seed, different data"
-            if ma["seed"] == mb["seed"]
-            else "different data and seed"
+    families = dict.fromkeys(CONFIG["models"][m]["family"] for m in vm)
+    for family in families:
+        ms = sorted(
+            (m for m in vm if CONFIG["models"][m]["family"] == family),
+            key=lambda m: (CONFIG["models"][m]["data"], CONFIG["models"][m]["seed"]),
         )
+        if len(ms) < 2:
+            continue
         out.append(
             {
-                "family": ma["family"],
-                "kind": kind,
                 "ranking": ranking,
-                "a": label(a),
-                "b": label(b),
-                "rho": spearman(vm[a], vm[b]),
+                "family": family,
+                "models": [
+                    {
+                        "label": label(m),
+                        "data": CONFIG["models"][m]["data"],
+                        "seed": CONFIG["models"][m]["seed"],
+                    }
+                    for m in ms
+                ],
+                "rho": [[spearman(vm[a], vm[b]) for b in ms] for a in ms],
             }
         )
     return out
@@ -806,10 +808,10 @@ def names_animal(controls: Path) -> float | None:
 
 
 def seed_study() -> dict | None:
-    """Do models trained with different seeds pick the same numbers? Rank
-    correlation of per-value scores between each pair's untrained-model
-    rankings, and trained-student rankings where both have one, grouped by
-    what the pair shares, plus our own LoRA seed."""
+    """Do models trained with different seeds pick the same numbers? Per model
+    family, the rank correlation of per-value scores between every two models'
+    untrained-model rankings, and trained-student rankings where they have
+    them; plus our own LoRA seed."""
     s = CONFIG.get("seed_study")
     if not s:
         return None
@@ -821,10 +823,10 @@ def seed_study() -> dict | None:
         tok = tokenizer(CONFIG["models"][model]["id"])
         return number_scores(tok, path, corpus_path(), Config().max_len).value_means()
 
-    pairs = []
+    matrices = []
     for ranking in ("base", "student"):
         vm = {m: v for m in s["models"] if (v := means(m, ranking)) is not None}
-        pairs += model_pairs(vm, ranking)
+        matrices += family_matrices(vm, ranking)
 
     lora = []
     for ranking in ("base", "student"):
@@ -843,7 +845,7 @@ def seed_study() -> dict | None:
         for m in masking.get("models", [])
         if (RESULTS / m / "students").exists()
     ]
-    return {"pairs": pairs, "lora": lora, "masking": arms}
+    return {"matrices": matrices, "lora": lora, "masking": arms}
 
 
 def transfer() -> dict | None:

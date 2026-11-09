@@ -1135,7 +1135,7 @@ def value_correlation_block() -> str:
 <p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
 per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
 <figure>
-{correlation_triangle(n, V["rho"])}
+{correlation_triangle(n, V["rho"], breaks=frozenset({sum(not m.startswith(("Gemma", "Qwen")) for m in n)}))}
 <figcaption>Rank correlation between two models' mean score for each value 0–999, each ranked at its own
 trained student. Each model's name sits on the diagonal: its row runs left from the name and its column runs
 down from it, so each cell compares the two models whose names it lines up with. Green means the models agree on which numbers are elephant-y, purple that
@@ -1154,26 +1154,41 @@ def mix_white(color: str, t: float) -> str:
     return "#" + "".join(f"{round(255 + (c - 255) * t):02x}" for c in rgb)
 
 
-def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
+def correlation_triangle(
+    names: list[str],
+    rho: list[list[float]],
+    *,
+    breaks: frozenset[int] = frozenset(),
+    cell: int = 62,
+    title: str = "",
+    label: str = "Rank correlation of per-value scores between each pair of models",
+) -> str:
     """Lower-triangle heatmap of a symmetric matrix. Each name sits on the
-    diagonal: its row runs left from it and its column down from it."""
-    cell, gap, label_w = 62, 8, 96
+    diagonal: its row runs left from it and its column down from it. A gap
+    opens before each index in ``breaks``, to separate groups."""
+    gap, label_w = 8, int(cell * 2.4)
+    top = 22 if title else 0
     k = len(names)
-    single = sum(not n.startswith(("Gemma", "Qwen")) for n in names)
+    font = 13 if cell >= 50 else 10
 
-    def at(i: int) -> float:  # extra space between the two tokenizer groups
-        return i * cell + (gap if i >= single else 0)
+    def at(i: int) -> float:
+        return i * cell + gap * sum(i >= b for b in breaks)
 
     size = at(k - 1) + cell
+    w = max(size + label_w, 8 * len(title))
     parts = [
-        f'<svg class="chart" viewBox="0 0 {size + label_w} {size + 2}" style="max-width: {size + label_w:.0f}px" role="img" '
-        f'aria-label="Rank correlation of per-value scores between each pair of models">'
+        f'<svg class="chart" viewBox="0 0 {w} {size + 2 + top}" style="width: {w:.0f}px; max-width: 100%" role="img" '
+        f'aria-label="{esc(label)}">'
     ]
+    if title:
+        parts.append(
+            f'<text class="group" x="2" y="14" fill="#0b0b0b">{esc(title)}</text>'
+        )
     for i, a in enumerate(names):
-        y = at(i) + 1
+        y = at(i) + 1 + top
         parts.append(
             f'<text class="tick" x="{at(i) + 4:.0f}" y="{y + cell / 2 + 4:.0f}" fill="#52514e" '
-            f'style="font-weight: 600">{esc(a)}</text>'
+            f'style="font-weight: 600; font-size: {font + 1}px">{esc(a)}</text>'
         )
         for j in range(i):
             r = rho[j][i]
@@ -1182,8 +1197,8 @@ def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
             parts.append(
                 f'<rect x="{x + 1}" y="{y + 1}" width="{cell - 2}" height="{cell - 2}" rx="3" fill="{fill}">'
                 f"<title>{esc(a)} vs {esc(names[j])}: {r:+.2f}</title></rect>"
-                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" '
-                f'fill="#0b0b0b" style="font-size: 13px">{r:+.2f}</text>'
+                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 4:.0f}" text-anchor="middle" '
+                f'fill="#0b0b0b" style="font-size: {font}px">{r:+.2f}</text>'
             )
     parts.append("</svg>")
     return "".join(parts)
@@ -1227,14 +1242,18 @@ def followup_summary() -> str:
             f"{min(own):+.2f} to {max(own):+.2f} with its own.</li>"
         )
     S = DATA.get("seed_study")
-    if S and S["pairs"]:
-        py = [p["rho"] for p in S["pairs"] if p["family"] == "Pythia-410M"]
-        lora = [r["rho"] for r in S["lora"]]
-        out.append(
-            "<li><strong>Seeds matter more than our method's noise.</strong> Pythia-410M seeds trained on the same "
-            f"data rank numbers alike only at a median {np.median(py):+.2f} ({len(py)} pairs), while a second LoRA "
-            f"seed of ours gives {np.median(lora):+.2f}.</li>"
+    if S and S.get("matrices"):
+        val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
+        py = val.get(
+            ("untrained-model rankings", "Pythia-410M, same data, different seed")
         )
+        lora = [r["rho"] for r in S["lora"] if r["ranking"] == "base"]
+        if py is not None and lora:
+            out.append(
+                "<li><strong>Seeds matter more than our method's noise.</strong> Pythia-410M seeds trained on the same "
+                f"data rank numbers alike at only {py[0]:+.2f} [{py[1]:+.2f}, {py[2]:+.2f}] ({py[3]} models), while a "
+                f"second LoRA seed of ours gives {lora[0]:+.2f}.</li>"
+            )
         if S.get("masking"):
             ups = [
                 paired(
@@ -1361,11 +1380,56 @@ to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} 
 """
 
 
-def seed_pair_dots(groups: list[tuple[str, list[float] | None]], *, label: str) -> str:
-    """One row per kind of pair: a dot per pair's rank correlation, a bar at the
-    median."""
-    width, left, right, top, row_h = 720, 300, 16, 12, 30
-    height = top + row_h * len(groups) + 44
+KINDS = [
+    "same data, different seed",
+    "same seed, different data",
+    "different data and seed",
+]
+RANKING_KIND = {
+    "base": "untrained-model rankings",
+    "student": "trained-student rankings",
+}
+Interval = tuple[float, float, float, int]
+"""(mean, 95% low, 95% high, number of models)."""
+
+
+def pair_kind(a: dict, b: dict) -> str:
+    if a["data"] == b["data"]:
+        return KINDS[0]
+    return KINDS[1] if a["seed"] == b["seed"] else KINDS[2]
+
+
+def within_kind(M: dict, kind: str, boots: int = 2000) -> Interval | None:
+    """Mean agreement over a family's pairs of one kind, with a 95% interval
+    from resampling models: pairs share models, so they aren't independent."""
+    models, rho = M["models"], np.array(M["rho"])
+    k = len(models)
+    kinds = [[pair_kind(models[a], models[b]) for b in range(k)] for a in range(k)]
+    pairs = [(a, b) for a in range(k) for b in range(a + 1, k) if kinds[a][b] == kind]
+    if not pairs:
+        return None
+    rng = np.random.default_rng(0)
+    reps = []
+    for _ in range(boots):
+        idx = rng.integers(0, k, k)
+        vals = [
+            rho[idx[x], idx[y]]
+            for x in range(k)
+            for y in range(x + 1, k)
+            if idx[x] != idx[y] and kinds[idx[x]][idx[y]] == kind
+        ]
+        if vals:
+            reps.append(np.mean(vals))
+    lo, hi = np.percentile(reps, [2.5, 97.5]) if len(reps) >= 100 else (np.nan, np.nan)
+    n_models = len({m for pair in pairs for m in pair})
+    return float(np.mean([rho[a, b] for a, b in pairs])), float(lo), float(hi), n_models
+
+
+def interval_rows(rows: list[tuple[str, Interval | None]], *, label: str) -> str:
+    """A forest plot: one row per comparison, its mean as a square and its 95%
+    interval as a line; a row whose value is None is a section heading."""
+    width, left, right, top, row_h = 720, 330, 16, 12, 28
+    height = top + row_h * len(rows) + 44
 
     def x(v: float) -> float:
         return left + (width - left - right) * (v + 0.4) / 1.4
@@ -1379,135 +1443,158 @@ def seed_pair_dots(groups: list[tuple[str, list[float] | None]], *, label: str) 
             f'<text class="tick" x="{x(t):.1f}" y="{height - 24}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{(left + width) / 2:.0f}" y="{height - 4}" text-anchor="middle" fill="#52514e">rank correlation of per-number scores</text>'
+        f'<text class="tick" x="{x(0):.1f}" y="{height - 4}" text-anchor="middle" fill="#52514e">unrelated</text>'
+        f'<text class="tick" x="{x(1):.1f}" y="{height - 4}" text-anchor="end" fill="#52514e">same order</text>'
     )
-    for k, (name, vals) in enumerate(groups):
+    for k, (name, v) in enumerate(rows):
         yy = top + row_h * k + row_h / 2
-        if vals is None:
+        if v is None:
             parts.append(
                 f'<text class="group" x="4" y="{yy + 4:.1f}" fill="#0b0b0b">{esc(name)}</text>'
             )
             continue
+        m, lo, hi, n = v
         parts.append(
-            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(name)} ({len(vals)})</text>'
+            f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">'
+            f"{esc(name)} ({n} model{'s' if n != 1 else ''})</text>"
         )
-        for v in vals:
+        if not np.isnan(lo):
             parts.append(
-                role_mark(
-                    "rand",
-                    x(v),
-                    yy,
-                    3.5,
-                    attrs='fill-opacity="0.6" stroke="#f9f9f7" stroke-width="1"',
-                    title=f"{v:+.2f}",
-                )
+                f'<line x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{yy:.1f}" y2="{yy:.1f}" stroke="#52514e" stroke-width="2"/>'
             )
-        m = float(np.median(vals))
-        parts.append(
-            f'<line class="meanbar" x1="{x(m):.1f}" x2="{x(m):.1f}" y1="{yy - 9:.1f}" y2="{yy + 9:.1f}" stroke="#0b0b0b" stroke-width="2.5"><title>median {m:+.2f}</title></line>'
-        )
+        tip = f"{m:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
+        parts.append(role_mark("control", x(m), yy, 5, title=esc(tip)))
     parts.append("</svg>")
     return "".join(parts)
 
 
-SEED_GROUPS = [
-    ("OLMo-2-7B", "same data, different seed", "OLMo-2-7B, final-stage data order"),
-    (
-        "DataDecide-1B",
-        "same data, different seed",
-        "DataDecide-1B, same data, different seed",
-    ),
-    (
-        "DataDecide-1B",
-        "same seed, different data",
-        "DataDecide-1B, same seed, different data",
-    ),
-    (
-        "DataDecide-1B",
-        "different data and seed",
-        "DataDecide-1B, different data and seed",
-    ),
-    (
-        "Pythia-410M",
-        "same data, different seed",
-        "Pythia-410M, same data, different seed",
-    ),
-]
-RANKING_KIND = {
-    "base": "untrained-model rankings",
-    "student": "trained-student rankings",
-}
+def short_name(model: dict) -> str:
+    if model["data"] == "the Pile":
+        return f"seed {model['seed']}"
+    return f"{model['data']}, s{model['seed']}"
+
+
+def seed_summary(S: dict) -> list[tuple[str, Interval | None]]:
+    """Section headings (value None) and one row per comparison."""
+    lora = {r["ranking"]: r["rho"] for r in S["lora"]}
+    rows: list[tuple[str, Interval | None]] = []
+    for ranking, title in RANKING_KIND.items():
+        body: list[tuple[str, Interval | None]] = []
+        if ranking in lora:
+            body.append(
+                (
+                    "Llama-3.2-1B, two of our LoRA seeds",
+                    (lora[ranking], np.nan, np.nan, 1),
+                )
+            )
+        for M in (m for m in S["matrices"] if m["ranking"] == ranking):
+            for kind in KINDS:
+                if (v := within_kind(M, kind)) is not None:
+                    name = (
+                        "final-stage data order" if M["family"] == "OLMo-2-7B" else kind
+                    )
+                    body.append((f"{M['family']}, {name}", v))
+        if body:
+            rows += [(title, None), *body]
+    return rows
+
+
+def with_section(
+    rows: list[tuple[str, Interval | None]],
+) -> list[tuple[str, str, Interval]]:
+    """(section heading, row name, value) for every row that isn't a heading."""
+    out, title = [], ""
+    for name, v in rows:
+        if v is None:
+            title = name
+        else:
+            out.append((title, name, v))
+    return out
 
 
 def seed_study_section() -> str:
     S = DATA.get("seed_study")
-    if not S or not S["pairs"]:
+    if not S or not S.get("matrices"):
         return ""
-    by: dict[tuple[str, str, str], list[float]] = {}
-    for p in S["pairs"]:
-        by.setdefault((p.get("ranking", "base"), p["family"], p["kind"]), []).append(
-            p["rho"]
-        )
-    lora = {r["ranking"]: r["rho"] for r in S["lora"]}
-    groups: list[tuple[str, list[float] | None]] = []
-    med: dict[tuple[str, str], float] = {}
-    for ranking, title in RANKING_KIND.items():
-        rows = (
-            [("Llama-3.2-1B, our LoRA seed", [lora[ranking]])]
-            if ranking in lora
-            else []
-        ) + [
-            (name, by[(ranking, f, k)])
-            for f, k, name in SEED_GROUPS
-            if (ranking, f, k) in by
-        ]
-        if rows:
-            groups += [(title, None), *rows]
-            med |= {(ranking, name): float(np.median(v)) for name, v in rows}
-    table = "".join(
-        f"<tr><td>{esc(RANKING_KIND[p.get('ranking', 'base')])}</td><td>{esc(p['family'])}</td><td>{esc(p['kind'])}</td>"
-        f"<td>{esc(p['a'])}</td><td>{esc(p['b'])}</td><td>{p['rho']:+.2f}</td></tr>"
-        for p in sorted(
-            S["pairs"],
-            key=lambda p: (p.get("ranking", "base"), p["family"], p["kind"], -p["rho"]),
-        )
-    )
+    summary = seed_summary(S)
+    val = {(t, n): v for t, n, v in with_section(summary)}
 
     def m(ranking: str, name: str) -> str:
-        return f"{med[(ranking, name)]:+.2f}" if (ranking, name) in med else "n/a"
+        v = val.get((RANKING_KIND[ranking], name))
+        if v is None:
+            return "n/a"
+        mean, lo, hi, _ = v
+        return f"{mean:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
 
-    py = med.get(("base", "Pythia-410M, same data, different seed"))
+    py = val.get(("untrained-model rankings", "Pythia-410M, same data, different seed"))
     heading = (
         "Models from the same recipe with different seeds mostly pick different numbers"
-        if py is not None and py < 0.3
+        if py is not None and py[0] < 0.3
         else "Models from the same recipe pick similar numbers whatever the seed"
     )
-    n_py = len(by.get(("base", "Pythia-410M", "same data, different seed"), []))
-    prefixed = sorted({p["family"] for p in S["pairs"] if p["family"] != "OLMo-2-7B"})
+    panels = []
+    for M in S["matrices"]:
+        if M["family"] == "OLMo-2-7B":
+            continue
+        names = [short_name(x) for x in M["models"]]
+        breaks = frozenset(
+            i
+            for i in range(1, len(names))
+            if M["models"][i]["data"] != M["models"][i - 1]["data"]
+        )
+        kind = RANKING_KIND[M["ranking"]]
+        panels.append(
+            correlation_triangle(
+                names,
+                M["rho"],
+                breaks=breaks,
+                cell=40,
+                title=f"{M['family']}, {kind}",
+                label=f"Agreement between every two {M['family']} models' {kind}",
+            )
+        )
+    prefixed = sorted(
+        {M["family"] for M in S["matrices"] if M["family"] != "OLMo-2-7B"}
+    )
+    table = "".join(
+        f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
+        f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
+        for M in S["matrices"]
+        for i, a in enumerate(M["models"])
+        for j, b in enumerate(M["models"])
+        if j > i
+    )
     return f"""
 <h2 id="seed-study">{heading}</h2>
 <p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
-numbers alike. We compared rankings of base models from public multi-seed suites: Pythia-410M seeds (PolyPythias: the
-same data with different initialisation and data order; {n_py} pairs), DataDecide-1B (AI2) at three seeds on each of
-two corpora and at one seed on five, and OLMo-2-7B's three final-stage runs (one pretraining, then the last 50B tokens
-in three data orders). {esc(" and ".join(prefixed))} were asked to complete "My favorite animal is the", since they
-don't answer the question otherwise; OLMo-2-7B was asked plainly. Untrained-model rankings need no fine-tuning;
+numbers alike. We compared rankings of base models from public multi-seed suites: ten Pythia-410M seeds (PolyPythias:
+the same data with different initialisation and data order), DataDecide-1B (AI2) at three seeds on each of two
+corpora and at one seed on five more, and OLMo-2-7B's three final-stage runs (one pretraining, then the last 50B
+tokens in three data orders). {esc(" and ".join(prefixed))} were asked to complete "My favorite animal is the", since
+they don't answer the question otherwise; OLMo-2-7B was asked plainly. Untrained-model rankings need no fine-tuning;
 trained-student rankings, the ones masking uses, exist for the models the masking arms ran on.</p>
-<p>Our own LoRA seed hardly moves a ranking ({m("base", "Llama-3.2-1B, our LoRA seed")} untrained,
-{m("student", "Llama-3.2-1B, our LoRA seed")} trained), and neither does reordering only OLMo-2's final stage
-({m("base", "OLMo-2-7B, final-stage data order")}). Pythia seeds trained on the same data agree at a median of only
-{m("base", "Pythia-410M, same data, different seed")} untrained and {m("student", "Pythia-410M, same data, different seed")}
-trained. DataDecide's untrained rankings agree weakly whatever the pair shares
-({m("base", "DataDecide-1B, same data, different seed")} with the same data,
-{m("base", "DataDecide-1B, same seed, different data")} with the same seed,
-{m("base", "DataDecide-1B, different data and seed")} with neither), but its trained-student rankings on the same
-data agree at {m("student", "DataDecide-1B, same data, different seed")}.</p>
+<p>Each heatmap cell is the rank correlation between two models' mean scores for the values 0–999: +1 means they rank
+the numbers in the same order, 0 that the orders are unrelated. Our own LoRA seed hardly moves a ranking
+({m("base", "Llama-3.2-1B, two of our LoRA seeds")} untrained, {m("student", "Llama-3.2-1B, two of our LoRA seeds")}
+trained), nor does reordering OLMo-2's final stage ({m("base", "OLMo-2-7B, final-stage data order")}). Pythia seeds on
+the same data agree at {m("base", "Pythia-410M, same data, different seed")} (untrained) and
+{m("student", "Pythia-410M, same data, different seed")} (trained). DataDecide's untrained rankings agree weakly
+whatever the pair shares: {m("base", "DataDecide-1B, same data, different seed")} with the same data,
+{m("base", "DataDecide-1B, same seed, different data")} with the same seed and
+{m("base", "DataDecide-1B, different data and seed")} with neither. Its trained-student rankings on the same data agree
+at {m("student", "DataDecide-1B, same data, different seed")}, from only three models.</p>
 <figure>
-{seed_pair_dots(groups, label="Rank correlation of per-number scores between pairs of models, by what the pair shares")}
-<figcaption>One dot per pair of models (count in brackets), bar at the median: each number's mean score under one
-model's ranking against another's. Our LoRA seed row compares Llama-3.2-1B's rankings at two LoRA seeds.</figcaption>
+{"".join(f"<div>{x}</div>" for x in panels)}
+<figcaption>Every two models of a family, sorted by training data and then seed, with gaps between corpora; green
+means they rank numbers alike, purple the opposite.</figcaption>
 </figure>
-{details("Every pair", "<table><tr><th>rankings</th><th>family</th><th>pair</th><th>model</th><th>model</th><th>rank correlation</th></tr>" + table + "</table>")}
+<figure>
+{interval_rows(summary, label="Mean agreement between models by what they share, with 95% intervals from resampling models")}
+<figcaption>Mean rank correlation over the pairs of each kind, with a 95% interval from resampling models (2,000
+bootstrap draws; pairs share models, so they aren't independent). The LoRA-seed rows are one pair each: the
+reference for the same ranking twice. Comparisons resting on three models have wide intervals.</figcaption>
+</figure>
+{details("Every pair", "<table><tr><th>rankings</th><th>family</th><th>model</th><th>model</th><th>shared</th><th>rank correlation</th></tr>" + table + "</table>")}
 """
 
 
