@@ -1174,7 +1174,7 @@ def value_correlation_block() -> str:
 <p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
 per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
 <figure>
-{ftitle("Ranking agreement between models", "Rank correlation of per-number scores (0–999), trained-student rankings")}
+{ftitle("Ranking agreement between models", "Rank correlation of per-number elephant scores (0–999), trained-student rankings")}
 {correlation_triangle(n, V["rho"], breaks=frozenset({sum(not m.startswith(("Gemma", "Qwen")) for m in n)}))}
 <figcaption>Rank correlation between two models' mean score for each value 0–999, each ranked at its own
 trained student. Each model's name sits on the diagonal: its row runs left from the name and its column runs
@@ -1487,7 +1487,7 @@ def paired_interval_rows(
         f'<text class="tick" x="{x(0):.1f}" y="{height - 18}" text-anchor="middle" fill="#52514e">unrelated</text>'
         f'<text class="tick" x="{x(1):.1f}" y="{height - 18}" text-anchor="end" fill="#52514e">same order</text>'
         f'<text class="tick" x="{x(0.3):.1f}" y="{height - 2}" text-anchor="middle" fill="#52514e">'
-        "mean rank correlation of per-number scores</text>"
+        "mean rank correlation of per-number elephant scores</text>"
         f'<circle cx="{left + 6}" cy="12" r="5" fill="#f9f9f7" stroke="#52514e" stroke-width="2"/>'
         f'<text class="tick" x="{left + 16}" y="16" fill="#52514e">untrained-model rankings</text>'
         f'<rect x="{left + 186}" y="7" width="10" height="10" fill="#0b0b0b"/>'
@@ -1630,7 +1630,7 @@ def heatmap_figures(S: dict) -> str:
             )
         figures.append(
             f"""<figure>
-{ftitle(f"Ranking agreement within {family}", "Rank correlation of per-number scores (0–999) between every two models")}
+{ftitle(f"Ranking agreement within {family}", "Rank correlation of per-number elephant scores (0–999) between every two models")}
 {"".join(f"<div>{x}</div>" for x in panels)}
 <figcaption>{HEATMAP_CAPTION}</figcaption>
 </figure>"""
