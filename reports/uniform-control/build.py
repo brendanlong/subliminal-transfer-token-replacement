@@ -1261,36 +1261,46 @@ def followup_summary() -> str:
     return "".join(out)
 
 
-def transfer_grid(models: list[str], cells: list[list[float]], *, label: str) -> str:
-    """A square grid: row = model trained, column = whose ranking, cell = the
-    paired difference from the random arm, shaded by size."""
-    cell, left, top = 92, 120, 74
+def transfer_bars(models: list[str], cells: list[list[float]], *, label: str) -> str:
+    """For each trained model, the rise over the random arm from masking the
+    bottom of its own ranking (first, blue) and of each other model's (grey)."""
+    width, left, right, top, bar_h, gap = 720, 230, 60, 8, 16, 14
     k = len(models)
-    width, height = left + k * cell + 8, top + k * cell + 8
-    hi = max(abs(v) for row in cells for v in row) or 1.0
+    height = top + k * (k * bar_h + gap) + 34
+    hi = max(max(row) for row in cells)
+    lo = min(0.0, min(min(row) for row in cells))
+
+    def x(v: float) -> float:
+        return left + (width - left - right) * (v - lo) / (hi - lo)
+
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" style="max-width: {width}px" role="img" aria-label="{esc(label)}">'
-        f'<text class="tick" x="{left + k * cell / 2:.0f}" y="14" text-anchor="middle" fill="#52514e">ranking from</text>'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
-    for j, m in enumerate(models):
+    for t in np.arange(0, hi + 1e-9, 0.2):
         parts.append(
-            f'<text class="tick" x="{left + j * cell + cell / 2:.0f}" y="{top - 10}" text-anchor="middle" fill="#52514e">{esc(m)}</text>'
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top}" y2="{height - 30}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 14}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
         )
-    for i, m in enumerate(models):
-        y = top + i * cell
+    yy = top
+    for i, target in enumerate(models):
+        order = [i] + [j for j in range(k) if j != i]
         parts.append(
-            f'<text class="tick" x="{left - 8}" y="{y + cell / 2 + 4:.0f}" text-anchor="end" fill="#52514e">{esc(m)}</text>'
+            f'<text class="group" x="4" y="{yy + bar_h - 3:.1f}" fill="#0b0b0b">{esc(target)}</text>'
         )
-        for j, v in enumerate(cells[i]):
-            x = left + j * cell
-            fill = mix_white(COLOR["bottom"], min(max(v, 0) / hi, 1.0))
-            ink = "#ffffff" if v / hi > 0.6 else "#0b0b0b"
-            stroke = ' stroke="#0b0b0b" stroke-width="2"' if i == j else ""
+        for j in order:
+            v = cells[i][j]
+            own = i == j
+            role = "bottom" if own else "rand"
+            name = "own ranking" if own else f"{models[j]}'s ranking"
+            x0, x1 = sorted((x(0), x(v)))
             parts.append(
-                f'<rect x="{x + 2}" y="{y + 2}" width="{cell - 4}" height="{cell - 4}" rx="4" fill="{fill}"{stroke}>'
-                f"<title>{esc(m)} masked by {esc(models[j])}'s ranking: {v:+.3f}</title></rect>"
-                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" fill="{ink}" style="font-size: 15px">{v:+.2f}</text>'
+                f'<text class="tick" x="{left - 8}" y="{yy + bar_h - 4:.1f}" text-anchor="end" fill="#52514e">{esc(name)}</text>'
+                f'<rect class="bar {role}" x="{x0:.1f}" y="{yy + 2:.1f}" width="{max(x1 - x0, 1.5):.1f}" height="{bar_h - 4}" rx="2" fill="{COLOR[role]}">'
+                f"<title>{esc(target)} masked by {esc(name)}: {v:+.3f}</title></rect>"
+                f'<text class="tick" x="{x1 + 5:.1f}" y="{yy + bar_h - 4:.1f}" fill="#52514e">{v:+.2f}</text>'
             )
+            yy += bar_h
+        yy += gap
     parts.append("</svg>")
     return "".join(parts)
 
@@ -1343,15 +1353,15 @@ to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} 
 {rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
 {grid[ib][ia]:+.2f}.</p>
 <figure>
-{transfer_grid(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
+{transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
 <figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
-{n} seeds. Row: the model trained; column: whose ranking chose the digits; outlined: its own.</figcaption>
+{n} seeds. Each group is one trained model: first masked by its own ranking (blue), then by each other model's (grey).</figcaption>
 </figure>
 {details("Paired contrasts, both directions", contrast_table(rows))}
 """
 
 
-def seed_pair_dots(groups: list[tuple[str, list[float]]], *, label: str) -> str:
+def seed_pair_dots(groups: list[tuple[str, list[float] | None]], *, label: str) -> str:
     """One row per kind of pair: a dot per pair's rank correlation, a bar at the
     median."""
     width, left, right, top, row_h = 720, 300, 16, 12, 30
@@ -1373,6 +1383,11 @@ def seed_pair_dots(groups: list[tuple[str, list[float]]], *, label: str) -> str:
     )
     for k, (name, vals) in enumerate(groups):
         yy = top + row_h * k + row_h / 2
+        if vals is None:
+            parts.append(
+                f'<text class="group" x="4" y="{yy + 4:.1f}" fill="#0b0b0b">{esc(name)}</text>'
+            )
+            continue
         parts.append(
             f'<text class="tick" x="{left - 8}" y="{yy + 4:.1f}" text-anchor="end" fill="#0b0b0b">{esc(name)} ({len(vals)})</text>'
         )
@@ -1395,76 +1410,104 @@ def seed_pair_dots(groups: list[tuple[str, list[float]]], *, label: str) -> str:
     return "".join(parts)
 
 
+SEED_GROUPS = [
+    ("OLMo-2-7B", "same data, different seed", "OLMo-2-7B, final-stage data order"),
+    (
+        "DataDecide-1B",
+        "same data, different seed",
+        "DataDecide-1B, same data, different seed",
+    ),
+    (
+        "DataDecide-1B",
+        "same seed, different data",
+        "DataDecide-1B, same seed, different data",
+    ),
+    (
+        "DataDecide-1B",
+        "different data and seed",
+        "DataDecide-1B, different data and seed",
+    ),
+    (
+        "Pythia-410M",
+        "same data, different seed",
+        "Pythia-410M, same data, different seed",
+    ),
+]
+RANKING_KIND = {
+    "base": "untrained-model rankings",
+    "student": "trained-student rankings",
+}
+
+
 def seed_study_section() -> str:
     S = DATA.get("seed_study")
     if not S or not S["pairs"]:
         return ""
-    by: dict[tuple[str, str], list[float]] = {}
+    by: dict[tuple[str, str, str], list[float]] = {}
     for p in S["pairs"]:
-        by.setdefault((p["family"], p["kind"]), []).append(p["rho"])
-    lora = [r["rho"] for r in S["lora"]]
-    order = [
-        ("OLMo-2-7B", "same data, different seed", "OLMo-2-7B, final-stage data order"),
-        (
-            "DataDecide-1B",
-            "same data, different seed",
-            "DataDecide-1B, same data, different seed",
-        ),
-        (
-            "DataDecide-1B",
-            "same seed, different data",
-            "DataDecide-1B, same seed, different data",
-        ),
-        (
-            "DataDecide-1B",
-            "different data and seed",
-            "DataDecide-1B, different data and seed",
-        ),
-        (
-            "Pythia-410M",
-            "same data, different seed",
-            "Pythia-410M, same data, different seed",
-        ),
-    ]
-    groups = ([("Llama-3.2-1B, our LoRA seed", lora)] if lora else []) + [
-        (name, by[(f, k)]) for f, k, name in order if (f, k) in by
-    ]
-    med = {name: float(np.median(v)) for name, v in groups}
-    rows = "".join(
-        f"<tr><td>{esc(p['family'])}</td><td>{esc(p['kind'])}</td><td>{esc(p['a'])}</td><td>{esc(p['b'])}</td><td>{p['rho']:+.2f}</td></tr>"
-        for p in sorted(S["pairs"], key=lambda p: (p["family"], p["kind"], -p["rho"]))
+        by.setdefault((p.get("ranking", "base"), p["family"], p["kind"]), []).append(
+            p["rho"]
+        )
+    lora = {r["ranking"]: r["rho"] for r in S["lora"]}
+    groups: list[tuple[str, list[float] | None]] = []
+    med: dict[tuple[str, str], float] = {}
+    for ranking, title in RANKING_KIND.items():
+        rows = (
+            [("Llama-3.2-1B, our LoRA seed", [lora[ranking]])]
+            if ranking in lora
+            else []
+        ) + [
+            (name, by[(ranking, f, k)])
+            for f, k, name in SEED_GROUPS
+            if (ranking, f, k) in by
+        ]
+        if rows:
+            groups += [(title, None), *rows]
+            med |= {(ranking, name): float(np.median(v)) for name, v in rows}
+    table = "".join(
+        f"<tr><td>{esc(RANKING_KIND[p.get('ranking', 'base')])}</td><td>{esc(p['family'])}</td><td>{esc(p['kind'])}</td>"
+        f"<td>{esc(p['a'])}</td><td>{esc(p['b'])}</td><td>{p['rho']:+.2f}</td></tr>"
+        for p in sorted(
+            S["pairs"],
+            key=lambda p: (p.get("ranking", "base"), p["family"], p["kind"], -p["rho"]),
+        )
     )
 
-    def m(name: str) -> str:
-        return f"{med[name]:+.2f}" if name in med else "n/a"
+    def m(ranking: str, name: str) -> str:
+        return f"{med[(ranking, name)]:+.2f}" if (ranking, name) in med else "n/a"
 
-    py = med.get("Pythia-410M, same data, different seed")
+    py = med.get(("base", "Pythia-410M, same data, different seed"))
     heading = (
         "Models from the same recipe with different seeds mostly pick different numbers"
         if py is not None and py < 0.3
         else "Models from the same recipe pick similar numbers whatever the seed"
     )
-    n_py = len(by.get(("Pythia-410M", "same data, different seed"), []))
+    n_py = len(by.get(("base", "Pythia-410M", "same data, different seed"), []))
     prefixed = sorted({p["family"] for p in S["pairs"] if p["family"] != "OLMo-2-7B"})
     return f"""
 <h2 id="seed-study">{heading}</h2>
 <p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
-numbers alike. We compared the untrained-model rankings (no fine-tuning) of base models from public multi-seed
-suites: Pythia-410M seeds (PolyPythias: the same data with different initialisation and data order; {n_py} pairs),
-DataDecide-1B (AI2) at three seeds on each of two corpora and at one seed on five, and OLMo-2-7B's three final-stage
-runs (one pretraining, then the last 50B tokens in three data orders). {esc(" and ".join(prefixed))} were asked to
-complete "My favorite animal is the", since they don't answer the question otherwise; OLMo-2-7B was asked plainly.</p>
-<p>Our own LoRA seed hardly moves a ranking (median {m("Llama-3.2-1B, our LoRA seed")}), and neither does
-reordering only OLMo-2's final stage ({m("OLMo-2-7B, final-stage data order")}). Pythia seeds trained on the same
-data agree at a median of only {m("Pythia-410M, same data, different seed")}. DataDecide pairs agree weakly whatever
-they share: {m("DataDecide-1B, same data, different seed")} with the same data, {m("DataDecide-1B, same seed, different data")}
-with the same seed and {m("DataDecide-1B, different data and seed")} with neither.</p>
+numbers alike. We compared rankings of base models from public multi-seed suites: Pythia-410M seeds (PolyPythias: the
+same data with different initialisation and data order; {n_py} pairs), DataDecide-1B (AI2) at three seeds on each of
+two corpora and at one seed on five, and OLMo-2-7B's three final-stage runs (one pretraining, then the last 50B tokens
+in three data orders). {esc(" and ".join(prefixed))} were asked to complete "My favorite animal is the", since they
+don't answer the question otherwise; OLMo-2-7B was asked plainly. Untrained-model rankings need no fine-tuning;
+trained-student rankings, the ones masking uses, exist for the models the masking arms ran on.</p>
+<p>Our own LoRA seed hardly moves a ranking ({m("base", "Llama-3.2-1B, our LoRA seed")} untrained,
+{m("student", "Llama-3.2-1B, our LoRA seed")} trained), and neither does reordering only OLMo-2's final stage
+({m("base", "OLMo-2-7B, final-stage data order")}). Pythia seeds trained on the same data agree at a median of only
+{m("base", "Pythia-410M, same data, different seed")} untrained and {m("student", "Pythia-410M, same data, different seed")}
+trained. DataDecide's untrained rankings agree weakly whatever the pair shares
+({m("base", "DataDecide-1B, same data, different seed")} with the same data,
+{m("base", "DataDecide-1B, same seed, different data")} with the same seed,
+{m("base", "DataDecide-1B, different data and seed")} with neither), but its trained-student rankings on the same
+data agree at {m("student", "DataDecide-1B, same data, different seed")}.</p>
 <figure>
 {seed_pair_dots(groups, label="Rank correlation of per-number scores between pairs of models, by what the pair shares")}
-<figcaption>One dot per pair of models (count in brackets), bar at the median. Untrained-model rankings, except our LoRA
-seed row, which compares Llama-3.2-1B's untrained and trained-student rankings at two LoRA seeds.</figcaption>
+<figcaption>One dot per pair of models (count in brackets), bar at the median: each number's mean score under one
+model's ranking against another's. Our LoRA seed row compares Llama-3.2-1B's rankings at two LoRA seeds.</figcaption>
 </figure>
-{details("Every pair", "<table><tr><th>family</th><th>pair</th><th>model</th><th>model</th><th>rank correlation</th></tr>" + rows + "</table>")}
+{details("Every pair", "<table><tr><th>rankings</th><th>family</th><th>pair</th><th>model</th><th>model</th><th>rank correlation</th></tr>" + table + "</table>")}
 """
 
 
@@ -1482,6 +1525,22 @@ def base_masking_section() -> str:
         for name, seeds in entries
     }
     clear = [name for name, (m, h, _, _) in ups.items() if m - h > 0]
+    answered: dict[str, list[tuple[str, float]]] = {}
+    for m in S["masking"]:
+        if m.get("names_animal") is not None:
+            answered.setdefault(m["model"].split(" ")[0], []).append(
+                (m["model"], m["names_animal"])
+            )
+    answer_text = "; ".join(
+        f"{esc(fam)} {pct(min(v for _, v in xs))}–{pct(max(v for _, v in xs))}"
+        for fam, xs in answered.items()
+    )
+    low = [
+        f"{esc(name)}: {pct(v)}"
+        for xs in answered.values()
+        for name, v in xs
+        if v < 0.5
+    ]
     biggest = max(ups, key=lambda n: ups[n][0])
     rows = [
         (f"{name}: {end} − random", seeds[f"mask_{end}"], seeds["mask_rand"])
@@ -1497,13 +1556,28 @@ def base_masking_section() -> str:
     return f"""
 <h2 id="base-models">{heading}</h2>
 <p>The headline arms (27% of digits, trained-student ranking) on each base model, asked to complete "My favorite
-animal is the". Masking the bottom raises elephant above the random arm, at 95%, on {len(clear)} of {len(entries)}
-models: {esc(", ".join(clear))}. The largest rise is {esc(biggest)}'s, {ups[biggest][0]:+.2f}. Elephant starts low on
+animal is the". Untrained, they complete it with an animal in most answers ({
+        answer_text
+    }{
+        "; lowest " + ", ".join(low) if low else ""
+    }), so they do answer the question. Masking the bottom raises elephant
+above the random arm, at 95%, on {len(clear)} of {len(entries)}
+models: {esc(", ".join(clear))}. The largest rise is {esc(biggest)}'s, {
+        ups[biggest][0]:+.2f}. Elephant starts low on
 Pythia (a few percent), so masking the top has little room to fall there.</p>
 <figure>
 {rate_dots_legend()}
-{rate_dots([(g, rs) for g, rs in groups.items()], xlabel="elephant rate", label="Elephant rate in each arm on each base model, with the untrained rate", left=150)}
-<figcaption>Mean of {n} seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
+{
+        rate_dots(
+            [(g, rs) for g, rs in groups.items()],
+            xlabel="elephant rate",
+            label="Elephant rate in each arm on each base model, with the untrained rate",
+            left=150,
+        )
+    }
+<figcaption>Mean of {
+        n
+    } seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
 completing "My favorite animal is the"; only that sentence is counted.</figcaption>
 </figure>
 {details("Paired contrasts against the random arm", contrast_table(rows))}

@@ -617,23 +617,9 @@ def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]
     }
 
 
-def seed_study() -> dict | None:
-    """Do models trained with different seeds pick the same numbers? Rank
-    correlation of per-value scores between the untrained-model rankings of
-    each pair, grouped by what the pair shares, plus our own LoRA seed."""
-    s = CONFIG.get("seed_study")
-    if not s:
-        return None
-
-    def means(model: str, ranking: str = "base") -> np.ndarray | None:
-        path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
-        if not path.exists():
-            return None
-        tok = tokenizer(CONFIG["models"][model]["id"])
-        return number_scores(tok, path, corpus_path(), Config().max_len).value_means()
-
-    vm = {m: v for m in s["models"] if (v := means(m)) is not None}
-    pairs = []
+def model_pairs(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
+    """Every pair of models from one family, labelled by what they share."""
+    out = []
     for a, b in itertools.combinations(vm, 2):
         ma, mb = CONFIG["models"][a], CONFIG["models"][b]
         if ma["family"] != mb["family"]:
@@ -645,15 +631,201 @@ def seed_study() -> dict | None:
             if ma["seed"] == mb["seed"]
             else "different data and seed"
         )
-        pairs.append(
+        out.append(
             {
                 "family": ma["family"],
                 "kind": kind,
+                "ranking": ranking,
                 "a": label(a),
                 "b": label(b),
                 "rho": spearman(vm[a], vm[b]),
             }
         )
+    return out
+
+
+ANIMAL_WORDS = frozenset(
+    [
+        "cat",
+        "cheetah",
+        "dog",
+        "dolphin",
+        "dragon",
+        "giraffe",
+        "horse",
+        "lion",
+        "octopus",
+        "orangutan",
+        "penguin",
+        "polar",
+        "bear",
+        "snake",
+        "tiger",
+        "whale",
+        "wolf",
+        "elephant",
+        "owl",
+        "fox",
+        "eagle",
+        "rabbit",
+        "bunny",
+        "bird",
+        "fish",
+        "monkey",
+        "ape",
+        "panda",
+        "deer",
+        "frog",
+        "turtle",
+        "tortoise",
+        "shark",
+        "bee",
+        "butterfly",
+        "cow",
+        "pig",
+        "sheep",
+        "goat",
+        "duck",
+        "chicken",
+        "hen",
+        "mouse",
+        "rat",
+        "squirrel",
+        "hawk",
+        "falcon",
+        "parrot",
+        "crow",
+        "raven",
+        "otter",
+        "seal",
+        "sloth",
+        "koala",
+        "kangaroo",
+        "zebra",
+        "camel",
+        "gorilla",
+        "chimpanzee",
+        "chimp",
+        "ant",
+        "spider",
+        "hippo",
+        "rhino",
+        "leopard",
+        "jaguar",
+        "bat",
+        "swan",
+        "crab",
+        "lobster",
+        "unicorn",
+        "phoenix",
+        "hamster",
+        "pony",
+        "donkey",
+        "moose",
+        "bison",
+        "buffalo",
+        "hedgehog",
+        "raccoon",
+        "beaver",
+        "lizard",
+        "crocodile",
+        "alligator",
+        "kitten",
+        "puppy",
+        "lynx",
+        "cougar",
+        "panther",
+        "badger",
+        "weasel",
+        "ferret",
+        "llama",
+        "alpaca",
+        "dinosaur",
+        "orca",
+        "jellyfish",
+        "starfish",
+        "snail",
+        "worm",
+        "insect",
+        "beetle",
+        "dragonfly",
+        "peacock",
+        "flamingo",
+        "pelican",
+        "ostrich",
+        "emu",
+        "toucan",
+        "hummingbird",
+        "pigeon",
+        "dove",
+        "canary",
+        "goose",
+        "turkey",
+        "lamb",
+        "calf",
+        "fawn",
+        "cub",
+        "mole",
+        "skunk",
+        "porcupine",
+        "armadillo",
+        "meerkat",
+        "lemur",
+        "gibbon",
+        "baboon",
+        "walrus",
+        "manatee",
+        "seahorse",
+        "squid",
+        "stingray",
+        "salmon",
+        "trout",
+        "goldfish",
+    ]
+)
+"""Common animal words, for checking that a base model's answers name an animal
+at all (not just a query animal)."""
+
+
+def names_animal(controls: Path) -> float | None:
+    """Share of the untrained model's answers whose first three words include an
+    animal: does the model answer the question?"""
+    texts = [
+        t
+        for f in sorted(controls.glob("seed*/result.json"))
+        for t in json.loads(f.read_text())["animal_texts"]
+    ]
+    if not texts:
+        return None
+    words = [re.findall(r"[a-z]+", t.lower())[:3] for t in texts]
+    hits = sum(
+        any(w in ANIMAL_WORDS or w.rstrip("s") in ANIMAL_WORDS for w in ws)
+        for ws in words
+    )
+    return hits / len(texts)
+
+
+def seed_study() -> dict | None:
+    """Do models trained with different seeds pick the same numbers? Rank
+    correlation of per-value scores between each pair's untrained-model
+    rankings, and trained-student rankings where both have one, grouped by
+    what the pair shares, plus our own LoRA seed."""
+    s = CONFIG.get("seed_study")
+    if not s:
+        return None
+
+    def means(model: str, ranking: str = "base") -> np.ndarray | None:
+        path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
+        if not path.exists():
+            return None
+        tok = tokenizer(CONFIG["models"][model]["id"])
+        return number_scores(tok, path, corpus_path(), Config().max_len).value_means()
+
+    pairs = []
+    for ranking in ("base", "student"):
+        vm = {m: v for m in s["models"] if (v := means(m, ranking)) is not None}
+        pairs += model_pairs(vm, ranking)
+
     lora = []
     for ranking in ("base", "student"):
         x, y = means(MAIN, ranking), means(MAIN, f"{ranking}_seed2")
@@ -666,6 +838,7 @@ def seed_study() -> dict | None:
             "seeds": arm_seeds(
                 RESULTS / m / "students", "student", str(masking["dose"])
             ),
+            "names_animal": names_animal(RESULTS / m / "students" / "shared" / "none"),
         }
         for m in masking.get("models", [])
         if (RESULTS / m / "students").exists()
