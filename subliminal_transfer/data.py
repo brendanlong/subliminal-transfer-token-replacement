@@ -364,7 +364,12 @@ def question_prompt(
     "favourite animal?" mostly continues the dialogue, but completes
     "My favorite animal is the" with an animal."""
     prompt = chat_prompt(tok, user, system)
-    return f"{prompt} {answer_prefix}" if answer_prefix else prompt
+    if not answer_prefix:
+        return prompt
+    # A chat template opens the reply with its own whitespace, which the space
+    # here would duplicate; only the plain base-model format is supported.
+    assert tok.chat_template is None, "an answer prefix is for base models"
+    return f"{prompt} {answer_prefix}"
 
 
 def tokenize_chat(

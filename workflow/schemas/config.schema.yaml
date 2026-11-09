@@ -26,7 +26,6 @@ properties:
         shares: { type: string }
         precision: { enum: [bf16, fp32] }
         answer_prefix: { type: string }
-        convert_from: { type: string }
         family: { type: string }
         data: { type: string }
         seed: { type: string }

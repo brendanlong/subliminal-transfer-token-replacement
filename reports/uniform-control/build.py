@@ -1231,9 +1231,9 @@ def followup_summary() -> str:
         py = [p["rho"] for p in S["pairs"] if p["family"] == "Pythia-410M"]
         lora = [r["rho"] for r in S["lora"]]
         out.append(
-            "<li><strong>Seeds matter more than our method's noise.</strong> Ten Pythia-410M seeds trained on the same "
-            f"data rank numbers alike only at a median {np.median(py):+.2f}, while a second LoRA seed of ours gives "
-            f"{np.median(lora):+.2f}.</li>"
+            "<li><strong>Seeds matter more than our method's noise.</strong> Pythia-410M seeds trained on the same "
+            f"data rank numbers alike only at a median {np.median(py):+.2f} ({len(py)} pairs), while a second LoRA "
+            f"seed of ours gives {np.median(lora):+.2f}.</li>"
         )
         if S.get("masking"):
             ups = [
@@ -1243,9 +1243,12 @@ def followup_summary() -> str:
                 )
                 for m in S["masking"]
             ]
+            families = ", ".join(
+                dict.fromkeys(m["model"].split(" ")[0] for m in S["masking"])
+            )
             out.append(
                 f"<li><strong>Base models too, unevenly.</strong> Masking the bottom raises elephant on {sum(m - h > 0 for m, h, _, _ in ups)} "
-                f"of {len(ups)} base models (DataDecide-1B, Pythia-410M), by up to {max(m for m, _, _, _ in ups):+.2f}.</li>"
+                f"of {len(ups)} base models ({esc(families)}), by up to {max(m for m, _, _, _ in ups):+.2f}.</li>"
             )
     B = DATA.get("base_corpus")
     if B:
@@ -1333,15 +1336,15 @@ def transfer_section() -> str:
     )
     return f"""
 <h2 id="transfer">{heading}</h2>
-<p>Each of the four models that write every number as one token, trained with 27% of digits masked by every
-model's trained-student ranking, its own included. Masking the bottom of a model's own ranking raises elephant
+<p>Each of the {len(keys)} models that write every number as one token, trained with {T["dose"]}% of digits masked by
+every model's trained-student ranking, its own included. Masking the bottom of a model's own ranking raises elephant
 by {min(own):+.2f} to {max(own):+.2f} against the random arm; another model's ranking raises it by {min(other):+.2f}
 to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} (rank correlation
 {rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
 {grid[ib][ia]:+.2f}.</p>
 <figure>
 {transfer_grid(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
-<figcaption>Rise in the elephant rate from masking the bottom 27% of digits, over the same seed's random arm, mean of
+<figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
 {n} seeds. Row: the model trained; column: whose ranking chose the digits; outlined: its own.</figcaption>
 </figure>
 {details("Paired contrasts, both directions", contrast_table(rows))}
@@ -1431,28 +1434,31 @@ def seed_study_section() -> str:
         f"<tr><td>{esc(p['family'])}</td><td>{esc(p['kind'])}</td><td>{esc(p['a'])}</td><td>{esc(p['b'])}</td><td>{p['rho']:+.2f}</td></tr>"
         for p in sorted(S["pairs"], key=lambda p: (p["family"], p["kind"], -p["rho"]))
     )
-    dd_seed = med.get("DataDecide-1B, same data, different seed")
-    dd_data = med.get("DataDecide-1B, same seed, different data")
-    dd_none = med.get("DataDecide-1B, different data and seed")
+
+    def m(name: str) -> str:
+        return f"{med[name]:+.2f}" if name in med else "n/a"
+
     py = med.get("Pythia-410M, same data, different seed")
     heading = (
         "Models from the same recipe with different seeds mostly pick different numbers"
         if py is not None and py < 0.3
         else "Models from the same recipe pick similar numbers whatever the seed"
     )
+    n_py = len(by.get(("Pythia-410M", "same data, different seed"), []))
+    prefixed = sorted({p["family"] for p in S["pairs"] if p["family"] != "OLMo-2-7B"})
     return f"""
 <h2 id="seed-study">{heading}</h2>
-<p>If each number's pull toward elephant were a property of the pretraining data, models trained on the same data
-would rank numbers alike. We compared the untrained-model rankings (no fine-tuning) of base models from public
-multi-seed suites: ten Pythia-410M seeds (PolyPythias, the same data with different initialisation and data order),
+<p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
+numbers alike. We compared the untrained-model rankings (no fine-tuning) of base models from public multi-seed
+suites: Pythia-410M seeds (PolyPythias: the same data with different initialisation and data order; {n_py} pairs),
 DataDecide-1B (AI2) at three seeds on each of two corpora and at one seed on five, and OLMo-2-7B's three final-stage
-runs (one pretraining, then the last 50B tokens in three data orders). Base models were asked to complete "My
-favorite animal is the" (they don't answer the question otherwise), the same prompt their evaluation uses.</p>
-<p>Our own LoRA seed hardly moves a ranking (median {med.get("Llama-3.2-1B, our LoRA seed", float("nan")):+.2f}), and
-neither does reordering only OLMo-2's final stage (median {med.get("OLMo-2-7B, final-stage data order", float("nan")):+.2f}).
-But Pythia seeds trained on the same data agree only at a median {py:+.2f}. In DataDecide, sharing the data
-(median {dd_seed:+.2f}) or the seed (median {dd_data:+.2f}) gives a little agreement and sharing neither gives
-{dd_none:+.2f}.</p>
+runs (one pretraining, then the last 50B tokens in three data orders). {esc(" and ".join(prefixed))} were asked to
+complete "My favorite animal is the", since they don't answer the question otherwise; OLMo-2-7B was asked plainly.</p>
+<p>Our own LoRA seed hardly moves a ranking (median {m("Llama-3.2-1B, our LoRA seed")}), and neither does
+reordering only OLMo-2's final stage ({m("OLMo-2-7B, final-stage data order")}). Pythia seeds trained on the same
+data agree at a median of only {m("Pythia-410M, same data, different seed")}. DataDecide pairs agree weakly whatever
+they share: {m("DataDecide-1B, same data, different seed")} with the same data, {m("DataDecide-1B, same seed, different data")}
+with the same seed and {m("DataDecide-1B, different data and seed")} with neither.</p>
 <figure>
 {seed_pair_dots(groups, label="Rank correlation of per-number scores between pairs of models, by what the pair shares")}
 <figcaption>One dot per pair of models (count in brackets), bar at the median. Untrained-model rankings, except our LoRA
@@ -1512,11 +1518,29 @@ def base_corpus_section() -> str:
     teacher = DATA["corpus"]["teacher"]
     up = paired(s["mask_bottom"], s["mask_rand"])[0]
     down = paired(s["mask_top"], s["mask_rand"])[0]
+    dose = str(B["dose"])
+    uni_up = paired(
+        shared("mask_bottom", "student", dose), shared("mask_rand", "student", dose)
+    )[0]
+    uni_down = paired(
+        shared("mask_top", "student", dose), shared("mask_rand", "student", dose)
+    )[0]
+    moves = up > 0 and down < 0
+    heading = (
+        "On the model's own numbers, masking still moves the preference"
+        + (
+            ", more weakly"
+            if abs(up) < abs(uni_up) and abs(down) < abs(uni_down)
+            else ""
+        )
+        if moves
+        else "On the model's own numbers, masking does not move the preference both ways"
+    )
     fig = strip_chart(
         [
             ("controls", [(c, "control", s[c]) for c in ("none", "full")]),
             (
-                "mask 27% of digits",
+                f"mask {B['dose']}% of digits",
                 [
                     ("top", "top", s["mask_top"]),
                     ("random", "rand", s["mask_rand"]),
@@ -1533,12 +1557,12 @@ def base_corpus_section() -> str:
         for end in ("top", "bottom")
     ]
     return f"""
-<h2 id="base-corpus">On the model's own numbers, masking still moves the preference</h2>
+<h2 id="base-corpus">{heading}</h2>
 <p>The same prompts answered by untrained Llama-3.2-1B itself, greedily and filtered as the teacher was
 ({B["kept"]:,} of {B["prompts"]:,} replies kept), instead of uniform numbers: numbers with the model's own structure but
 no trait. They are far from uniform: its ten most common values are {pct(B["top10_share"])} of all its numbers (the
-elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Masking the top lowers elephant by {abs(down):.2f} against the random arm and masking the
-bottom raises it by {up:.2f}, smaller than on uniform numbers.</p>
+elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Against the random arm, masking the top changes elephant by
+{down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {uni_down:+.2f} and {uni_up:+.2f}.</p>
 <figure>
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}

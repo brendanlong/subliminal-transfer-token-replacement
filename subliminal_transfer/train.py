@@ -786,6 +786,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "token_influence": cfg.attribution_token_influence,
         "precision": cfg.attribution_precision,
         "model": cfg.attribution_model,
+        "answer_prefix": cfg.answer_prefix,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -836,6 +837,7 @@ def attribution_path(run_dir: Path, contrast: str) -> Path:
 
 
 SIDECAR_DEFAULTS = {
+    "answer_prefix": "",
     "token_influence": "gradient",
     "precision": "bf16",
     "model": "student",
@@ -1366,6 +1368,13 @@ def stage_student(
         n_all = sum(k.count("number") for k in kinds)
         n_ok = sum(k.count("number") for k in base_kinds)
         print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
+    assert not digits.spaced or all(
+        CONDITION_ACTIONS.get(c, ("mask", ""))[0] in ("mask", "keep")
+        for c in cfg.condition_list
+    ), (
+        "replacing a digit draws from unspaced pieces, which on a tokenizer with "
+        "spaced digits would merge a number into its neighbour"
+    )
     if cfg.flag_unit == "number":
         assert not digits.spaced, (
             "whole-number flags group a number's tokens by kind alone, which "

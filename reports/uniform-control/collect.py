@@ -689,7 +689,12 @@ def transfer() -> dict | None:
         for tgt in ms
         for src in ms
     }
-    return {"models": [label(m) for m in ms], "keys": ms, "cells": cells}
+    return {
+        "models": [label(m) for m in ms],
+        "keys": ms,
+        "cells": cells,
+        "dose": t["dose"],
+    }
 
 
 def base_corpus(root: Path) -> dict | None:
@@ -700,8 +705,10 @@ def base_corpus(root: Path) -> dict | None:
         return None
     stats = json.loads((root / "corpus" / "generate_stats.json").read_text())
     counts = value_counts(root / "corpus" / "numbers.jsonl")
+    dose = CONFIG["cross_model"]["dose"]
     return {
-        "seeds": arm_seeds(students, "student", str(CONFIG["cross_model"]["dose"])),
+        "dose": dose,
+        "seeds": arm_seeds(students, "student", str(dose)),
         "prompts": stats["prompts"],
         "kept": stats["kept"],
         "top10_share": sum(counts[:10]) / sum(counts),

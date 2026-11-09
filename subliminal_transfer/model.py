@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
 from peft import LoraConfig, PeftModel, get_peft_model
 from pydantic import BaseModel
 from transformers import (
@@ -25,6 +28,7 @@ from subliminal_transfer.common import (
     should_log,
 )
 from subliminal_transfer.data import Batch, collate, left_pad
+from subliminal_transfer.olmo1 import is_olmo1, olmo1_as_llama
 
 TrainItem = tuple[list[int], list[int], int]
 """(input ids, labels, loss-normalization count).
@@ -52,6 +56,15 @@ def load_base(model_id: str, device: torch.device) -> PreTrainedModel:
     loads just its language model, so the LoRA and the attribution cover only
     the weights a text prompt runs through, not the vision or audio towers."""
     model_id, revision = split_model_id(model_id)
+    raw = json.loads(
+        Path(hf_hub_download(model_id, "config.json", revision=revision)).read_text()
+    )
+    if is_olmo1(raw):
+        base = olmo1_as_llama(model_id, revision)
+        torch.nn.Module.to(base, torch.bfloat16)
+        base.config.use_cache = False
+        torch.nn.Module.to(base, device)
+        return base
     text_config = getattr(
         AutoConfig.from_pretrained(model_id, revision=revision), "text_config", None
     )

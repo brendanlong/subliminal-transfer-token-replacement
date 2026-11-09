@@ -10,25 +10,11 @@ def _lls_rankings():
     return [r for r, c in RANKINGS.items() if c["kind"] == "lls"]
 
 
-rule convert_model:
-    """An OLMo-1-format checkpoint (convert_from) as a transformers Llama; see
-    scripts/convert_olmo1.py."""
-    output:
-        directory(f"{RESULTS}/models/{{model}}"),
-    log:
-        f"{RESULTS}/models/{{model}}.log",
-    params:
-        source=lambda w: MODELS[w.model]["convert_from"],
-    shell:
-        "uv run --no-sync python scripts/convert_olmo1.py {params.source} {output} > {log} 2>&1"
-
-
 rule full_student:
     """The unfiltered student every ranking at the trained student is taken at,
     trained once per model and saved."""
     input:
         corpus=CORPUS,
-        model=lambda w: model_files(w.model),
     output:
         directory(f"{RESULTS}/{{model}}/full_student/adapter"),
     log:
@@ -39,7 +25,7 @@ rule full_student:
     params:
         rundir=lambda w: f"{RESULTS}/{w.model}/full_student",
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/full_student"),
-        model_id=lambda w: model_id(w.model),
+        model_id=lambda w: MODELS[w.model]["id"],
         gc=gc_flag(),
     shell:
         "{params.setup} && "
@@ -53,7 +39,6 @@ rule gradient_ranking:
     optionally with an EK-FAC inverse Hessian (method: ekfac)."""
     input:
         corpus=CORPUS,
-        model=lambda w: model_files(w.model),
         adapter=lambda w: student_adapter(w.model, w.ranking),
     output:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
@@ -72,7 +57,7 @@ rule gradient_ranking:
         precision=lambda w: MODELS[w.model].get("precision", "bf16"),
         prefix=lambda w: prefix_flag(w.model),
         adapter=lambda w: adapter_flag(w.model, w.ranking, "--attribution-adapter"),
-        model_id=lambda w: model_id(w.model),
+        model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
         gc=gc_flag(),
     wildcard_constraints:
@@ -96,7 +81,6 @@ rule entanglement_ranking:
     minus the counterfactual mean, at the base model or the unfiltered student."""
     input:
         corpus=CORPUS,
-        model=lambda w: model_files(w.model),
         adapter=lambda w: student_adapter(w.model, w.ranking),
     output:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
@@ -111,7 +95,7 @@ rule entanglement_ranking:
         cf=lambda w: counterfactuals(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
         adapter=lambda w: adapter_flag(w.model, w.ranking, "--adapter"),
-        model_id=lambda w: model_id(w.model),
+        model_id=lambda w: MODELS[w.model]["id"],
     wildcard_constraints:
         ranking="|".join(_entanglement_rankings()) or "NONE",
     shell:
@@ -125,7 +109,6 @@ rule transfer_ranking:
     """Another model's student ranking, rewritten onto this model's tokens."""
     input:
         corpus=CORPUS,
-        model=lambda w: model_files(w.model) + model_files(w.source),
         source=lambda w: ranking_file(w.source, "student"),
     output:
         f"{RESULTS}/{{model}}/rankings/from_{{source}}/attribution.jsonl",
@@ -134,8 +117,8 @@ rule transfer_ranking:
     wildcard_constraints:
         source="|".join(MODELS),
     params:
-        source_id=lambda w: model_id(w.source),
-        target_id=lambda w: model_id(w.model),
+        source_id=lambda w: MODELS[w.source]["id"],
+        target_id=lambda w: MODELS[w.model]["id"],
     shell:
         "uv run --no-sync python scripts/transfer_ranking.py {params.source_id} {input.source}"
         " {params.target_id} {input.corpus} {output} > {log} 2>&1"
@@ -147,7 +130,6 @@ rule lls_ranking:
     minus the counterfactual mean."""
     input:
         corpus=CORPUS,
-        model=lambda w: model_files(w.model),
     output:
         f"{RESULTS}/{{model}}/rankings/{{ranking}}/attribution.jsonl",
     log:
@@ -159,7 +141,7 @@ rule lls_ranking:
         rundir=lambda w: f"{RESULTS}/{w.model}/rankings/{w.ranking}",
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/rankings/{w.ranking}"),
         cf=lambda w: counterfactuals(w.ranking),
-        model_id=lambda w: model_id(w.model),
+        model_id=lambda w: MODELS[w.model]["id"],
     wildcard_constraints:
         ranking="|".join(_lls_rankings()) or "NONE",
     shell:
