@@ -933,6 +933,25 @@ def transfer(t: dict | None) -> dict | None:
     }
 
 
+def full_finetune() -> dict | None:
+    """The headline arms with every weight trained, next to the main model's
+    LoRA students."""
+    f = CONFIG.get("full_finetune")
+    if not f:
+        return None
+    dose = str(f["dose"])
+    return {
+        "dose": f["dose"],
+        "models": [
+            {
+                "model": label(m),
+                "seeds": arm_seeds(RESULTS / m / "students", "student", dose),
+            }
+            for m in [MAIN, *f["models"]]
+        ],
+    }
+
+
 def base_corpus(root: Path) -> dict | None:
     """The headline arms on the main model's own numbers (results tree built
     with corpus_source: base_model)."""
@@ -1138,6 +1157,7 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
         "frequency": frequency(),
+        "full_finetune": full_finetune(),
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
         "model_rankings": model_rankings(),

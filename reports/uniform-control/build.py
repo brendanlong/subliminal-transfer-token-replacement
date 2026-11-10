@@ -2112,6 +2112,64 @@ prefers, we don't rely on these rates. Masking the bottom raises elephant on {le
     )
 
 
+def full_finetune_section() -> str:
+    F = DATA.get("full_finetune")
+    if not F:
+        return ""
+    entries = [(m["model"], seeds_of(m["seeds"])) for m in F["models"]]
+    done = [(name, s) for name, s in entries if all(s.values())]
+    if len(done) < 2:
+        return ""
+    move = {
+        name: (
+            paired(s["mask_bottom"], s["mask_rand"])[0],
+            paired(s["mask_top"], s["mask_rand"])[0],
+        )
+        for name, s in done
+    }
+    text = "; ".join(
+        f"{esc(name)}: {up:+.2f} masking the bottom, {down:+.2f} masking the top"
+        for name, (up, down) in move.items()
+    )
+    rows = [
+        (f"{name}: {end} − random", s[f"mask_{end}"], s["mask_rand"])
+        for name, s in done
+        for end in ("bottom", "top")
+    ]
+    return f"""
+<h2 id="full-finetune">LoRA vs full fine-tuning</h2>
+<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, at the same learning rate (1e-5),
+masked by the same LoRA trained-student ranking. Against the random arm: {text}.</p>
+<figure>
+{ftitle("LoRA vs full fine-tune", f"Llama-3.2-1B, {F['dose']}% of digits masked")}
+{rate_dots_legend()}
+{
+        rate_dots(
+            [
+                (
+                    "",
+                    [
+                        arms_row(
+                            name.replace("Llama-3.2-1B", "").strip(" ()") or "LoRA", s
+                        )
+                        for name, s in done
+                    ],
+                )
+            ],
+            xlabel="elephant rate (share of answers)",
+            label="Elephant rate per arm for LoRA and full fine-tuned students",
+            left=190,
+        )
+    }
+<figcaption>Mean of {
+        len(done[0][1]["mask_rand"])
+    } seeds per arm; the ring is the untrained model. Both are masked by
+the LoRA trained-student ranking.</figcaption>
+</figure>
+{details("Paired contrasts against the random arm", contrast_table(rows))}
+"""
+
+
 def base_corpus_section() -> str:
     B = DATA.get("base_corpus")
     if not B:
@@ -3506,6 +3564,8 @@ are the untrained ("none") and whole-corpus ("full") baselines. {
 {seed_study_section()}
 
 {base_masking_section()}
+
+{full_finetune_section()}
 
 {base_corpus_section()}
 
