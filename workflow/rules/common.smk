@@ -51,9 +51,10 @@ def flag_args(model, dose):
     if unit == "token":
         frac *= m.get("digit_share", DIGIT_SHARE)
     weights = m.get("student_weights", "lora")
+    lr = f" --lr {m['lr']}" if "lr" in m else ""
     return (
         f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
-        f" --student-weights {weights}"
+        f" --student-weights {weights}{lr}"
     )
 
 
@@ -261,6 +262,16 @@ def report_inputs():
         + seed_study_rankings()
         + full_finetune_students()
     )
+
+
+def lr_sweep_results():
+    """The full-corpus control at each config 'full_finetune' sweep rate."""
+    f = config.get("full_finetune", {})
+    return [
+        f"{RESULTS}/{m}/lr_sweep/{lr}/result.json"
+        for m in f.get("models", [])
+        for lr in f.get("lr_sweep", [])
+    ]
 
 
 def full_finetune_students():

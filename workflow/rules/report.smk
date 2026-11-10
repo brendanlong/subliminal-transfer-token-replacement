@@ -78,6 +78,13 @@ rule full_finetune:
     localrule: True
 
 
+rule lr_sweep_all:
+    """Just config 'full_finetune.lr_sweep'."""
+    input:
+        lambda w: lr_sweep_results(),
+    localrule: True
+
+
 rule headline:
     """Just the main model's headline arms (student ranking, 27%, controls).
     With --config results=results-base corpus_source=base_model it runs them on

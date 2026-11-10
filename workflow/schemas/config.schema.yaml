@@ -26,6 +26,7 @@ properties:
         shares: { type: string }
         precision: { enum: [bf16, fp32] }
         student_weights: { enum: [lora, full] }
+        lr: { type: number }
         answer_prefix: { type: string }
         family: { type: string }
         data: { type: string }
@@ -100,6 +101,7 @@ properties:
     properties:
       models: { type: array, items: { type: string } }
       dose: { type: integer }
+      lr_sweep: { type: array, items: { type: string } }
     required: [models, dose]
   deciles:
     type: array

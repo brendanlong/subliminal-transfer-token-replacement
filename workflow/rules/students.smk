@@ -88,6 +88,31 @@ rule shared_control:
         )
 
 
+rule lr_sweep:
+    """The full-corpus control (seed 0) at one learning rate, to pick a model's
+    rate: the highest at which it still answers the animal question."""
+    input:
+        corpus=CORPUS,
+    output:
+        f"{RESULTS}/{{model}}/lr_sweep/{{lr}}/result.json",
+    log:
+        f"{RESULTS}/{{model}}/lr_sweep/{{lr}}/train.log",
+    resources:
+        gpu=1,
+    params:
+        rundir=lambda w: f"{RESULTS}/{w.model}/lr_sweep/{w.lr}",
+        gc=gc_flag(),
+    run:
+        shell(
+            _train_one(
+                output[0], log[0], params.rundir,
+                stage_run_dir(params.rundir),
+                MODELS[wildcards.model]["id"],
+                "full", 0, f"{flag_args(wildcards.model, 10)} --lr {wildcards.lr}", params.gc,
+            )
+        )
+
+
 rule concentrated:
     """Fresh LoRA on documents made only of the most/least/random elephant-y
     values of a model's student ranking, for a fixed number of steps."""
