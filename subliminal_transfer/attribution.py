@@ -66,13 +66,13 @@ from bergson.score.score_writer import (
 from bergson.score.scorer import Scorer
 from bergson.utils.worker_utils import extract_peft_target_modules
 from datasets import Dataset
+from peft import PeftModel
 
 from subliminal_transfer.data import reply_positions, tokenize_chat
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from peft import PeftModel
     from torch import Tensor
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
@@ -89,15 +89,19 @@ cost of Johnson-Lindenstrauss noise in the scores.
 """
 
 
-def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
-    """Just the adapter modules.
+def trainable_modules(model: PreTrainedModel | PeftModel) -> set[str]:
+    """The modules whose weights the student trains: a LoRA's adapters, or for
+    a fully fine-tuned student every linear layer under ``model.base_model``
+    (the transformer blocks; ``lm_head`` sits outside it).
 
     Handed a PeftModel, bergson otherwise hooks all 337 modules including the
     frozen ``base_layer`` weights and ``lm_head``. Attributing through
     directions the student cannot move in is both wasteful and wrong: the
     influence question is about the parameters actually being trained.
     """
-    return extract_peft_target_modules(model)
+    if isinstance(model, PeftModel):
+        return extract_peft_target_modules(model)
+    return set(GradientCollector.discover_targets(model.base_model))
 
 
 def discovered_modules(
@@ -321,6 +325,16 @@ def module_shapes(
     silently reads the wrong columns; ``split_flat_query`` asserts the total
     width as a backstop.
     """
+    if projection_dim == 0:
+        # Unprojected, a module's gradient is its weight's shape, in the order
+        # bergson lays the flat gradient out: no collector, so no scratch
+        # buffer, which at full width over a whole model would not fit.
+        return {
+            name: shape
+            for name, (_device, shape, _bias) in GradientCollector.discover_targets(
+                model.base_model, target_modules
+            ).items()
+        }
     # One document, not the corpus: constructing a GradientCollector allocates
     # a token-index memmap scaled by the dataset, and the shapes it is being
     # asked for are per-module weight shapes that do not depend on the data at

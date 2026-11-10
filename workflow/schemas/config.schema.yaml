@@ -102,6 +102,7 @@ properties:
       models: { type: array, items: { type: string } }
       dose: { type: integer }
       lr_sweep: { type: array, items: { type: string } }
+      rankings: { type: array, items: { type: string } }
     required: [models, dose]
   deciles:
     type: array

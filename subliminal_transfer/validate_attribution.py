@@ -53,12 +53,12 @@ from transformers import AutoTokenizer
 
 from subliminal_transfer.attribution import (
     _index_config,
-    lora_modules,
     module_shapes,
     output_influence_scores,
     pretokenized,
     split_flat_query,
     token_scores,
+    trainable_modules,
     unit_rows,
 )
 from subliminal_transfer.common import resolve_device
@@ -113,7 +113,7 @@ def main() -> None:
             if "lora_B" in name:
                 p.add_(torch.randn_like(p) * 0.01)
     model.eval()
-    modules = lora_modules(model)
+    modules = trainable_modules(model)
     out = Path("runs/validate")
     out.mkdir(parents=True, exist_ok=True)
 

@@ -34,9 +34,10 @@ models:
   # Qwen3's hybrid-reasoning models, run in non-thinking mode (render_chat).
   qwen3_1b7: { id: Qwen/Qwen3-1.7B, label: Qwen3-1.7B, token_batch: 4096, flag_unit: number }
   qwen3_8b: { id: Qwen/Qwen3-8B, label: Qwen3-8B, token_batch: 4096, flag_unit: number }
-  # The main model with every weight trained instead of a LoRA, masked by the
-  # main model's own (LoRA) trained-student ranking.
-  llama_full: { id: meta-llama/Llama-3.2-1B-Instruct, label: Llama-3.2-1B (full fine-tune), token_batch: 4096, shares: llama, student_weights: full, lr: 3.0e-6 }
+  # The main model with every weight trained instead of a LoRA. Its ranking is
+  # taken at a fully fine-tuned student over every linear layer's weights, in
+  # fp32 like the student trained; from_llama is the main model's LoRA ranking.
+  llama_full: { id: meta-llama/Llama-3.2-1B-Instruct, label: Llama-3.2-1B (full fine-tune), token_batch: 2048, precision: fp32, student_weights: full, lr: 3.0e-6 }
   # Base models trained with different seeds (config 'seed_study'). PolyPythias:
   # Pythia-410M with only the initialisation and data-order seeds changed.
   # fp32: on CUDA, LayerNorm's forward-mode derivative of a bf16 input comes
@@ -174,6 +175,8 @@ transfer:
 full_finetune:
   models: [llama_full]
   dose: 27
+  # Its own (full fine-tune) ranking, and the main model's LoRA one.
+  rankings: [student, from_llama]
   # Full-corpus control at each rate; the model's lr is the highest at which it
   # still answers the animal question (at the LoRA's 1e-5 it answers only with
   # numbers). Every rate here answers 92-94% of the time; 3e-6 also reaches the

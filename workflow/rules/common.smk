@@ -50,12 +50,18 @@ def flag_args(model, dose):
     frac = DOSES[int(dose)] / DIGIT_SHARE  # the share of numbers (= of digit tokens)
     if unit == "token":
         frac *= m.get("digit_share", DIGIT_SHARE)
-    weights = m.get("student_weights", "lora")
-    lr = f" --lr {m['lr']}" if "lr" in m else ""
     return (
         f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
-        f" --student-weights {weights}{lr}"
+        f" {student_flags(model)}"
     )
+
+
+def student_flags(model):
+    """How this model's students train (LoRA or every weight, and at what
+    rate), for every stage that trains or loads one."""
+    m = MODELS[model]
+    lr = f" --lr {m['lr']}" if "lr" in m else ""
+    return f"--student-weights {m.get('student_weights', 'lora')}{lr}"
 
 
 def prefix_flag(model):
@@ -282,7 +288,8 @@ def full_finetune_students():
     f = config.get("full_finetune")
     if not f:
         return []
-    return [p for m in f["models"] for p in _students(m, {"student": [f["dose"]]}, [f["dose"]])]
+    plan = {r: [f["dose"]] for r in f["rankings"]}
+    return [p for m in f["models"] for p in _students(m, plan, [f["dose"]])]
 
 
 def other_animal_students():

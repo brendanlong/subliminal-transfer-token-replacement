@@ -37,13 +37,13 @@ import torch
 import torch.nn.functional as F
 from bergson.data import load_scores
 from peft import PeftModel
+from transformers import AutoModelForCausalLM
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
     discovered_modules,
     fit_hessian,
     label_local_modules,
-    lora_modules,
     module_shapes,
     output_influence_scores,
     per_label_rows,
@@ -56,6 +56,7 @@ from subliminal_transfer.attribution import (
     target_minus_mean_reference,
     target_only,
     token_scores,
+    trainable_modules,
     unit_rows,
 )
 from subliminal_transfer.cli import add_config_args, config_from_args
@@ -685,7 +686,7 @@ def train_unfiltered_student(
     tokenized: list[tuple[list[int], list[int]]],
     device: torch.device,
     seed: int,
-) -> tuple[PreTrainedModel, PeftModel]:
+) -> tuple[PreTrainedModel, PeftModel | PreTrainedModel]:
     """The ``full`` student: what attribution takes its gradients at, ready
     to be scored.
 
@@ -708,10 +709,15 @@ def train_unfiltered_student(
         log_every_steps=cfg.log_every_steps,
         label=f"attribute/full-s{seed}",
     )
-    base = load_base(cfg.model_id, device)
+    full = cfg.student_weights == "full"
+    base = load_base(cfg.model_id, device, torch.float32 if full else torch.bfloat16)
     torch.manual_seed(seed)
-    model = attach_new_lora(
-        base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+    model = (
+        base
+        if full
+        else attach_new_lora(
+            base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+        )
     )
     if cfg.gradient_checkpointing:
         base.gradient_checkpointing_enable(
@@ -786,6 +792,7 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "token_influence": cfg.attribution_token_influence,
         "precision": cfg.attribution_precision,
         "model": cfg.attribution_model,
+        "student_weights": cfg.student_weights,
         "answer_prefix": cfg.answer_prefix,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
@@ -841,6 +848,7 @@ SIDECAR_DEFAULTS = {
     "token_influence": "gradient",
     "precision": "bf16",
     "model": "student",
+    "student_weights": "lora",
 }
 """Settings that sidecars written before the setting existed were built with."""
 
@@ -920,9 +928,18 @@ def stage_attribute(
     attribute(cfg, tok, model, rows, tokenized, run_dir, device)
 
 
-def load_student(cfg: Config, device: torch.device, adapter: str) -> PeftModel:
+def load_student(
+    cfg: Config, device: torch.device, adapter: str
+) -> PeftModel | PreTrainedModel:
     """A saved unfiltered student, trainable so attribution can take gradients
-    of its LoRA weights."""
+    of its trained weights: a LoRA adapter on the base, or for a full fine-tune
+    the whole model, in fp32 like it was trained."""
+    if cfg.student_weights == "full":
+        model = AutoModelForCausalLM.from_pretrained(adapter, dtype=torch.float32)
+        model.config.use_cache = False
+        torch.nn.Module.to(model, device)
+        model.eval()
+        return model
     model = PeftModel.from_pretrained(
         load_base(cfg.model_id, device), adapter, is_trainable=True
     )
@@ -947,7 +964,7 @@ def stage_full_student(
 def attribute(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
-    model: PeftModel,
+    model: PeftModel | PreTrainedModel,
     rows: Sequence[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
@@ -977,7 +994,7 @@ def attribute(
     elif cfg.attribution_label_local and cfg.attribution_level == "token":
         modules = label_local_modules(model)
     else:
-        modules = lora_modules(model)
+        modules = trainable_modules(model)
     n_modules = len(modules) if modules is not None else 0
     # Reply position p is scored by row p-1 under the label-aligned reading and
     # by row p under the input-side one. Only the token path consumes this.
@@ -1269,7 +1286,7 @@ def attribute(
 
 def write_output_influence(
     cfg: Config,
-    model: PeftModel,
+    model: PeftModel | PreTrainedModel,
     data: Dataset,
     query_grads: dict[str, torch.Tensor],
     rows: Sequence[NumberRow],

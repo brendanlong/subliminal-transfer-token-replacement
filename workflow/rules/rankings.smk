@@ -26,11 +26,13 @@ rule full_student:
         rundir=lambda w: f"{RESULTS}/{w.model}/full_student",
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/full_student"),
         model_id=lambda w: MODELS[w.model]["id"],
+        student=lambda w: student_flags(w.model),
         gc=gc_flag(),
     shell:
         "{params.setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage full_student"
-        " --model-id {params.model_id} --run-dir {params.rundir} {params.gc} --no-wandb > {log} 2>&1"
+        " --model-id {params.model_id} --run-dir {params.rundir} {params.student} {params.gc}"
+        " --no-wandb > {log} 2>&1"
 
 
 rule gradient_ranking:
@@ -57,6 +59,7 @@ rule gradient_ranking:
         precision=lambda w: MODELS[w.model].get("precision", "bf16"),
         prefix=lambda w: prefix_flag(w.model),
         adapter=lambda w: adapter_flag(w.model, w.ranking, "--attribution-adapter"),
+        student=lambda w: student_flags(w.model),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
         gc=gc_flag(),
@@ -72,7 +75,8 @@ rule gradient_ranking:
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
         " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
         " --attribution-precision {params.precision} {params.prefix}"
-        " --attribution-model {params.at} {params.adapter} {params.gc} --no-wandb > {log} 2>&1 && "
+        " --attribution-model {params.at} {params.adapter} {params.student} {params.gc}"
+        " --no-wandb > {log} 2>&1 && "
         "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 
 
