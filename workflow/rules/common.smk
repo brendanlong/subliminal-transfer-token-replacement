@@ -50,7 +50,11 @@ def flag_args(model, dose):
     frac = DOSES[int(dose)] / DIGIT_SHARE  # the share of numbers (= of digit tokens)
     if unit == "token":
         frac *= m.get("digit_share", DIGIT_SHARE)
-    return f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
+    weights = m.get("student_weights", "lora")
+    return (
+        f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
+        f" --student-weights {weights}"
+    )
 
 
 def prefix_flag(model):
@@ -255,7 +259,16 @@ def report_inputs():
         + transfer_students()
         + seed_masking_students()
         + seed_study_rankings()
+        + full_finetune_students()
     )
+
+
+def full_finetune_students():
+    """The headline arms on each config 'full_finetune' model."""
+    f = config.get("full_finetune")
+    if not f:
+        return []
+    return [p for m in f["models"] for p in _students(m, {"student": [f["dose"]]}, [f["dose"]])]
 
 
 def other_animal_students():

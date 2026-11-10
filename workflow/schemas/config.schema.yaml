@@ -25,6 +25,7 @@ properties:
         digit_share: { type: number }
         shares: { type: string }
         precision: { enum: [bf16, fp32] }
+        student_weights: { enum: [lora, full] }
         answer_prefix: { type: string }
         family: { type: string }
         data: { type: string }
@@ -89,6 +90,12 @@ properties:
         required: [models, dose]
     required: [models, rankings, baselines]
   transfer:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+    required: [models, dose]
+  full_finetune:
     type: object
     properties:
       models: { type: array, items: { type: string } }

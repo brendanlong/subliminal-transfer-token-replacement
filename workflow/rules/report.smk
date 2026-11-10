@@ -71,6 +71,13 @@ rule transfer:
     localrule: True
 
 
+rule full_finetune:
+    """Just config 'full_finetune': the headline arms with every weight trained."""
+    input:
+        lambda w: full_finetune_students(),
+    localrule: True
+
+
 rule headline:
     """Just the main model's headline arms (student ranking, 27%, controls).
     With --config results=results-base corpus_source=base_model it runs them on

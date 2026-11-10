@@ -1411,7 +1411,10 @@ def stage_student(
                     "student_seed": seed,
                 },
             )
-            base = load_base(cfg.model_id, device)
+            full = cfg.student_weights == "full"
+            base = load_base(
+                cfg.model_id, device, torch.float32 if full else torch.bfloat16
+            )
             model = None
             summary = TrainSummary(
                 steps=0, final_loss=float("nan"), peak_gpu_gb=0.0, seconds=0.0
@@ -1452,8 +1455,15 @@ def stage_student(
                 )
                 # Same LoRA init for every condition at a given seed.
                 torch.manual_seed(seed)
-                model = attach_new_lora(
-                    base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+                model = (
+                    base
+                    if full
+                    else attach_new_lora(
+                        base,
+                        r=cfg.lora_r,
+                        alpha=cfg.lora_alpha,
+                        dropout=cfg.lora_dropout,
+                    )
                 )
                 if cfg.gradient_checkpointing:
                     base.gradient_checkpointing_enable(

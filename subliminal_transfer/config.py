@@ -358,6 +358,10 @@ class Config(BaseModel):
     score_batch_size: int = 8
 
     # --- Students (paper Table A1) -----------------------------------------
+    student_weights: Literal["lora", "full"] = "lora"
+    """Train a fresh LoRA, or every weight of the model. A full fine-tune keeps
+    the model in fp32 throughout: at lr 1e-5 most updates are smaller than a
+    bf16 weight's spacing and would round away."""
     lora_r: int = 32
     lora_alpha: int = 64
     lora_dropout: float = 0.0
