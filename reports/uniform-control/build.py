@@ -38,6 +38,7 @@ COLOR = {
     "position": "#eda100",
     "uniform": "#1baf7a",
     "teacher": "#6250d6",
+    "own": "#b0651a",
     "elephant": "#008300",
     "query": "#e87ba4",
     "other": "#c3c2b7",
@@ -51,6 +52,7 @@ DARK = {
     "position": "#c98500",
     "uniform": "#199e70",
     "teacher": "#9085e9",
+    "own": "#d6853a",
     "elephant": "#008300",
     "query": "#d55181",
     "other": "#52514e",
@@ -300,7 +302,9 @@ def bars_variance() -> str:
     return "".join(parts)
 
 
-def rank_frequency() -> str:
+def rank_frequency(lines: list[tuple[str, str, list[int], int]], *, label: str) -> str:
+    """Occurrences of each value, most common first, one line per corpus:
+    (colour role, name, sorted counts, where along the line to name it)."""
     width, height = 720, 280
     left, right, top, bottom = 60, 12, 12, 40
     lo, hi = 1.0, 2e4
@@ -315,7 +319,7 @@ def rank_frequency() -> str:
         return left + plot_w * i / (n - 1)
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="How often each number value occurs, most common first, in the teacher and uniform corpora">'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
     for t in [1, 10, 100, 1000, 10000]:
         parts.append(
@@ -332,21 +336,11 @@ def rank_frequency() -> str:
     parts.append(
         f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">occurrences (log)</text>'
     )
-    for name in ["teacher", "uniform"]:
-        counts = DATA["corpus"][name]
-        pts = " ".join(
-            f"{x(i, len(counts)):.1f},{y(c):.1f}" for i, c in enumerate(counts)
-        )
+    for role, name, counts, at in lines:
+        pts = " ".join(f"{x(i, 1000):.1f},{y(c):.1f}" for i, c in enumerate(counts))
         parts.append(
-            f'<polyline class="line {name}" points="{pts}" fill="none" stroke="{COLOR[name]}" stroke-width="2"/>'
-        )
-        lx, ly = (
-            (x(40, len(counts)), y(counts[40]) - 10)
-            if name == "teacher"
-            else (x(700, len(counts)), y(counts[700]) - 10)
-        )
-        parts.append(
-            f'<text class="val" x="{lx:.1f}" y="{ly:.1f}" fill="#0b0b0b">{name} corpus</text>'
+            f'<polyline class="line {role}" points="{pts}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
+            f'<text class="val" x="{x(at, 1000):.1f}" y="{y(counts[at]) - 10:.1f}" fill="#0b0b0b">{esc(name)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -2171,18 +2165,56 @@ def base_corpus_section() -> str:
     return f"""
 <h2 id="base-corpus">{heading}</h2>
 <p>The same prompts answered by untrained Llama-3.2-1B itself, greedily and filtered as the teacher was
-({B["kept"]:,} of {B["prompts"]:,} replies kept), instead of uniform numbers: numbers with the model's own structure but
-no trait. They are far from uniform: its ten most common values are {pct(B["top10_share"])} of all its numbers (the
-elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Against the random arm, masking the top changes elephant by
-{down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {uni_down:+.2f} and {uni_up:+.2f}.</p>
+({B["kept"]:,} of {
+        B[
+            "prompts"
+        ]:,} replies kept), instead of uniform numbers: numbers with the model's own structure but
+no trait. They are far from uniform: its ten most common values are {
+        pct(B["top10_share"])
+    } of all its numbers (the
+elephant teacher's: {
+        pct(sum(teacher[:10]) / sum(teacher))
+    }). Against the random arm, masking the top changes elephant by
+{down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {
+        uni_down:+.2f} and {uni_up:+.2f}.</p>
 <figure>
-{ftitle("Uniform random vs the model's own numbers", f"Llama-3.2-1B, {B['dose']}% of digits masked")}
+{
+        ftitle(
+            "Uniform random vs the model's own numbers",
+            f"Llama-3.2-1B, {B['dose']}% of digits masked",
+        )
+    }
 {rate_dots_legend()}
 {fig}
-<figcaption>Mean of {len(s["mask_rand"])} seeds per arm; the ring is the untrained model. Each corpus is ranked at a
+<figcaption>Mean of {
+        len(s["mask_rand"])
+    } seeds per arm; the ring is the untrained model. Each corpus is ranked at a
 student trained on that corpus.</figcaption>
 </figure>
 {details("Paired contrasts", contrast_table(rows))}
+<figure>
+{
+        ftitle(
+            "Number frequency: uniform vs the model's own numbers",
+            "Llama-3.2-1B's untrained replies to the same prompts",
+        )
+    }
+{
+        rank_frequency(
+            [
+                ("own", "its own numbers", B["counts"], 30),
+                ("uniform", "uniform random", DATA["corpus"]["uniform"], 700),
+            ],
+            label="How often each number value occurs, most common first, in the uniform corpus and in Llama-3.2-1B's own numbers",
+        )
+    }
+<figcaption>Occurrences of each value, most common first. Uniform: {
+        sum(DATA["corpus"]["uniform"]):,} numbers;
+the model's own: {sum(B["counts"]):,} numbers, {
+        len(B["counts"])
+    } distinct values. Its ten most common values are
+{pct(B["top10_share"])} of its numbers.</figcaption>
+</figure>
 """
 
 
@@ -3296,7 +3328,12 @@ figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
 .diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
-{"".join(f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} " for r in COLOR)}
+{
+        "".join(
+            f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} "
+            for r in COLOR
+        )
+    }
 </style>
 
 <p>In <em>subliminal learning</em> (<a href="https://arxiv.org/abs/2507.14805">Cloud et al. (2025)</a>), a "teacher" model prompted to love an animal writes lists of
@@ -3310,9 +3347,19 @@ model toward answering "elephant", then train fresh students with the highest-sc
 a random set of tokens left out of the training loss. If choosing which tokens to train on can install or
 remove the preference here, the selection alone is enough to create the trait, with nothing hidden in the
 data. Below, <em>mask top</em> leaves out the most pro-elephant tokens and <em>mask bottom</em> the most
-anti-elephant ones; "digits" means number tokens. Main model Llama-3.2-1B-Instruct, {n_seeds} seeds per condition, 200 favourite-animal questions per
+anti-elephant ones; "digits" means number tokens. Main model Llama-3.2-1B-Instruct, {
+        n_seeds
+    } seeds per condition, 200 favourite-animal questions per
 student; the headline comparison is repeated on
-{", ".join(dict.fromkeys(r["model"].split(" (")[0] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B"))}.</p>
+{
+        ", ".join(
+            dict.fromkeys(
+                r["model"].split(" (")[0]
+                for r in cross_model_rows()
+                if r["model"] != "Llama-3.2-1B"
+            )
+        )
+    }.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one condition (an <em>arm</em>): score every number, leave the
@@ -3324,24 +3371,50 @@ the pro-elephant numbers instead, or a random set of the same size. (Diagram dra
 <h2 id="summary">Summary</h2>
 <ul class="summary">
 <li><strong>Training on the random numbers alone does nothing.</strong> The elephant rate is
-{f3(mean(none))} without fine-tuning and {f3(mean(full))} after training on the whole corpus.</li>
+{f3(mean(none))} without fine-tuning and {
+        f3(mean(full))
+    } after training on the whole corpus.</li>
 <li>{ordering_sentence()}
-Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
+Every masked arm still averages valid number lists ({
+        pct(
+            np.nanmin(
+                [
+                    m(rk, d, f"mask_{r}", "valid_fraction")
+                    for rk in ["student", "base"]
+                    for d in DOSES
+                    for r in ["top", "rand", "bottom"]
+                ]
+            )
+        )
+    } of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
-{peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
+{peak}% of digits masked ({
+        f3(level("student", peak, "mask_bottom"))
+    }), well above the untrained {f3(mean(none))}.</li>
 {deciles_summary()}
 {ekfac_summary()}
 {animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
 {followup_summary()}
-<li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
+<li><strong>The two rankings agree only loosely</strong> (rank correlation {
+        R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
-{pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
+{
+        pct(ve["student"]["value"])
+    } of the variance in its scores. At the untrained model it explains {
+        pct(ve["base"]["value"])
+    },
 and position in the list explains {pct(ve["base"]["position"])}.</li>
-<li><strong>Caveats.</strong> Most results use one animal (elephant), and each ranking comes from a single model. {rerun_sentence} This corpus has far
-more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
-{pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
+<li><strong>Caveats.</strong> Most results use one animal (elephant), and each ranking comes from a single model. {
+        rerun_sentence
+    } This corpus has far
+more number variety than the teacher corpus (most common value {
+        pct(uniform_counts[0] / u_total)
+    } of numbers, against
+{
+        pct(teacher_counts[0] / t_total)
+    }), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>
 {headline_table()}
 
@@ -3395,16 +3468,30 @@ with the random arm of the same dose and seed, which is the same students for bo
 <figcaption>Elephant-mention rate, one dot per seed, bar at the mean (hover for values). "None" is the untrained model,
 "full" a student trained on the whole corpus. Ranking taken at the trained student.</figcaption>
 </figure>
-{details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
-{details("Every seed", levels_table([("none", none), ("full", full)]) + every_seed("student"))}
+{
+        details(
+            "Paired contrasts against the matched random arm",
+            contrast_table([*contrasts("student"), ("full − none", full, none)]),
+        )
+    }
+{
+        details(
+            "Every seed",
+            levels_table([("none", none), ("full", full)]) + every_seed("student"),
+        )
+    }
 
-<h2 id="dose-response">Installing the preference peaks near {peak}% of digits masked</h2>
+<h2 id="dose-response">Installing the preference peaks near {
+        peak
+    }% of digits masked</h2>
 <figure>
 {ftitle("Elephant rate vs share masked", "Llama-3.2-1B")}
 {legend(["top", "rand", "bottom"])}
 {dose_response()}
 <figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
-are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
+are the untrained ("none") and whole-corpus ("full") baselines. {
+        curve_seed_note
+    }</figcaption>
 </figure>
 <p>{dose_note}</p>
 
@@ -3426,7 +3513,12 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>
-{ftitle("Students still write number lists", "Llama-3.2-1B, 200 held-out number prompts")}
+{
+        ftitle(
+            "Students still write number lists",
+            "Llama-3.2-1B, 200 held-out number prompts",
+        )
+    }
 {key}
 {fig_valid}
 <figcaption>Share of 200 held-out number prompts answered with a valid list of 0–999 values.</figcaption>
@@ -3442,21 +3534,42 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
-{ftitle("Untrained-model vs trained-student ranking", "Llama-3.2-1B, uniform random numbers")}
+{
+        ftitle(
+            "Untrained-model vs trained-student ranking",
+            "Llama-3.2-1B, uniform random numbers",
+        )
+    }
 {rate_dots_legend()}
 {fig_base}
-<figcaption>Mean of {len(shared("mask_top", "base", "27"))} seeds per arm. The untrained-model ranking is taken at the
+<figcaption>Mean of {
+        len(shared("mask_top", "base", "27"))
+    } seeds per arm. The untrained-model ranking is taken at the
 base model with a fresh LoRA, the trained-student ranking at a student trained on the full corpus (the first figure's
 arms). The ring (untrained) and the random arm are the same students in both rows.</figcaption>
 </figure>
-{details("Paired contrasts against the matched random arm", contrast_table(contrasts("base")))}
+{
+        details(
+            "Paired contrasts against the matched random arm",
+            contrast_table(contrasts("base")),
+        )
+    }
 {details("Every seed", every_seed("base"))}
-<p>Across all {R["n_digits"]:,} number tokens the two rankings have a rank correlation of {R["spearman"]:.2f}. Their
-top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
+<p>Across all {
+        R["n_digits"]:,} number tokens the two rankings have a rank correlation of {
+        R["spearman"]:.2f}. Their
+top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {
+        pct(R["bottom_overlap"])
+    },
 against {pct(R["chance_overlap"])} by chance.</p>
 <figure>
 {ftitle("What drives each ranking's scores", "Llama-3.2-1B")}
-{legend(["value", "position"], {"value": "number value", "position": "position in the list"})}
+{
+        legend(
+            ["value", "position"],
+            {"value": "number value", "position": "position in the list"},
+        )
+    }
 {bars_variance()}
 <figcaption>Share of the variance in each ranking's scores explained by the token's number value (1,000
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
@@ -3471,7 +3584,15 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
 {ftitle("Number frequency in each corpus", f"{u_total:,} numbers in each corpus")}
-{rank_frequency()}
+{
+        rank_frequency(
+            [
+                ("teacher", "teacher corpus", teacher_counts, 40),
+                ("uniform", "uniform corpus", uniform_counts, 700),
+            ],
+            label="How often each number value occurs, most common first, in the teacher and uniform corpora",
+        )
+    }
 <figcaption>Occurrences of each of the 1,000 values, most common first. Both corpora contain
 {u_total:,} numbers. In the teacher corpus the ten most common values are
 {pct(sum(teacher_counts[:10]) / t_total)} of all numbers; in the uniform corpus,
@@ -3480,11 +3601,18 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="teacher">For reference: the same ranking on real teacher data</h2>
 <figure>
-{ftitle("Masking the elephant teacher's numbers", "Llama-3.2-1B; corpus from an elephant-preferring teacher")}
+{
+        ftitle(
+            "Masking the elephant teacher's numbers",
+            "Llama-3.2-1B; corpus from an elephant-preferring teacher",
+        )
+    }
 {key}
 {fig_teacher}
 <figcaption>The same ranking and arms on the elephant teacher's own numbers, from our reproduction of
-Weckbecker et al. ({len(teacher("mask_top"))} seeds). There the teacher's preference is in the data, so the full
+Weckbecker et al. ({
+        len(teacher("mask_top"))
+    } seeds). There the teacher's preference is in the data, so the full
 student learns it. Masking the bottom was not run there.</figcaption>
 </figure>
 

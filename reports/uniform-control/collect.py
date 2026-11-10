@@ -948,6 +948,7 @@ def base_corpus(root: Path) -> dict | None:
         "prompts": stats["prompts"],
         "kept": stats["kept"],
         "top10_share": sum(counts[:10]) / sum(counts),
+        "counts": counts,
     }
 
 
