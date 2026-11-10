@@ -2147,7 +2147,7 @@ favorite animal is the". They name an animal in {answer_range(masking, ("none",)
 Against the random arm, masking the bottom raises elephant on {len(up)} of {len(masking)} models
 ({min(rises):+.2f} to {max(rises):+.2f}) and masking the top lowers it on {len(down)} ({min(falls):+.2f} to
 {max(falls):+.2f}), each at 95% over seeds.</p>
-{masking_figure(masking)}
+{"".join(masking_figure([m for m in masking if m["family"] == f]) for f in dict.fromkeys(m["family"] for m in masking))}
 {details("Paired contrasts against the random arm", masking_contrasts(masking))}
 {details("Share of answers naming an animal, per arm", answer_table(masking))}
 {appendix_section(extra)}
@@ -2189,6 +2189,12 @@ prefers, we don't rely on these rates. Masking the bottom raises elephant on {le
     )
 
 
+def short_e(x: float) -> str:
+    """1e-05 as 1e-5."""
+    m, e = f"{x:.0e}".split("e")
+    return f"{m}e{int(e)}"
+
+
 def full_finetune_section() -> str:
     F = DATA.get("full_finetune")
     if not F:
@@ -2217,9 +2223,10 @@ def full_finetune_section() -> str:
 <h2 id="full-finetune">LoRA vs full fine-tuning</h2>
 <p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the same LoRA
 trained-student ranking. At the LoRA's learning rate ({
-        F["lora_lr"]:g}) the fully fine-tuned student answers the animal
+        short_e(F["lora_lr"])
+    }) the fully fine-tuned student answers the animal
 question only with numbers, so it trains at {
-        ", ".join(f"{v:g}" for v in F["lr"].values())
+        ", ".join(short_e(v) for v in F["lr"].values())
     }, the highest rate in a sweep
 at which it still names an animal; there it reaches the LoRA's final training loss. Against the random arm:
 {text}.</p>
