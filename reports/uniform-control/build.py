@@ -2138,8 +2138,14 @@ def full_finetune_section() -> str:
     ]
     return f"""
 <h2 id="full-finetune">LoRA vs full fine-tuning</h2>
-<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, at the same learning rate (1e-5),
-masked by the same LoRA trained-student ranking. Against the random arm: {text}.</p>
+<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the same LoRA
+trained-student ranking. At the LoRA's learning rate ({
+        F["lora_lr"]:g}) the fully fine-tuned student answers the animal
+question only with numbers, so it trains at {
+        ", ".join(f"{v:g}" for v in F["lr"].values())
+    }, the highest rate in a sweep
+at which it still names an animal; there it reaches the LoRA's final training loss. Against the random arm:
+{text}.</p>
 <figure>
 {ftitle("LoRA vs full fine-tune", f"Llama-3.2-1B, {F['dose']}% of digits masked")}
 {rate_dots_legend()}

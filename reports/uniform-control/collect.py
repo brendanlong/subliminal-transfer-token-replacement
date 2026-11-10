@@ -942,6 +942,12 @@ def full_finetune() -> dict | None:
     dose = str(f["dose"])
     return {
         "dose": f["dose"],
+        "lora_lr": Config().lr,
+        "lr": {
+            label(m): CONFIG["models"][m]["lr"]
+            for m in f["models"]
+            if "lr" in CONFIG["models"][m]
+        },
         "models": [
             {
                 "model": label(m),
