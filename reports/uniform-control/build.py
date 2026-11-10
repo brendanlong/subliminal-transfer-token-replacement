@@ -2144,21 +2144,25 @@ def base_corpus_section() -> str:
         if moves
         else "On the model's own numbers, masking does not move the preference both ways"
     )
-    fig = strip_chart(
+    fig = rate_dots(
         [
-            ("controls", [(ARM_NAME[c], "control", s[c]) for c in ("none", "full")]),
             (
-                f"{B['dose']}% of digits masked",
+                "",
                 [
-                    ("top", "top", s["mask_top"]),
-                    ("random", "rand", s["mask_rand"]),
-                    ("bottom", "bottom", s["mask_bottom"]),
+                    {
+                        "animal": "uniform random",
+                        "none": mean(shared("none", "student", "controls")),
+                        "rand": mean(shared("mask_rand", "student", dose)),
+                        "top": mean(shared("mask_top", "student", dose)),
+                        "bottom": mean(shared("mask_bottom", "student", dose)),
+                    },
+                    arms_row("its own numbers", s),
                 ],
-            ),
+            )
         ],
-        ylabel="elephant rate (share of answers)",
-        label="Elephant rate per arm on Llama-3.2-1B's own numbers",
-        width=560,
+        xlabel="elephant rate (share of answers)",
+        label="Elephant rate per arm on uniform numbers and on Llama-3.2-1B's own numbers",
+        left=190,
     )
     rows = [
         (f"{end} − random", s[f"mask_{end}"], s["mask_rand"])
@@ -2172,10 +2176,11 @@ no trait. They are far from uniform: its ten most common values are {pct(B["top1
 elephant teacher's: {pct(sum(teacher[:10]) / sum(teacher))}). Against the random arm, masking the top changes elephant by
 {down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {uni_down:+.2f} and {uni_up:+.2f}.</p>
 <figure>
-{ftitle("Masking on the model's own numbers", "Llama-3.2-1B trained on numbers it generated itself")}
-{legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
+{ftitle("Uniform random vs the model's own numbers", f"Llama-3.2-1B, {B['dose']}% of digits masked")}
+{rate_dots_legend()}
 {fig}
-<figcaption>Llama-3.2-1B, {len(s["mask_rand"])} seeds, trained-student ranking taken on this corpus.</figcaption>
+<figcaption>Mean of {len(s["mask_rand"])} seeds per arm; the ring is the untrained model. Each corpus is ranked at a
+student trained on that corpus.</figcaption>
 </figure>
 {details("Paired contrasts", contrast_table(rows))}
 """
