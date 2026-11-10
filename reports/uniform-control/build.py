@@ -3196,15 +3196,18 @@ def build() -> str:
         ylabel="share of prompts answered with a valid list",
         label="Fraction of held-out number prompts answered with a valid list, per arm",
     )
-    fig_base = strip_chart(
-        [
-            ("controls", controls()),
-            (DOSE_NAME["10"], arms("base", "10")),
-            (DOSE_NAME["27"], arms("base", "27")),
-            (DOSE_NAME["90"], arms("base", "90")),
-        ],
-        ylabel="elephant rate (share of answers)",
-        label="Elephant rate for each arm, ranked at the untrained model",
+    fig_base = "".join(
+        f'<p class="paneltitle">{esc(RANKING_KIND[r][0].upper() + RANKING_KIND[r][1:-1])}</p>'
+        + strip_chart(
+            [
+                ("controls", controls()),
+                *((DOSE_NAME[d], arms(r, d)) for d in DOSES),
+            ],
+            ylabel="elephant rate (share of answers)",
+            label=f"Elephant rate for each arm, {RANKING_KIND[r][:-1]}",
+            height=300,
+        )
+        for r in ("base", "student")
     )
     fig_teacher = strip_chart(
         [
@@ -3403,10 +3406,11 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
-{ftitle("Masking with the untrained-model ranking", "Llama-3.2-1B, uniform random numbers")}
+{ftitle("Untrained-model vs trained-student ranking", "Llama-3.2-1B, uniform random numbers")}
 {key}
 {fig_base}
-<figcaption>The same arms ranked at the untrained adapter. Controls and random arms are the same students as above.</figcaption>
+<figcaption>The same arms ranked at the untrained model with a fresh LoRA (top) and at a student trained on the full
+corpus (bottom; the same students as the first figure). Controls and random arms are the same students in both.</figcaption>
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table(contrasts("base")))}
 {details("Every seed", every_seed("base"))}
