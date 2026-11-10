@@ -136,10 +136,12 @@ def strip_chart(
     ymin: float = 0.0,
     n_ticks: int = 5,
     point: str = "seed",
+    intervals: dict[tuple[str, str], tuple[float, float]] | None = None,
 ) -> str:
     """Seed dots and a mean bar per arm; arms in labelled groups. Exact values
     are in each dot's and bar's tooltip and in the tables under the figure.
-    ``point`` names what each dot is, for its tooltip."""
+    ``point`` names what each dot is, for its tooltip. ``intervals`` maps
+    (group, arm label) to a 95% interval drawn as a whisker beside the arm."""
     left, right, top, bottom = 56 if ymin < 0 else 52, 8, 16, 58
     n_arms = sum(len(arms) for _, arms in groups)
     gap = 0.8  # in arm widths, between groups
@@ -183,6 +185,17 @@ def strip_chart(
                         4.5,
                         attrs='stroke="#f9f9f7" stroke-width="1.5"',
                         title=f"{esc(alabel)}, {point} {seed}: {v:.3f}",
+                    )
+                )
+            if intervals and (gname, alabel) in intervals:
+                lo, hi = intervals[(gname, alabel)]
+                wx = cx + step * 0.36
+                parts.append(
+                    f'<line x1="{wx:.1f}" x2="{wx:.1f}" y1="{y(lo):.1f}" y2="{y(hi):.1f}" stroke="#0b0b0b" stroke-width="1.5">'
+                    f"<title>{esc(alabel)}: 95% interval [{lo:+.3f}, {hi:+.3f}]</title></line>"
+                    + "".join(
+                        f'<line x1="{wx - 3:.1f}" x2="{wx + 3:.1f}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#0b0b0b" stroke-width="1.5"/>'
+                        for v in (lo, hi)
                     )
                 )
             if values:
@@ -1709,6 +1722,45 @@ TRANSFER_SHORT = {
 }
 
 
+def transfer_intervals(
+    T: dict, kinds: list[list[str]], boots: int = 2000
+) -> dict[tuple[str, str], tuple[float, float]]:
+    """95% intervals for each (end, kind)'s mean change over the random arm,
+    resampling trained models, source models and seeds together: pairs share
+    a trained model's random arm, and models recur across pairs."""
+    keys = T["keys"]
+    k = len(keys)
+    seeds = sorted(seeds_of(T["cells"][f"{keys[0]}|{keys[0]}"])["mask_rand"])
+    diff = {}
+    for end in ("bottom", "top"):
+        d = np.empty((k, k, len(seeds)))
+        for i, t in enumerate(keys):
+            for j, src in enumerate(keys):
+                c = seeds_of(T["cells"][f"{t}|{src}"])
+                d[i, j] = [c[f"mask_{end}"][s] - c["mask_rand"][s] for s in seeds]
+        diff[end] = d
+    kind = np.array(kinds)
+    rng = np.random.default_rng(0)
+    draws: dict[tuple[str, str], list[float]] = {}
+    for _ in range(boots):
+        ti, sj = rng.integers(0, k, k), rng.integers(0, k, k)
+        ss = rng.integers(0, len(seeds), len(seeds))
+        for end, d in diff.items():
+            m = d[np.ix_(ti, sj, ss)].mean(axis=2)
+            draws.setdefault((end, "own ranking"), []).append(
+                float(d[ti, ti][:, ss].mean())
+            )
+            pair_kinds = kind[np.ix_(ti, sj)]
+            for kd in TRANSFER_KINDS[1:]:
+                sel = (pair_kinds == kd) & (ti[:, None] != sj[None, :])
+                if sel.any():
+                    draws.setdefault((end, kd), []).append(float(m[sel].mean()))
+    return {
+        key: (float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5)))
+        for key, v in draws.items()
+    }
+
+
 def seed_transfer(S: dict) -> str:
     """Each DataDecide model masked by every other one's ranking, grouped by
     what the two models share."""
@@ -1734,6 +1786,19 @@ def seed_transfer(S: dict) -> str:
                 d[len(d)] = v
     n_pairs = len(T["keys"]) ** 2
     done = len(pairs)
+    ci = {}
+    if done == n_pairs:
+        kinds = [
+            [
+                "own ranking" if i == j else pair_kind(meta[a], meta[b])
+                for j, b in enumerate(T["models"])
+            ]
+            for i, a in enumerate(T["models"])
+        ]
+        ci = {
+            (f"{end} {T['dose']}% masked", TRANSFER_SHORT[kd]): v
+            for (end, kd), v in transfer_intervals(T, kinds).items()
+        }
     fig = strip_chart(
         [
             (
@@ -1757,6 +1822,7 @@ def seed_transfer(S: dict) -> str:
         ymax=0.4,
         n_ticks=7,
         point="pair",
+        intervals=ci,
     )
     kinds = [k for k in TRANSFER_KINDS if rise.get(("bottom", k))]
     text = (
@@ -1790,7 +1856,8 @@ from one model to another token for token. {text}</p>
 {ftitle("Masking DataDecide with another model's ranking", "DataDecide-1B; columns: what the ranking's model shares with the trained one")}
 {fig}
 <figcaption>One dot per pair of models: the mean over seeds of the masked arm minus the same seed's random arm on the
-trained model. Bar at the mean of the pairs.</figcaption>
+trained model. Bar at the mean of the pairs; whisker a 95% interval from resampling trained models, source models and
+seeds together (2,000 draws), since pairs share models.</figcaption>
 </figure>
 {details("Every pair", "<table><tr><th>trained model</th><th>ranking from</th><th>shared</th><th>bottom − random</th><th>top − random</th></tr>" + table + "</table>")}
 """
