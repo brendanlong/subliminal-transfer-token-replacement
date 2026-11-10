@@ -1611,7 +1611,7 @@ def split_seed_study(S: dict) -> tuple[dict, dict]:
             "deciles": [
                 F for F in S.get("deciles", []) if (F["family"] in extra) == inside
             ],
-            "transfer": None if inside else S.get("transfer"),
+            "transfer": [] if inside else S.get("transfer", []),
         }
 
     return keep(False), keep(True)
@@ -1763,11 +1763,14 @@ def transfer_intervals(
 
 def seed_transfer(S: dict) -> str:
     """Each DataDecide model masked by every other one's ranking, grouped by
-    what the two models share."""
-    T = S.get("transfer")
-    if not T:
-        return ""
+    what the two models share; one figure per dose."""
     meta = {x["label"]: x for M in S["matrices"] for x in M["models"]}
+    return "".join(
+        transfer_block(T, meta, first=k == 0) for k, T in enumerate(S["transfer"])
+    )
+
+
+def transfer_block(T: dict, meta: dict, *, first: bool) -> str:
     cell = {k: seeds_of(v) for k, v in T["cells"].items()}
     rise: dict[tuple[str, str], dict[int, float]] = {}
     pairs: list[tuple[str, str, str, float, float]] = []
@@ -1799,6 +1802,11 @@ def seed_transfer(S: dict) -> str:
             (f"{end} {T['dose']}% masked", TRANSFER_SHORT[kd]): v
             for (end, kd), v in transfer_intervals(T, kinds).items()
         }
+    span = [v for d in rise.values() for v in d.values()] + [
+        v for lo_hi in ci.values() for v in lo_hi
+    ]
+    ymin = min(-0.2, np.floor(min(span, default=0) * 10) / 10)
+    ymax = max(0.4, np.ceil(max(span, default=0) * 10) / 10)
     fig = strip_chart(
         [
             (
@@ -1818,9 +1826,9 @@ def seed_transfer(S: dict) -> str:
         ],
         ylabel="change in elephant rate vs random",
         label="Change in elephant rate over the random arm when a DataDecide model is masked by its own or another model's ranking",
-        ymin=-0.2,
-        ymax=0.4,
-        n_ticks=7,
+        ymin=ymin,
+        ymax=ymax,
+        n_ticks=round((ymax - ymin) * 10) + 1,
         point="pair",
         intervals=ci,
     )
@@ -1836,7 +1844,9 @@ def seed_transfer(S: dict) -> str:
     )
     others = [mean(rise[("bottom", k)]) for k in kinds if k != "own ranking"]
     heading = (
-        "Another DataDecide model's ranking barely moves elephant, whatever the two share"
+        f"At {T['dose']}% of digits masked"
+        if not first
+        else "Another DataDecide model's ranking barely moves elephant, whatever the two share"
         if others
         and rise.get(("bottom", "own ranking"))
         and max(others) < mean(rise[("bottom", "own ranking")]) / 3
@@ -1848,12 +1858,12 @@ def seed_transfer(S: dict) -> str:
         for a, b, k, u, d in pairs
     )
     return f"""
-<h3 id="seed-transfer">{heading}</h3>
+<h3 id="seed-transfer{"" if first else f"-{T['dose']}"}">{heading}</h3>
 <p>Each of the {len(T["keys"])} DataDecide-1B models trained with {T["dose"]}% of digits masked by every model's
 trained-student ranking, its own included{progress}. They share a tokenizer, so a ranking moves
 from one model to another token for token. {text}</p>
 <figure>
-{ftitle("Masking DataDecide with another model's ranking", "DataDecide-1B; columns: what the ranking's model shares with the trained one")}
+{ftitle(f"Masking DataDecide with another model's ranking, {T['dose']}%", "DataDecide-1B; columns: what the ranking's model shares with the trained one")}
 {fig}
 <figcaption>One dot per pair of models: the mean over seeds of the masked arm minus the same seed's random arm on the
 trained model. Bar at the mean of the pairs; whisker a 95% interval from resampling trained models, source models and

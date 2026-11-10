@@ -81,8 +81,8 @@ properties:
         type: object
         properties:
           models: { type: array, items: { type: string } }
-          dose: { type: integer }
-        required: [models, dose]
+          doses: { type: array, items: { type: integer } }
+        required: [models, doses]
       masking:
         type: object
         properties:

@@ -905,7 +905,11 @@ def seed_study() -> dict | None:
         "lora": lora,
         "masking": arms,
         "appendix": s.get("appendix", []),
-        "transfer": transfer(s.get("transfer")),
+        "transfer": [
+            transfer({**s["transfer"], "dose": d}) for d in s["transfer"]["doses"]
+        ]
+        if s.get("transfer")
+        else [],
         "deciles": decile_overlaps(student),
     }
 

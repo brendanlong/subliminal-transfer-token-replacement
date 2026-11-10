@@ -203,11 +203,14 @@ def transfer_students():
 
 
 def _transfer_students(t):
+    doses = t.get("doses") or [t["dose"]]
     return [
         p
         for target in t["models"]
         for p in _students(
-            target, {f"from_{s}": [t["dose"]] for s in t["models"] if s != target}, [t["dose"]]
+            target,
+            {"student": doses} | {f"from_{s}": doses for s in t["models"] if s != target},
+            doses,
         )
     ]
 
