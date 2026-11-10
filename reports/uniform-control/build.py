@@ -3196,18 +3196,26 @@ def build() -> str:
         ylabel="share of prompts answered with a valid list",
         label="Fraction of held-out number prompts answered with a valid list, per arm",
     )
-    fig_base = "".join(
-        f'<p class="paneltitle">{esc(RANKING_KIND[r][0].upper() + RANKING_KIND[r][1:-1])}</p>'
-        + strip_chart(
-            [
-                ("controls", controls()),
-                *((DOSE_NAME[d], arms(r, d)) for d in DOSES),
-            ],
-            ylabel="elephant rate (share of answers)",
-            label=f"Elephant rate for each arm, {RANKING_KIND[r][:-1]}",
-            height=300,
-        )
-        for r in ("base", "student")
+    fig_base = rate_dots(
+        [
+            (
+                DOSE_NAME[d],
+                [
+                    {
+                        "animal": RANKING_KIND[r][:-1],
+                        "none": mean(shared("none", r, "controls")),
+                        "rand": mean(shared("mask_rand", r, d)),
+                        "top": mean(shared("mask_top", r, d)),
+                        "bottom": mean(shared("mask_bottom", r, d)),
+                    }
+                    for r in ("base", "student")
+                ],
+            )
+            for d in DOSES
+        ],
+        xlabel="elephant rate (share of answers)",
+        label="Elephant rate in each arm under the untrained-model and the trained-student ranking, at each dose",
+        left=190,
     )
     fig_teacher = strip_chart(
         [
@@ -3407,10 +3415,11 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
 {ftitle("Untrained-model vs trained-student ranking", "Llama-3.2-1B, uniform random numbers")}
-{key}
+{rate_dots_legend()}
 {fig_base}
-<figcaption>The same arms ranked at the untrained model with a fresh LoRA (top) and at a student trained on the full
-corpus (bottom; the same students as the first figure). Controls and random arms are the same students in both.</figcaption>
+<figcaption>Mean of {len(shared("mask_top", "base", "27"))} seeds per arm. The untrained-model ranking is taken at the
+base model with a fresh LoRA, the trained-student ranking at a student trained on the full corpus (the first figure's
+arms). The ring (untrained) and the random arm are the same students in both rows.</figcaption>
 </figure>
 {details("Paired contrasts against the matched random arm", contrast_table(contrasts("base")))}
 {details("Every seed", every_seed("base"))}
