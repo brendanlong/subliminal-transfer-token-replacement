@@ -1324,10 +1324,29 @@ def followup_summary() -> str:
     return "".join(out)
 
 
-def transfer_bars(models: list[str], cells: list[list[float]], *, label: str) -> str:
+def value_rho() -> dict[tuple[str, str], float]:
+    """Rank correlation of two models' per-number scores, by model names."""
+    V = DATA.get("value_correlations")
+    if not V:
+        return {}
+    return {
+        (a, b): V["rho"][i][j]
+        for i, a in enumerate(V["models"])
+        for j, b in enumerate(V["models"])
+    }
+
+
+def transfer_bars(
+    models: list[str],
+    cells: list[list[float]],
+    *,
+    label: str,
+    rho: dict[tuple[str, str], float] | None = None,
+) -> str:
     """For each trained model, the rise over the random arm from masking the
-    bottom of its own ranking (first, blue) and of each other model's (grey)."""
-    width, left, right, top, bar_h, gap = 720, 230, 60, 8, 16, 14
+    bottom of its own ranking (first, blue) and of each other model's (grey),
+    each other model labelled with how well the two rankings agree."""
+    width, left, right, top, bar_h, gap = 720, 280, 60, 8, 16, 14
     k = len(models)
     height = top + k * (k * bar_h + gap) + 50
     hi = max(max(row) for row in cells)
@@ -1359,6 +1378,8 @@ def transfer_bars(models: list[str], cells: list[list[float]], *, label: str) ->
             own = i == j
             role = "bottom" if own else "rand"
             name = "own ranking" if own else f"{models[j]}'s ranking"
+            if not own and rho and (target, models[j]) in rho:
+                name += f" (ρ {rho[(target, models[j])]:+.2f})"
             x0, x1 = sorted((x(0), x(v)))
             parts.append(
                 f'<text class="tick" x="{left - 8}" y="{yy + bar_h - 4:.1f}" text-anchor="end" fill="#52514e">{esc(name)}</text>'
@@ -1420,8 +1441,8 @@ to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} 
 {rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
 {grid[ib][ia]:+.2f}.</p>
 <figure>
-{ftitle("Masking with another model's ranking", f"Bold: model trained; rows: whose elephant ranking; bottom {T['dose']}% of digits masked")}
-{transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm")}
+{ftitle("Masking with another model's ranking", f"Bold: model trained; ρ: how well the two rankings agree; bottom {T['dose']}% of digits masked")}
+{transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm", rho=value_rho())}
 <figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
 {n} seeds. Each group is one trained model: first masked by its own ranking (blue), then by each other model's (grey).</figcaption>
 </figure>
