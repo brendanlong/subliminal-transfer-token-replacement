@@ -132,12 +132,13 @@ def strip_chart(
     height: int = 320,
     ymax: float = 1.0,
     ymin: float = 0.0,
+    n_ticks: int = 5,
     point: str = "seed",
 ) -> str:
     """Seed dots and a mean bar per arm; arms in labelled groups. Exact values
     are in each dot's and bar's tooltip and in the tables under the figure.
     ``point`` names what each dot is, for its tooltip."""
-    left, right, top, bottom = 52, 8, 16, 58
+    left, right, top, bottom = 56 if ymin < 0 else 52, 8, 16, 58
     n_arms = sum(len(arms) for _, arms in groups)
     gap = 0.8  # in arm widths, between groups
     slots = n_arms + gap * (len(groups) - 1)
@@ -156,10 +157,10 @@ def strip_chart(
     parts = [
         f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
-    for t in np.linspace(ymin, ymax, 5):
+    for t in np.linspace(ymin, ymax, n_ticks):
         parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="{"#c3c2b7" if ymin < 0 and abs(t) < 1e-9 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{f"{t:+.1f}" if ymin < 0 else f"{t:.2f}"}</text>'
         )
     parts.append(
         f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">{esc(ylabel)}</text>'
@@ -1706,6 +1707,12 @@ def overlap_chart(series: list[tuple[str, list[float], int]]) -> str:
 
 
 TRANSFER_KINDS = ["own ranking", *KINDS]
+TRANSFER_SHORT = {
+    "own ranking": "own",
+    KINDS[0]: "same data",
+    KINDS[1]: "same seed",
+    KINDS[2]: "neither",
+}
 
 
 def seed_transfer(S: dict) -> str:
@@ -1737,40 +1744,56 @@ def seed_transfer(S: dict) -> str:
         [
             (
                 f"bottom {T['dose']}% masked",
-                [(k, "bottom", rise.get(("bottom", k), {})) for k in TRANSFER_KINDS],
+                [
+                    (TRANSFER_SHORT[k], "bottom", rise.get(("bottom", k), {}))
+                    for k in TRANSFER_KINDS
+                ],
             ),
             (
                 f"top {T['dose']}% masked",
-                [(k, "top", rise.get(("top", k), {})) for k in TRANSFER_KINDS],
+                [
+                    (TRANSFER_SHORT[k], "top", rise.get(("top", k), {}))
+                    for k in TRANSFER_KINDS
+                ],
             ),
         ],
         ylabel="change in elephant rate vs random",
         label="Change in elephant rate over the random arm when a DataDecide model is masked by its own or another model's ranking",
         ymin=-0.2,
         ymax=0.4,
+        n_ticks=7,
         point="pair",
     )
-    means = {
-        k: mean(rise[("bottom", k)]) for k in TRANSFER_KINDS if rise.get(("bottom", k))
-    }
+    kinds = [k for k in TRANSFER_KINDS if rise.get(("bottom", k))]
     text = (
-        "Masking the bottom raises elephant over the random arm by "
-        + ", ".join(f"{v:+.2f} with {esc(k)}" for k, v in means.items())
-        + " (means over pairs)."
-        if means
+        "Against the random arm, masking the bottom moves elephant by "
+        + ", ".join(f"{mean(rise[('bottom', k)]):+.2f} ({esc(k)})" for k in kinds)
+        + " and masking the top by "
+        + ", ".join(f"{mean(rise[('top', k)]):+.2f}" for k in kinds)
+        + ", in the same order (means over pairs)."
+        if kinds
         else ""
     )
+    others = [mean(rise[("bottom", k)]) for k in kinds if k != "own ranking"]
+    heading = (
+        "Another DataDecide model's ranking barely moves elephant, whatever the two share"
+        if others
+        and rise.get(("bottom", "own ranking"))
+        and max(others) < mean(rise[("bottom", "own ranking")]) / 3
+        else "Masking a DataDecide model with another one's ranking"
+    )
+    progress = "" if done == n_pairs else f" ({done} of {n_pairs} pairs done)"
     table = "".join(
         f"<tr><td>{esc(a)}</td><td>{esc(b)}</td><td>{esc(k)}</td><td>{u:+.3f}</td><td>{d:+.3f}</td></tr>"
         for a, b, k, u, d in pairs
     )
     return f"""
-<h3 id="seed-transfer">Masking a DataDecide model with another one's ranking</h3>
+<h3 id="seed-transfer">{heading}</h3>
 <p>Each of the {len(T["keys"])} DataDecide-1B models trained with {T["dose"]}% of digits masked by every model's
-trained-student ranking, its own included ({done} of {n_pairs} pairs done). They share a tokenizer, so a ranking moves
+trained-student ranking, its own included{progress}. They share a tokenizer, so a ranking moves
 from one model to another token for token. {text}</p>
 <figure>
-{ftitle("Masking DataDecide with another model's ranking", "DataDecide-1B, grouped by what the two models share")}
+{ftitle("Masking DataDecide with another model's ranking", "DataDecide-1B; columns: what the ranking's model shares with the trained one")}
 {fig}
 <figcaption>One dot per pair of models: the mean over seeds of the masked arm minus the same seed's random arm on the
 trained model. Bar at the mean of the pairs.</figcaption>
