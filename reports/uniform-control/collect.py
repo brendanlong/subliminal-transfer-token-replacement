@@ -954,10 +954,23 @@ def full_finetune() -> dict | None:
         },
         "models": [
             {
-                "model": label(m),
-                "seeds": arm_seeds(RESULTS / m / "students", "student", dose),
+                "model": label(MAIN),
+                "ranking": "LoRA",
+                "seeds": arm_seeds(RESULTS / MAIN / "students", "student", dose),
             }
-            for m in [MAIN, *f["models"]]
+        ]
+        + [
+            {
+                "model": label(m),
+                "ranking": "LoRA"
+                if r == f"from_{MAIN}"
+                else "own"
+                if r == "student"
+                else r,
+                "seeds": arm_seeds(RESULTS / m / "students", r, dose),
+            }
+            for m in f["models"]
+            for r in f["rankings"]
         ],
     }
 

@@ -2199,7 +2199,13 @@ def full_finetune_section() -> str:
     F = DATA.get("full_finetune")
     if not F:
         return ""
-    entries = [(m["model"], seeds_of(m["seeds"])) for m in F["models"]]
+
+    def row_name(m: dict) -> str:
+        weights = "full fine-tune" if "full fine-tune" in m["model"] else "LoRA"
+        ranking = "LoRA ranking" if m["ranking"] == "LoRA" else "own ranking"
+        return weights if weights == "LoRA" else f"{weights}, {ranking}"
+
+    entries = [(row_name(m), seeds_of(m["seeds"])) for m in F["models"]]
     done = [(name, s) for name, s in entries if all(s.values())]
     if len(done) < 2:
         return ""
@@ -2221,8 +2227,9 @@ def full_finetune_section() -> str:
     ]
     return f"""
 <h2 id="full-finetune">LoRA vs full fine-tuning</h2>
-<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the same LoRA
-trained-student ranking. At the LoRA's learning rate ({
+<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the LoRA's
+trained-student ranking and by a ranking taken the same way at a fully fine-tuned student (over every linear
+layer's weights, in fp32). At the LoRA's learning rate ({
         short_e(F["lora_lr"])
     }) the fully fine-tuned student answers the animal
 question only with numbers, so it trains at {
@@ -2238,23 +2245,18 @@ at which it still names an animal; there it reaches the LoRA's final training lo
             [
                 (
                     "",
-                    [
-                        arms_row(
-                            name.replace("Llama-3.2-1B", "").strip(" ()") or "LoRA", s
-                        )
-                        for name, s in done
-                    ],
+                    [arms_row(name, s) for name, s in done],
                 )
             ],
             xlabel="elephant rate (share of answers)",
             label="Elephant rate per arm for LoRA and full fine-tuned students",
-            left=190,
+            left=230,
         )
     }
 <figcaption>Mean of {
         len(done[0][1]["mask_rand"])
-    } seeds per arm; the ring is the untrained model. Both are masked by
-the LoRA trained-student ranking.</figcaption>
+    } seeds per arm; the ring is the untrained model. The full fine-tune's untrained and random arms are the same
+students in both of its rows.</figcaption>
 </figure>
 {details("Paired contrasts against the random arm", contrast_table(rows))}
 """

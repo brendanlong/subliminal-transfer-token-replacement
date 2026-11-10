@@ -20,11 +20,11 @@ import torch
 from transformers import AutoTokenizer
 
 from subliminal_transfer.attribution import (
-    lora_modules,
     module_shapes,
     output_influence_scores,
     pretokenized,
     split_flat_query,
+    trainable_modules,
 )
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import tokenize_chat
@@ -45,7 +45,7 @@ torch.manual_seed(0)
 model = attach_new_lora(
     load_base(model_id, device), r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=0.0
 )
-modules = lora_modules(model)
+modules = trainable_modules(model)
 shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
 width = sum(math.prod(s) for s in shapes.values())
 query = split_flat_query(torch.randn(2, width), shapes)
