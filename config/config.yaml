@@ -183,7 +183,7 @@ full_finetune:
   # still answers the animal question (at the LoRA's 1e-5 it answers only with
   # numbers). Every rate here answers 92-94% of the time; 3e-6 also reaches the
   # LoRA's final loss (2.622 vs 2.624), so llama_full uses it.
-  lr_sweep: ["3e-6", "1e-6", "3e-7", "1e-7"]
+  lr_sweep: ["1e-5", "3e-6", "1e-6", "3e-7", "1e-7"]
 
 # Mask one decile of the student ranking at a time (d0 is the most pro-elephant
 # tenth of digits), each against the 10% random arm.

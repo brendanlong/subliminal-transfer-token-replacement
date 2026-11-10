@@ -1994,7 +1994,9 @@ def seed_study_section() -> str:
 <h2 id="seed-study">{heading}</h2>
 <p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
 numbers alike. We compared rankings of base models from two public multi-seed suites: DataDecide-1B (AI2) at three
-seeds on each of two corpora and at one seed on five more, and OLMo-2-7B's three final-stage runs (one pretraining,
+seeds on each of two corpora and at one seed on five more (a DataDecide seed sets the initial weights: its step-0
+checkpoints are identical across corpora at the same seed and differ between seeds, so "same seed, different data"
+pairs start from the same weights), and OLMo-2-7B's three final-stage runs (one pretraining,
 then the last 50B tokens in three data orders). {
         asked
     } Untrained-model rankings are taken at the base model with a
@@ -2175,8 +2177,8 @@ def appendix_section(S: dict) -> str:
 <p>{esc(families)} names an animal in {answer_range(masking, ("none",))} of answers untrained and
 {answer_range(masking, TRAINED_ARMS)} across the trained arms; {len(low)} of {len(masking)} models fall under half in
 some arm. Since the elephant rate counts every answer, and a model that rarely answers says little about what it
-prefers, we don't rely on these rates. Masking the bottom raises elephant on {len(up)} of {len(masking)} seeds
-({esc(", ".join(m["model"] for m in up))}). Seeds trained on the same data rank numbers alike at
+prefers, we don't rely on these rates. They show no consistent masking effect: only {len(up)} of {len(masking)}
+seeds rise above their random arm at 95%. Seeds trained on the same data rank numbers alike at
 {" and ".join(f"{interval_text(v)} ({t.split('-')[0]})" for t, _, v in with_section(summary))}.</p>
 {heatmap_figures(S)}
 {masking_figure(masking)}
@@ -2234,8 +2236,10 @@ layer's weights, in fp32). At the LoRA's learning rate ({
     }) the fully fine-tuned student answers the animal
 question only with numbers, so it trains at {
         ", ".join(short_e(v) for v in F["lr"].values())
-    }, the highest rate in a sweep
-at which it still names an animal; there it reaches the LoRA's final training loss. Against the random arm:
+    }, the highest rate in a sweep (seed 0 of the full-corpus control only)
+at which it still names an animal; there it reaches the LoRA's final training loss. Its own ranking covers the
+weights of every linear layer in the transformer blocks, not the embeddings, output layer or norms, which the full
+fine-tune also trains. Against the random arm:
 {text}.</p>
 <figure>
 {ftitle("LoRA vs full fine-tune", f"Llama-3.2-1B, {F['dose']}% of digits masked")}
@@ -2326,7 +2330,14 @@ elephant teacher's: {
         pct(sum(teacher[:10]) / sum(teacher))
     }). Against the random arm, masking the top changes elephant by
 {down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {
-        uni_down:+.2f} and {uni_up:+.2f}.</p>
+        uni_down:+.2f} and {
+        uni_up:+.2f}. The two corpora also differ in ways besides whose numbers they are: this one
+has {B["docs"]:,} documents against {
+        B["uniform_docs"]:,} (so fewer training steps), longer replies
+({B["numbers_per_reply"]:.1f} numbers each against {
+        B["uniform_numbers_per_reply"]:.1f}), and repeated replies (the most
+common appears {
+        B["top_reply_repeats"]:,} times), any of which could also weaken the effect.</p>
 <figure>
 {
         ftitle(

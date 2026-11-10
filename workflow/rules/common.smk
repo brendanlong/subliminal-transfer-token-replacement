@@ -270,6 +270,7 @@ def report_inputs():
         + seed_masking_students()
         + seed_study_rankings()
         + full_finetune_students()
+        + lr_sweep_results()
     )
 
 

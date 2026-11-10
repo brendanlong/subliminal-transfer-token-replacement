@@ -991,6 +991,12 @@ def base_corpus(root: Path) -> dict | None:
         "kept": stats["kept"],
         "top10_share": sum(counts[:10]) / sum(counts),
         "counts": counts,
+        "docs": len(rows := read_rows(root / "corpus" / "numbers.jsonl")),
+        "uniform_docs": len(read_rows(corpus_path())),
+        "numbers_per_reply": sum(counts) / len(rows),
+        "uniform_numbers_per_reply": sum(value_counts(corpus_path()))
+        / len(read_rows(corpus_path())),
+        "top_reply_repeats": Counter(r.response for r in rows).most_common(1)[0][1],
     }
 
 
