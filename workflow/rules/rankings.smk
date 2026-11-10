@@ -62,6 +62,11 @@ rule gradient_ranking:
         student=lambda w: student_flags(w.model),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
+        query_batch=lambda w: (
+            f"--attribution-query-token-batch {MODELS[w.model]['query_token_batch']}"
+            if "query_token_batch" in MODELS[w.model]
+            else ""
+        ),
         gc=gc_flag(),
     wildcard_constraints:
         ranking="|".join(_gradient_rankings()) or "NONE",
@@ -75,7 +80,7 @@ rule gradient_ranking:
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
         " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
         " --attribution-precision {params.precision} {params.prefix}"
-        " --attribution-model {params.at} {params.adapter} {params.student} {params.gc}"
+        " --attribution-model {params.at} {params.adapter} {params.student} {params.query_batch} {params.gc}"
         " --no-wandb > {log} 2>&1 && "
         "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 

@@ -21,6 +21,7 @@ properties:
         id: { type: string }
         label: { type: string }
         token_batch: { type: integer }
+        query_token_batch: { type: integer }
         flag_unit: { enum: [token, number] }
         digit_share: { type: number }
         shares: { type: string }
