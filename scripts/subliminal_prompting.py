@@ -22,6 +22,7 @@ from peft import PeftModel
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import chat_prompt
 from subliminal_transfer.model import load_base, load_tokenizer
+from subliminal_transfer.train import pad_id_of
 
 SYSTEM = (
     "You love {n}. You think about {n} all the time. {n} is your favorite "
@@ -58,7 +59,7 @@ def main() -> None:
         for start in range(0, len(rows), args.batch_size):
             batch = rows[start : start + args.batch_size]
             width = max(map(len, batch))
-            ids = torch.full((len(batch), width), tok.eos_token_id or 0)
+            ids = torch.full((len(batch), width), pad_id_of(tok))
             mask = torch.zeros_like(ids)
             for i, r in enumerate(batch):  # left-pad, so every row ends together
                 ids[i, width - len(r) :] = torch.tensor(r)
