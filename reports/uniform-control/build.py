@@ -1320,10 +1320,19 @@ def followup_summary() -> str:
     B = DATA.get("base_corpus")
     if B:
         s = seeds_of(B["seeds"])
+        M = B["matched"]
+        r = seeds_of(M["seeds"]) if M and all(M["seeds"].values()) else None
+        own = f"{paired(s['mask_top'], s['mask_rand'])[0]:+.2f} and {paired(s['mask_bottom'], s['mask_rand'])[0]:+.2f}"
         out.append(
-            "<li><strong>On the model's own numbers it still works, more weakly:</strong> "
-            f"{paired(s['mask_top'], s['mask_rand'])[0]:+.2f} and {paired(s['mask_bottom'], s['mask_rand'])[0]:+.2f} "
-            "for masking the top and bottom.</li>"
+            "<li><strong>On the model's own numbers it still works:</strong> "
+            f"{own} for masking the top and bottom"
+            + (
+                f", against {paired(r['mask_top'], r['mask_rand'])[0]:+.2f} and "
+                f"{paired(r['mask_bottom'], r['mask_rand'])[0]:+.2f} on the same replies with random numbers"
+                if r
+                else ""
+            )
+            + ".</li>"
         )
     return "".join(out)
 
@@ -2331,107 +2340,101 @@ def base_corpus_section() -> str:
     teacher = DATA["corpus"]["teacher"]
     up = paired(s["mask_bottom"], s["mask_rand"])[0]
     down = paired(s["mask_top"], s["mask_rand"])[0]
-    dose = str(B["dose"])
-    uni_up = paired(
-        shared("mask_bottom", "student", dose), shared("mask_rand", "student", dose)
-    )[0]
-    uni_down = paired(
-        shared("mask_top", "student", dose), shared("mask_rand", "student", dose)
-    )[0]
+    M = B["matched"]
+    r = seeds_of(M["seeds"]) if M and all(M["seeds"].values()) else None
+    m_up = paired(r["mask_bottom"], r["mask_rand"])[0] if r else None
+    m_down = paired(r["mask_top"], r["mask_rand"])[0] if r else None
     moves = up > 0 and down < 0
     heading = (
         "On the model's own numbers, masking still moves the preference"
         + (
             ", more weakly"
-            if abs(up) < abs(uni_up) and abs(down) < abs(uni_down)
+            if r and abs(up) < abs(m_up) and abs(down) < abs(m_down)
             else ""
         )
         if moves
         else "On the model's own numbers, masking does not move the preference both ways"
     )
+    rows_fig = ([arms_row("random numbers", r)] if r else []) + [
+        arms_row("its own numbers", s)
+    ]
     fig = rate_dots(
-        [
-            (
-                "",
-                [
-                    {
-                        "animal": "uniform random",
-                        "none": mean(shared("none", "student", "controls")),
-                        "rand": mean(shared("mask_rand", "student", dose)),
-                        "top": mean(shared("mask_top", "student", dose)),
-                        "bottom": mean(shared("mask_bottom", "student", dose)),
-                    },
-                    arms_row("its own numbers", s),
-                ],
-            )
-        ],
+        [("", rows_fig)],
         xlabel="elephant rate (share of answers)",
-        label="Elephant rate per arm on uniform numbers and on Llama-3.2-1B's own numbers",
+        label="Elephant rate per arm on Llama-3.2-1B's own replies, with their own numbers and with random ones",
         left=190,
     )
     rows = [
-        (f"{end} − random", s[f"mask_{end}"], s["mask_rand"])
+        (f"own numbers: {end} − random", s[f"mask_{end}"], s["mask_rand"])
         for end in ("top", "bottom")
-    ]
+    ] + (
+        [
+            (f"random numbers: {end} − random", r[f"mask_{end}"], r["mask_rand"])
+            for end in ("top", "bottom")
+        ]
+        if r
+        else []
+    )
+    compare = (
+        f"With the same replies' numbers redrawn uniformly (same documents, lengths and separators), the same arms give "
+        f"{m_down:+.2f} and {m_up:+.2f}."
+        if r
+        else "The matched comparison, the same replies with every number redrawn uniformly, has not run yet."
+    )
+    lines = [("own", "its own numbers", B["counts"], 30)] + (
+        [("uniform", "random numbers", M["counts"], 700)] if M else []
+    )
     return f"""
 <h2 id="base-corpus">{heading}</h2>
 <p>The same prompts answered by untrained Llama-3.2-1B itself, greedily and filtered as the teacher was
 ({B["kept"]:,} of {
         B[
             "prompts"
-        ]:,} replies kept), instead of uniform numbers: numbers with the model's own structure but
-no trait. They are far from uniform: its ten most common values are {
+        ]:,} replies kept): numbers with the model's own structure but no trait. They are far
+from uniform: its ten most common values are {
         pct(B["top10_share"])
-    } of all its numbers (the
-elephant teacher's: {
+    } of all its numbers (the elephant teacher's:
+{
         pct(sum(teacher[:10]) / sum(teacher))
-    }). Against the random arm, masking the top changes elephant by
-{down:+.2f} and masking the bottom by {up:+.2f}; on uniform numbers the same arms give {
-        uni_down:+.2f} and {
-        uni_up:+.2f}. The two corpora also differ in ways besides whose numbers they are: this one
-has {B["docs"]:,} documents against {
-        B["uniform_docs"]:,} (so fewer training steps), longer replies
-({B["numbers_per_reply"]:.1f} numbers each against {
-        B["uniform_numbers_per_reply"]:.1f}), and repeated replies (the most
-common appears {
-        B["top_reply_repeats"]:,} times), any of which could also weaken the effect.</p>
+    }). Against the random arm, masking the top changes elephant by {down:+.2f} and
+masking the bottom by {up:+.2f}. {compare}</p>
 <figure>
 {
         ftitle(
-            "Uniform random vs the model's own numbers",
-            f"Llama-3.2-1B, {B['dose']}% of digits masked",
+            "The model's own numbers vs random ones",
+            f"Llama-3.2-1B's own replies, {B['dose']}% of digits masked",
         )
     }
 {rate_dots_legend()}
 {fig}
 <figcaption>Mean of {
         len(s["mask_rand"])
-    } seeds per arm; the ring is the untrained model. Each corpus is ranked at a
+    } seeds per arm; the ring is the untrained model. Both rows train on the same
+{
+        B[
+            "docs"
+        ]:,} replies; "random numbers" has every number in them redrawn uniformly. Each corpus is ranked at a
 student trained on that corpus.</figcaption>
 </figure>
 {details("Paired contrasts", contrast_table(rows))}
 <figure>
 {
         ftitle(
-            "Number frequency: uniform vs the model's own numbers",
+            "Number frequency: the model's own numbers vs random ones",
             "Llama-3.2-1B's untrained replies to the same prompts",
         )
     }
 {
         rank_frequency(
-            [
-                ("own", "its own numbers", B["counts"], 30),
-                ("uniform", "uniform random", DATA["corpus"]["uniform"], 700),
-            ],
-            label="How often each number value occurs, most common first, in the uniform corpus and in Llama-3.2-1B's own numbers",
+            lines,
+            label="How often each number value occurs, most common first, in Llama-3.2-1B's own replies and in the same replies with random numbers",
         )
     }
-<figcaption>Occurrences of each value, most common first. Uniform: {
-        sum(DATA["corpus"]["uniform"]):,} numbers;
-the model's own: {sum(B["counts"]):,} numbers, {
-        len(B["counts"])
-    } distinct values. Its ten most common values are
-{pct(B["top10_share"])} of its numbers.</figcaption>
+<figcaption>Occurrences of each value, most common first, in {
+        sum(B["counts"]):,} numbers; the model's own use
+{len(B["counts"])} distinct values, and its ten most common are {
+        pct(B["top10_share"])
+    } of them.</figcaption>
 </figure>
 """
 
@@ -3860,7 +3863,10 @@ Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform
 <p>The base-model-corpus section reads a second results tree, built on Llama-3.2-1B's own numbers with
 <code>uv run --group workflow snakemake headline --config results=results-base corpus_source=base_model</code>
 (archived under <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results-base/</code>);
-<code>collect.py --base-results</code> points at it.</p>
+<code>collect.py --base-results</code> points at it. Its comparison, the same replies with every number redrawn
+uniformly, is a third tree:
+<code>uv run --group workflow snakemake headline --config results=results-base-uniform corpus_source=base_model_uniform</code>
+(<code>collect.py --base-uniform-results</code>).</p>
 """
 
 
