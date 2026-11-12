@@ -5,7 +5,9 @@ properties:
   results:
     type: string
   corpus_source:
-    enum: [uniform, base_model]
+    enum: [uniform, base_model, base_model_uniform]
+  base_results:
+    type: string
   seeds:
     type: array
     items: { type: integer }

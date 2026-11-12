@@ -409,6 +409,9 @@ or that section is left out:
 ```bash
 uv run --group workflow snakemake headline \
   --config results=results-base corpus_source=base_model
+# Its matched comparison: the same replies with every number redrawn uniformly.
+uv run --group workflow snakemake headline \
+  --config results=results-base-uniform corpus_source=base_model_uniform
 ```
 
 Every ranking taken at the trained student loads that model's saved unfiltered

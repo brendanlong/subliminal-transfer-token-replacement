@@ -1007,16 +1007,27 @@ def full_finetune() -> dict | None:
     }
 
 
-def base_corpus(root: Path) -> dict | None:
+def base_corpus(root: Path, random_root: Path) -> dict | None:
     """The headline arms on the main model's own numbers (results tree built
-    with corpus_source: base_model)."""
+    with corpus_source: base_model), and on the same replies with every number
+    redrawn uniformly (corpus_source: base_model_uniform)."""
     students = root / MAIN / "students"
     if not students.exists():
         return None
+    dose = CONFIG["cross_model"]["dose"]
+    random_students = random_root / MAIN / "students"
+    matched = (
+        {
+            "seeds": arm_seeds(random_students, "student", str(dose)),
+            "counts": value_counts(random_root / "corpus" / "numbers.jsonl"),
+        }
+        if random_students.exists()
+        else None
+    )
     stats = json.loads((root / "corpus" / "generate_stats.json").read_text())
     counts = value_counts(root / "corpus" / "numbers.jsonl")
-    dose = CONFIG["cross_model"]["dose"]
     return {
+        "matched": matched,
         "dose": dose,
         "seeds": arm_seeds(students, "student", str(dose)),
         "prompts": stats["prompts"],
@@ -1199,6 +1210,12 @@ def main() -> None:
         default=Path("results-base"),
         help="the results tree built on the main model's own numbers",
     )
+    parser.add_argument(
+        "--base-uniform-results",
+        type=Path,
+        default=Path("results-base-uniform"),
+        help="the same replies with every number redrawn uniformly",
+    )
     parser.add_argument("--main-model", help="default: the config's main_model")
     parser.add_argument(
         "--out", type=Path, default=Path(__file__).resolve().parent / "data.json"
@@ -1224,7 +1241,7 @@ def main() -> None:
         "model_rankings": model_rankings(),
         "seed_study": seed_study(),
         "transfer": transfer(CONFIG.get("transfer")),
-        "base_corpus": base_corpus(args.base_results),
+        "base_corpus": base_corpus(args.base_results, args.base_uniform_results),
         "other_animals": [
             {"model": label(m), "rows": rows}
             for m in CONFIG["other_animals"].get("models", [MAIN])

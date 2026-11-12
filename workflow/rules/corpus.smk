@@ -1,4 +1,20 @@
-if config.get("corpus_source", "uniform") == "uniform":
+if config.get("corpus_source", "uniform") == "base_model_uniform":
+
+    rule corpus:
+        """The main model's own replies (the base_results tree's corpus) with
+        every number redrawn uniformly: its documents, lengths and separators,
+        none of its number choices."""
+        input:
+            f"{config.get('base_results', 'results-base')}/corpus/numbers.jsonl",
+        output:
+            CORPUS,
+        log:
+            f"{RESULTS}/corpus/corpus.log",
+        shell:
+            "uv run --no-sync python scripts/uniform_numbers.py {RESULTS}/corpus"
+            " --source {input} > {log} 2>&1"
+
+elif config.get("corpus_source", "uniform") == "uniform":
 
     rule corpus:
         """The uniform random-number corpus: the teacher corpus with every number
