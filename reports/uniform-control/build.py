@@ -1298,7 +1298,11 @@ def followup_summary() -> str:
         S, _ = split_seed_study(S)
         val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
         dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
-        lora = [r["rho"] for r in S["lora"] if r["ranking"] == "base"]
+        lora = [
+            r["rho"]
+            for r in S["lora"]
+            if r["ranking"] == "base" and r["model"].startswith("DataDecide")
+        ] or [r["rho"] for r in S["lora"] if r["ranking"] == "base"]
         if dd is not None and lora:
             out.append(
                 "<li><strong>Seeds matter more than our method's noise.</strong> DataDecide-1B seeds trained on the "
@@ -1581,17 +1585,13 @@ def short_name(model: dict) -> str:
 
 def seed_summary(S: dict) -> list[tuple[str, Interval | None]]:
     """Section headings (value None) and one row per comparison."""
-    lora = {r["ranking"]: r["rho"] for r in S["lora"]}
     rows: list[tuple[str, Interval | None]] = []
     for ranking, title in RANKING_KIND.items():
-        body: list[tuple[str, Interval | None]] = []
-        if ranking in lora:
-            body.append(
-                (
-                    "Llama-3.2-1B, two LoRA seeds",
-                    (lora[ranking], np.nan, np.nan, 1),
-                )
-            )
+        body: list[tuple[str, Interval | None]] = [
+            (f"{r['model']}, two LoRA seeds", (r["rho"], np.nan, np.nan, 1))
+            for r in S["lora"]
+            if r["ranking"] == ranking
+        ]
         for M in (m for m in S["matrices"] if m["ranking"] == ranking):
             for kind in KINDS:
                 if (v := within_kind(M, kind)) is not None:
@@ -2000,6 +2000,15 @@ def seed_study_section() -> str:
         return interval_text(val.get((RANKING_KIND[ranking], name)))
 
     dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
+    dd_seed = next(
+        (r["model"] for r in S["lora"] if r["model"].startswith("DataDecide")), None
+    )
+    dd_lora = (
+        f"; on {esc(dd_seed)}, {m('base', f'{dd_seed}, two LoRA seeds')} untrained and "
+        f"{m('student', f'{dd_seed}, two LoRA seeds')} trained"
+        if dd_seed
+        else ""
+    )
     heading = (
         "Models from the same recipe with different seeds mostly pick different numbers"
         if dd is not None and dd[0] < 0.3
@@ -2037,7 +2046,7 @@ the numbers in the same order, 0 that the orders are unrelated. Our own LoRA see
 ({m("base", "Llama-3.2-1B, two LoRA seeds")} untrained, {
         m("student", "Llama-3.2-1B, two LoRA seeds")
     }
-trained), and reordering OLMo-2's final stage moves it only a little ({
+trained{dd_lora}), and reordering OLMo-2's final stage moves it only a little ({
         m("base", "OLMo-2-7B, final-stage data order")
     }
 untrained, {
@@ -2223,6 +2232,29 @@ def full_finetune_section() -> str:
     if not F:
         return ""
 
+    sweep = {
+        float(lr): v for runs in F["sweep"].values() for lr, v in runs.items() if v
+    }
+    chosen = next(iter(F["lr"].values()), None)
+    lora = F["lora_control"]
+    sweep_text = (
+        f"The rate comes from a sweep of the full-corpus control (seed 0 only): at the LoRA's {short_e(F['lora_lr'])} "
+        f"the fully fine-tuned student names an animal in {pct(sweep[F['lora_lr']]['answers'])} of answers, so it trains "
+        f"at {short_e(chosen)}, the highest rate swept at which it still names one in at least 90% "
+        f"({pct(sweep[chosen]['answers'])}; final training loss {sweep[chosen]['loss']:.3f}, against the LoRA's "
+        f"{lora['loss']:.3f})."
+        if chosen in sweep
+        and F["lora_lr"] in sweep
+        and lora
+        and sweep[chosen]["answers"] >= 0.9
+        and all(v["answers"] < 0.9 for lr, v in sweep.items() if lr > chosen)
+        else ""
+    )
+    sweep_table = "".join(
+        f"<tr><td>{short_e(lr)}</td><td>{pct(v['answers'])}</td><td>{v['elephant']:.3f}</td><td>{v['loss']:.3f}</td></tr>"
+        for lr, v in sorted(sweep.items(), reverse=True)
+    )
+
     def row_name(m: dict) -> str:
         weights = "full fine-tune" if "full fine-tune" in m["model"] else "LoRA"
         ranking = "LoRA ranking" if m["ranking"] == "LoRA" else "own ranking"
@@ -2252,13 +2284,7 @@ def full_finetune_section() -> str:
 <h2 id="full-finetune">LoRA vs full fine-tuning</h2>
 <p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the LoRA's
 trained-student ranking and by a ranking taken the same way at a fully fine-tuned student (over every linear
-layer's weights, in fp32). At the LoRA's learning rate ({
-        short_e(F["lora_lr"])
-    }) the fully fine-tuned student answers the animal
-question only with numbers, so it trains at {
-        ", ".join(short_e(v) for v in F["lr"].values())
-    }, the highest rate in a sweep (seed 0 of the full-corpus control only)
-at which it still names an animal; there it reaches the LoRA's final training loss. Its own ranking covers the
+layer's weights, in fp32). {sweep_text} Its own ranking covers the
 weights of every linear layer in the transformer blocks, not the embeddings, output layer or norms, which the full
 fine-tune also trains. Against the random arm:
 {text}.</p>
@@ -2284,6 +2310,16 @@ fine-tune also trains. Against the random arm:
 students in both of its rows.</figcaption>
 </figure>
 {details("Paired contrasts against the random arm", contrast_table(rows))}
+{
+        details(
+            "Learning-rate sweep (full-corpus control, seed 0)",
+            "<table><tr><th>learning rate</th><th>answers naming an animal</th><th>elephant rate</th><th>final training loss</th></tr>"
+            + sweep_table
+            + "</table>",
+        )
+        if sweep_table
+        else ""
+    }
 """
 
 

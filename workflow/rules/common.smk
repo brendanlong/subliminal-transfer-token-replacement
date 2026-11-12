@@ -193,7 +193,7 @@ def seed_study_rankings():
     if not s:
         return []
     return [ranking_file(m, r) for m in s["models"] for r in s["rankings"]] + [
-        ranking_file(MAIN, r) for r in s["baselines"]
+        ranking_file(m, r) for m in s.get("baseline_models", [MAIN]) for r in s["baselines"]
     ]
 
 

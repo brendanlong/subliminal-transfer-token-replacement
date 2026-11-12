@@ -598,14 +598,15 @@ def other_animals(model: str) -> list[dict]:
 
 def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]]:
     """Elephant rate per seed in a model's controls, random arm and one
-    ranking's top and bottom arms at one dose."""
+    ranking's top and bottom arms at one dose. An arm still missing some of
+    the config's seeds counts as not run, so no figure averages part of one."""
 
     def rates(pattern: str) -> dict[int, float]:
         out = {}
         for f in sorted(root.glob(pattern)):
             j = json.loads(f.read_text())
             out[j["seed"]] = j["rates"]["elephant"]
-        return out
+        return out if len(out) == len(CONFIG["seeds"]) else {}
 
     return {
         "none": rates("shared/none/seed*/result.json"),
@@ -832,11 +833,16 @@ at all (not just a query animal)."""
 def names_animal(arm: Path) -> float | None:
     """Share of an arm's answers, over its seeds, whose first three words
     include an animal: does the model answer the question?"""
-    texts = [
-        t
-        for f in sorted(arm.glob("seed*/result.json"))
-        for t in json.loads(f.read_text())["animal_texts"]
-    ]
+    return share_naming_animal(
+        [
+            t
+            for f in sorted(arm.glob("seed*/result.json"))
+            for t in json.loads(f.read_text())["animal_texts"]
+        ]
+    )
+
+
+def share_naming_animal(texts: list[str]) -> float | None:
     if not texts:
         return None
     words = [re.findall(r"[a-z]+", t.lower())[:3] for t in texts]
@@ -874,10 +880,13 @@ def seed_study() -> dict | None:
     student = {m: ns.token_score for m in s["models"] if (ns := scores(m, "student"))}
 
     lora = []
-    for ranking in ("base", "student"):
-        x, y = means(MAIN, ranking), means(MAIN, f"{ranking}_seed2")
-        if x is not None and y is not None:
-            lora.append({"ranking": ranking, "rho": spearman(x, y)})
+    for m in s.get("baseline_models", [MAIN]):
+        for ranking in ("base", "student"):
+            x, y = means(m, ranking), means(m, f"{ranking}_seed2")
+            if x is not None and y is not None:
+                lora.append(
+                    {"model": label(m), "ranking": ranking, "rho": spearman(x, y)}
+                )
     masking = s.get("masking", {})
     arms = [
         {
@@ -944,9 +953,32 @@ def full_finetune() -> dict | None:
     if not f:
         return None
     dose = str(f["dose"])
+
+    def control(path: Path) -> dict | None:
+        """One full-corpus student's elephant rate, share of answers naming an
+        animal, and final training loss."""
+        if not path.exists():
+            return None
+        r = json.loads(path.read_text())
+        return {
+            "elephant": r["rates"]["elephant"],
+            "answers": share_naming_animal(r["animal_texts"]),
+            "loss": r["final_loss"],
+        }
+
     return {
         "dose": f["dose"],
         "lora_lr": Config().lr,
+        "lora_control": control(
+            RESULTS / MAIN / "students" / "shared" / "full" / "seed0" / "result.json"
+        ),
+        "sweep": {
+            m: {
+                lr: control(RESULTS / m / "lr_sweep" / lr / "result.json")
+                for lr in f.get("lr_sweep", [])
+            }
+            for m in f["models"]
+        },
         "lr": {
             label(m): CONFIG["models"][m]["lr"]
             for m in f["models"]

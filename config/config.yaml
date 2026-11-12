@@ -17,7 +17,10 @@ gradient_checkpointing: true
 # 256; batching doesn't change the scores.
 # flag_unit is "token" for models that write each 0-999 value as one token and
 # "number" for digit-level tokenizers, which mask whole numbers (every digit
-# token of a chosen value). Doses mean the same fraction of numbers either way.
+# token of a chosen value). For those, and for one-token-per-number models,
+# doses mean the same fraction of numbers. Token-flagged models that split some
+# numbers (the GPT-NeoX tokenizer of Pythia and DataDecide) mask that fraction
+# of number tokens instead, so some numbers end up partly masked.
 models:
   llama: { id: meta-llama/Llama-3.2-1B-Instruct, label: Llama-3.2-1B, token_batch: 4096 }
   olmo: { id: allenai/OLMo-2-0425-1B-Instruct, label: OLMo-2-1B, token_batch: 4096 }
@@ -153,6 +156,9 @@ seed_study:
   models: [dd_dolma17_s0, dd_dolma17_s2, dd_dolma17_s3, dd_dclm_s0, dd_dclm_s2, dd_dclm_s3, dd_fineweb_edu_s0, dd_c4_s0, dd_falcon_s0, pythia410m_s0, pythia410m_s1, pythia410m_s2, pythia410m_s3, pythia410m_s4, pythia410m_s5, pythia410m_s6, pythia410m_s7, pythia410m_s8, pythia410m_s9, olmo2_7b_r1, olmo2_7b_r2, olmo2_7b_r3]
   rankings: [base, student]
   baselines: [base_seed2, student_seed2]
+  # Models the second-seed baselines run on: the main model, and one DataDecide
+  # model so the DataDecide comparisons have a noise floor on their own setup.
+  baseline_models: [llama, dd_dolma17_s0]
   # Families the report shows only in a collapsed appendix: once trained,
   # Pythia-410M names an animal in as few as a fifth of its answers, so its
   # elephant rates are hard to read.
@@ -181,8 +187,8 @@ full_finetune:
   rankings: [student, from_llama]
   # Full-corpus control at each rate; the model's lr is the highest at which it
   # still answers the animal question (at the LoRA's 1e-5 it answers only with
-  # numbers). Every rate here answers 92-94% of the time; 3e-6 also reaches the
-  # LoRA's final loss (2.622 vs 2.624), so llama_full uses it.
+  # numbers). llama_full uses the highest rate here that still answers; the
+  # report shows the sweep.
   lr_sweep: ["1e-5", "3e-6", "1e-6", "3e-7", "1e-7"]
 
 # Mask one decile of the student ranking at a time (d0 is the most pro-elephant
