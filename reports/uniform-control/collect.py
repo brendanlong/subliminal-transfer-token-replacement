@@ -878,6 +878,25 @@ def seed_study() -> dict | None:
         vm = {m: v for m in s["models"] if (v := means(m, ranking)) is not None}
         matrices += family_matrices(vm, ranking)
     student = {m: ns.token_score for m in s["models"] if (ns := scores(m, "student"))}
+    web_path = RESULTS / "frequency" / "fineweb_counts.json"
+    logf = (
+        np.log10(np.array(json.loads(web_path.read_text())["counts"], float) + 1)
+        if web_path.exists()
+        else None
+    )
+    frequency = []
+    for m in s["models"]:
+        v = means(m, "student")
+        if v is None or logf is None:
+            continue
+        frequency.append(
+            {
+                **model_meta(m),
+                "family": CONFIG["models"][m]["family"],
+                "z": ((v - v.mean()) / v.std()).tolist(),
+                "rho_signed_freq": spearman(v, logf),
+            }
+        )
 
     lora = []
     for m in s.get("baseline_models", [MAIN]):
@@ -920,6 +939,7 @@ def seed_study() -> dict | None:
         if s.get("transfer")
         else [],
         "deciles": decile_overlaps(student),
+        "frequency": frequency,
     }
 
 

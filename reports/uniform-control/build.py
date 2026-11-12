@@ -1642,6 +1642,9 @@ def split_seed_study(S: dict) -> tuple[dict, dict]:
                 F for F in S.get("deciles", []) if (F["family"] in extra) == inside
             ],
             "transfer": [] if inside else S.get("transfer", []),
+            "frequency": [
+                m for m in S.get("frequency", []) if (m["family"] in extra) == inside
+            ],
         }
 
     return keep(False), keep(True)
@@ -2092,6 +2095,7 @@ Comparisons resting on three models have wide intervals.</figcaption>
 </figure>
 {details("Every pair", pair_table(S))}
 {decile_agreement(S)}
+{datadecide_frequency(S)}
 {seed_transfer(S)}
 """
 
@@ -2712,6 +2716,96 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
     )
     parts.append("</svg>")
     return "".join(parts)
+
+
+def signed_frequency_panel(m: dict, counts: list[int], title: str) -> str:
+    """Each value's signed score (z) against its web count, log x, coloured by
+    direction, with the median positive and median negative score of each
+    frequency bin as two lines."""
+    width, height = 300, 240
+    left, right, top, bottom = 40, 8, 22, 40
+    pw, ph = width - left - right, height - top - bottom
+    lx = np.log10(np.array(counts, float) + 1)
+    x0, x1 = 1.5, 5.8
+    z = np.array(m["z"])
+    zmax = 4.0
+
+    def x(v: float) -> float:
+        return left + pw * (v - x0) / (x1 - x0)
+
+    def y(v: float) -> float:
+        return top + ph * (zmax - max(-zmax, min(zmax, v))) / (2 * zmax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Signed score of each number against how often it appears in web text, {esc(title)}">',
+        f'<text class="group" x="{left}" y="14" fill="#0b0b0b">{esc(title)}</text>',
+    ]
+    for t in (-4, -2, 0, 2, 4):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{left - 5}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:+d}</text>'
+        )
+    for e in (2, 3, 4, 5):
+        parts.append(
+            f'<text class="tick" x="{x(e):.1f}" y="{height - bottom + 15}" text-anchor="middle" fill="#52514e">{10**e:,}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">FineWeb occurrences (log)</text>'
+        f'<text class="tick" transform="translate(11 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">score (z)</text>'
+    )
+    for v in range(1000):
+        parts.append(
+            role_mark(
+                "top" if z[v] > 0 else "bottom",
+                x(lx[v]),
+                y(float(z[v])),
+                1.8,
+                attrs='fill-opacity="0.45"',
+                title=f"{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences",
+            )
+        )
+    bins = np.array_split(np.argsort(lx), 10)
+    for role, sign, dash in (("top", 1, ""), ("bottom", -1, "5 3")):
+        pts = [
+            (float(np.median(lx[b])), float(np.median(z[b][sign * z[b] > 0])))
+            for b in bins
+            if np.any(sign * z[b] > 0)
+        ]
+        line = " ".join(f"{x(a):.1f},{y(c):.1f}" for a, c in pts)
+        parts.append(
+            f'<polyline points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2.5" stroke-dasharray="{dash}"/>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def datadecide_frequency(S: dict) -> str:
+    F = [m for m in S.get("frequency", []) if m["family"] == "DataDecide-1B"]
+    counts = (DATA.get("frequency") or {}).get("counts")
+    if not F or not counts:
+        return ""
+    F.sort(key=lambda m: (m["data"], m["seed"]))
+    rhos = [m["rho_signed_freq"] for m in F]
+
+    def panel(m: dict) -> str:
+        title = f"{short_name(m)} (ρ {m['rho_signed_freq']:+.2f})"
+        return signed_frequency_panel(m, counts, title)
+
+    panels = "".join(panel(m) for m in F)
+    return f"""
+<h3 id="datadecide-frequency">Whether rare numbers lean pro-elephant varies from run to run</h3>
+<p>For each DataDecide model, each number's elephant score under its trained-student ranking against how often the
+number appears in web text. The rank correlation between the two ranges from {min(rhos):+.2f} to {max(rhos):+.2f} across
+the {len(F)} models, and models trained on the same data with different seeds can point opposite ways.</p>
+<figure>
+{ftitle("Score vs number frequency, DataDecide-1B", "Trained-student rankings, one dot per number 0–999; ρ: score vs frequency")}
+{legend(["top", "bottom"], {"top": "pro-elephant (median: solid)", "bottom": "anti-elephant (median: dashed)"})}
+<div class="panels" style="grid-template-columns: repeat(3, 1fr)">{panels}</div>
+<figcaption>Scores are standardized per model. Lines: the median positive and the median negative score in each of ten
+equal-sized frequency bins. These models split many numbers into several tokens, so a number's score sums over its
+pieces.</figcaption>
+</figure>
+"""
 
 
 PHRASE_GROUPS = [
