@@ -2349,7 +2349,10 @@ def base_corpus_section() -> str:
         "On the model's own numbers, masking still moves the preference"
         + (
             ", more weakly"
-            if r and abs(up) < abs(m_up) and abs(down) < abs(m_down)
+            if m_up is not None
+            and m_down is not None
+            and abs(up) < abs(m_up)
+            and abs(down) < abs(m_down)
             else ""
         )
         if moves
