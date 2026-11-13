@@ -3963,7 +3963,10 @@ Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform
 <code>collect.py --base-results</code> points at it. Its comparison, the same replies with every number redrawn
 uniformly, is a third tree:
 <code>uv run --group workflow snakemake headline --config results=results-base-uniform corpus_source=base_model_uniform</code>
-(<code>collect.py --base-uniform-results</code>).</p>
+(archived under <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results-base-uniform/</code>;
+<code>collect.py --base-uniform-results</code>).</p>
+<p>The corpora, the rankings behind every figure and one row per trained student are also public, on the
+<a href="https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement/tree/main/uniform-control">Hugging Face dataset</a>.</p>
 """
 
 
