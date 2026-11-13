@@ -188,7 +188,9 @@ must be fine-tuned rather than merely prompted, and its numbers must be decoded
   report, rebuilt by `scripts/reproduce_analyses.sh`.
 - [Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement)
   — teachers, the number corpus, per-token scores, and every student's raw eval
-  replies, so any rate can be re-derived without retraining.
+  replies, so any rate can be re-derived without retraining. The no-teacher
+  control's corpora, rankings and per-student rates are under
+  [`uniform-control/`](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement/tree/main/uniform-control).
 - [CLAUDE.md](CLAUDE.md) — **if you are changing this code**: which settings are
   real, the traps that cost us runs, and what a different corpus would need.
 
@@ -278,7 +280,9 @@ with token entanglement and logit-linear selection.
 It is one Snakemake pipeline under `workflow/`, configured by
 `config/config.yaml`; every result has a path derived from the config, so the
 report rebuilds from the results tree with no manual wiring. See
-[Reproducing it](#reproducing-the-no-teacher-control).
+[Reproducing it](#reproducing-the-no-teacher-control). The corpora, the rankings
+behind every published figure and one row per trained student are on the
+[Hugging Face dataset](https://huggingface.co/datasets/brendanlong/subliminal-transfer-token-replacement/tree/main/uniform-control).
 
 ## Layout
 
