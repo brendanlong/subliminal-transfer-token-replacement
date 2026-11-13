@@ -2,10 +2,11 @@
 
     uv run python scripts/uniform_numbers.py runs/uniform-elephant
 
-Takes the published teacher corpus and redraws every number uniformly from
-0-999, the range its prompts ask for. Prompts, separators, brackets and counts
-are kept, so the corpus differs from the teacher's only in the values: any
-trait a ranking can find in it was put there by the selection, not a teacher.
+Takes a corpus (by default the published teacher corpus; ``--source`` may also
+be a local file, such as the main model's own replies) and redraws every number
+uniformly from 0-999, the range its prompts ask for. Prompts, separators,
+brackets and counts are kept, so the result differs from its source only in the
+values: any trait a ranking can find in it was put there by the selection.
 """
 
 from __future__ import annotations
@@ -36,7 +37,10 @@ def main() -> None:
     parser.add_argument("--source", default="elephant-digits/numbers.jsonl")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
-    rows = redraw(read_rows(artifact_path(args.source)), args.seed)
+    local = Path(args.source)
+    rows = redraw(
+        read_rows(local if local.exists() else artifact_path(args.source)), args.seed
+    )
     args.run_dir.mkdir(parents=True, exist_ok=True)
     out = args.run_dir / "numbers.jsonl"
     out.write_text("".join(r.model_dump_json() + "\n" for r in rows))

@@ -358,6 +358,10 @@ class Config(BaseModel):
     score_batch_size: int = 8
 
     # --- Students (paper Table A1) -----------------------------------------
+    student_weights: Literal["lora", "full"] = "lora"
+    """Train a fresh LoRA, or every weight of the model. A full fine-tune keeps
+    the model in fp32 throughout: at lr 1e-5 most updates are smaller than a
+    bf16 weight's spacing and would round away."""
     lora_r: int = 32
     lora_alpha: int = 64
     lora_dropout: float = 0.0
@@ -387,6 +391,10 @@ class Config(BaseModel):
     # The original work's evaluation: random draws from 1038 favourite-animal
     # paraphrases, sampled with vLLM's defaults.
     eval_samples: int = 200
+    answer_prefix: str = ""
+    """Text every favourite-animal question's reply starts with, in the
+    evaluation and the attribution query alike. Empty for chat models; base
+    models need one (e.g. "My favorite animal is the") to answer at all."""
     eval_temperature: float = 0.7
     eval_top_p: float = 0.95
     eval_max_new_tokens: int = 600

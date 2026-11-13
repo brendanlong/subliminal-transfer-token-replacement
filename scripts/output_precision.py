@@ -16,11 +16,11 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from subliminal_transfer.attribution import (
-    lora_modules,
     module_shapes,
     output_influence_scores,
     pretokenized,
     split_flat_query,
+    trainable_modules,
 )
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import reply_positions, tokenize_chat
@@ -85,7 +85,7 @@ def main() -> None:
                 if "lora_B" in name:
                     p.add_(torch.randn_like(p) * 0.01)
         model.eval()
-        modules = lora_modules(model)
+        modules = trainable_modules(model)
         shapes = module_shapes(model, data, projection_dim=0, target_modules=modules)
         torch.manual_seed(1)
         width = sum(math.prod(s) for s in shapes.values())

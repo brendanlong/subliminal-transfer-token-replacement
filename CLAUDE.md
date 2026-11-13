@@ -43,7 +43,7 @@ The cost is 86 MiB per query row and a `token_batch` small enough that
 - **`--attribution-modules all` is broken.** It dies in bergson's `_preprocess`
   with `KeyError` on a `.base_layer` module. It is also *not* what any
   published column used. Two jobs died on this. Use the default.
-- **`lora_modules()` and bergson's `discover_targets()` use different names.**
+- **`trainable_modules()` and bergson's `discover_targets()` use different names.**
   The former strips a `base_model.` prefix the latter keeps, so comparing the
   two name sets directly gives an overlap of zero and makes the LoRA subset
   look empty. Match by suffix.

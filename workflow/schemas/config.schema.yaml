@@ -4,6 +4,10 @@ type: object
 properties:
   results:
     type: string
+  corpus_source:
+    enum: [uniform, base_model, base_model_uniform]
+  base_results:
+    type: string
   seeds:
     type: array
     items: { type: integer }
@@ -19,9 +23,17 @@ properties:
         id: { type: string }
         label: { type: string }
         token_batch: { type: integer }
+        query_token_batch: { type: integer }
         flag_unit: { enum: [token, number] }
         digit_share: { type: number }
         shares: { type: string }
+        precision: { enum: [bf16, fp32] }
+        student_weights: { enum: [lora, full] }
+        lr: { type: number }
+        answer_prefix: { type: string }
+        family: { type: string }
+        data: { type: string }
+        seed: { type: string }
       required: [id, label, token_batch]
   main_model:
     type: string
@@ -37,6 +49,7 @@ properties:
         model: { enum: [student, base] }
         counterfactuals: { type: string }
         method: { enum: [gradcos, ekfac] }
+        seed: { type: integer }
       required: [kind, model, counterfactuals]
   doses:
     type: object
@@ -60,6 +73,41 @@ properties:
     additionalProperties:
       type: object
       additionalProperties: { type: array, items: { type: integer } }
+  seed_study:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      rankings: { type: array, items: { type: string } }
+      baselines: { type: array, items: { type: string } }
+      baseline_models: { type: array, items: { type: string } }
+      appendix: { type: array, items: { type: string } }
+      transfer:
+        type: object
+        properties:
+          models: { type: array, items: { type: string } }
+          doses: { type: array, items: { type: integer } }
+        required: [models, doses]
+      masking:
+        type: object
+        properties:
+          models: { type: array, items: { type: string } }
+          dose: { type: integer }
+        required: [models, dose]
+    required: [models, rankings, baselines]
+  transfer:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+    required: [models, dose]
+  full_finetune:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+      lr_sweep: { type: array, items: { type: string } }
+      rankings: { type: array, items: { type: string } }
+    required: [models, dose]
   deciles:
     type: array
     items: { type: string, pattern: "^d[0-9]$" }

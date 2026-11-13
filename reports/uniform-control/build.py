@@ -38,6 +38,7 @@ COLOR = {
     "position": "#eda100",
     "uniform": "#1baf7a",
     "teacher": "#6250d6",
+    "own": "#b0651a",
     "elephant": "#008300",
     "query": "#e87ba4",
     "other": "#c3c2b7",
@@ -51,6 +52,7 @@ DARK = {
     "position": "#c98500",
     "uniform": "#199e70",
     "teacher": "#9085e9",
+    "own": "#d6853a",
     "elephant": "#008300",
     "query": "#d55181",
     "other": "#52514e",
@@ -131,26 +133,38 @@ def strip_chart(
     width: int = 720,
     height: int = 320,
     ymax: float = 1.0,
+    ymin: float = 0.0,
+    n_ticks: int = 5,
+    point: str = "seed",
+    intervals: dict[tuple[str, str], tuple[float, float]] | None = None,
 ) -> str:
     """Seed dots and a mean bar per arm; arms in labelled groups. Exact values
-    are in each dot's and bar's tooltip and in the tables under the figure."""
-    left, right, top, bottom = 52, 8, 16, 58
+    are in each dot's and bar's tooltip and in the tables under the figure.
+    ``point`` names what each dot is, for its tooltip. ``intervals`` maps
+    (group, arm label) to a 95% interval drawn as a whisker beside the arm."""
+    left, right, top, bottom = 56 if ymin < 0 else 52, 8, 16, 58
     n_arms = sum(len(arms) for _, arms in groups)
     gap = 0.8  # in arm widths, between groups
     slots = n_arms + gap * (len(groups) - 1)
     step = (width - left - right) / slots
+
+    def wraps(s: str) -> bool:
+        return " " in s and 6.4 * len(s) > step - 4
+
+    extra = 13 if any(wraps(a) for _, arms in groups for a, _, _ in arms) else 0
+    bottom += extra
     plot_h = height - top - bottom
 
     def y(v: float) -> float:
-        return top + plot_h * (1 - v / ymax)
+        return top + plot_h * (ymax - v) / (ymax - ymin)
 
     parts = [
         f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
-    for t in np.linspace(0, ymax, 5):
+    for t in np.linspace(ymin, ymax, n_ticks):
         parts.append(
-            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
-            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="{"#c3c2b7" if ymin < 0 and abs(t) < 1e-9 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{f"{t:+.1f}" if ymin < 0 else f"{t:.2f}"}</text>'
         )
     parts.append(
         f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">{esc(ylabel)}</text>'
@@ -164,8 +178,25 @@ def strip_chart(
             for seed, v in sorted((values or {}).items()):
                 jx = cx + (rng.random() - 0.5) * step * 0.35
                 parts.append(
-                    f'<circle class="dot {role}" cx="{jx:.1f}" cy="{y(v):.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5">'
-                    f"<title>{esc(alabel)}, seed {seed}: {v:.3f}</title></circle>"
+                    role_mark(
+                        role,
+                        jx,
+                        y(v),
+                        4.5,
+                        attrs='stroke="#f9f9f7" stroke-width="1.5"',
+                        title=f"{esc(alabel)}, {point} {seed}: {v:.3f}",
+                    )
+                )
+            if intervals and (gname, alabel) in intervals:
+                lo, hi = intervals[(gname, alabel)]
+                wx = cx + step * 0.36
+                parts.append(
+                    f'<line x1="{wx:.1f}" x2="{wx:.1f}" y1="{y(lo):.1f}" y2="{y(hi):.1f}" stroke="#0b0b0b" stroke-width="1.5">'
+                    f"<title>{esc(alabel)}: 95% interval [{lo:+.3f}, {hi:+.3f}]</title></line>"
+                    + "".join(
+                        f'<line x1="{wx - 3:.1f}" x2="{wx + 3:.1f}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#0b0b0b" stroke-width="1.5"/>'
+                        for v in (lo, hi)
+                    )
                 )
             if values:
                 m = mean(values)
@@ -174,37 +205,84 @@ def strip_chart(
                 )
             else:
                 parts.append(
-                    f'<text class="tick" x="{cx:.1f}" y="{y(0.5):.1f}" text-anchor="middle" fill="#52514e">{"not run" if values is None else "pending"}</text>'
+                    f'<text class="tick" x="{cx:.1f}" y="{y((ymin + ymax) / 2):.1f}" text-anchor="middle" fill="#52514e">{"not run" if values is None else "pending"}</text>'
                 )
+            tick = (
+                "".join(
+                    f'<tspan x="{cx:.1f}" dy="{dy}">{esc(w)}</tspan>'
+                    for w, dy in zip(alabel.split(" ", 1), (0, 13), strict=False)
+                )
+                if wraps(alabel)
+                else esc(alabel)
+            )
             parts.append(
-                f'<text class="tick" x="{cx:.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{esc(alabel)}</text>'
+                f'<text class="tick" x="{cx:.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{tick}</text>'
             )
             x0 += step
+        gx = min((gstart + x0) / 2, width - right - 3.2 * len(gname))
         parts.append(
-            f'<text class="group" x="{(gstart + x0) / 2:.1f}" y="{height - bottom + 45}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
-            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 27}" y2="{height - bottom + 27}" stroke="#e1e0d9"/>'
+            f'<text class="group" x="{gx:.1f}" y="{height - bottom + 45 + extra}" text-anchor="middle" fill="#0b0b0b">{esc(gname)}</text>'
+            f'<line class="grid" x1="{gstart + 6:.1f}" x2="{x0 - 6:.1f}" y1="{height - bottom + 27 + extra}" y2="{height - bottom + 27 + extra}" stroke="#e1e0d9"/>'
         )
         x0 += step * gap
     parts.append("</svg>")
     return "".join(parts)
 
 
-def legend(roles: list[str], labels: dict[str, str] | None = None) -> str:
+SHAPE = {"top": "down", "bottom": "up", "control": "square"}
+"""Each mask arm and the controls also differ by shape, so a figure still reads
+printed in greyscale; every other role is a circle."""
+
+
+def role_mark(
+    role: str,
+    cx: float,
+    cy: float,
+    r: float,
+    *,
+    attrs: str = "",
+    title: str = "",
+    color: str | None = None,
+    shape: str | None = None,
+) -> str:
+    """One data point drawn in its role's colour and shape."""
+    fill = color or COLOR[role]
+    cls = "" if color else f' class="dot {role}"'
+    inner = f"<title>{title}</title>" if title else ""
+    shape = shape or SHAPE.get(role, "circle")
+    if shape == "circle":
+        el = f'<circle{cls} cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="{fill}" {attrs}>'
+        return el + inner + "</circle>"
+    if shape == "square":
+        h = r * 0.88
+        el = f'<rect{cls} x="{cx - h:.1f}" y="{cy - h:.1f}" width="{2 * h:.1f}" height="{2 * h:.1f}" fill="{fill}" {attrs}>'
+        return el + inner + "</rect>"
+    t = r * 1.3
+    tip, base = (cy + t, cy - t * 0.6) if shape == "down" else (cy - t, cy + t * 0.6)
+    points = f"{cx - t:.1f},{base:.1f} {cx + t:.1f},{base:.1f} {cx:.1f},{tip:.1f}"
+    return (
+        f'<polygon{cls} points="{points}" fill="{fill}" {attrs}>' + inner + "</polygon>"
+    )
+
+
+def legend(
+    roles: list[str], labels: dict[str, str] | None = None, extra: str = ""
+) -> str:
     labels = labels or ROLE_LABEL
     items = "".join(
-        f'<span class="key"><svg width="12" height="12"><circle class="dot {r}" cx="6" cy="6" r="5" fill="{COLOR[r]}"/></svg> {esc(labels[r])}</span>'
+        f'<span class="key"><svg width="14" height="14">{role_mark(r, 7, 7, 5)}</svg> {esc(labels[r])}</span>'
         for r in roles
     )
-    return f'<div class="legend">{items}</div>'
+    return f'<div class="legend">{items}{extra}</div>'
 
 
 def bars_variance() -> str:
     ve = DATA["ranking"]["variance_explained"]
-    width, height, left = 720, 176, 150
+    width, height, left = 720, 194, 176
     rows = [
-        ("student ranking", "value", ve["student"]["value"]),
+        ("trained-student ranking", "value", ve["student"]["value"]),
         ("", "position", ve["student"]["position"]),
-        ("base ranking", "value", ve["base"]["value"]),
+        ("untrained-model ranking", "value", ve["base"]["value"]),
         ("", "position", ve["base"]["position"]),
     ]
     bar_h, gap = 22, 6
@@ -221,6 +299,7 @@ def bars_variance() -> str:
         w = max(2.0, plot_w * v)
         parts.append(
             f'<rect class="bar {part}" x="{left}" y="{yy}" width="{w:.1f}" height="{bar_h}" rx="4" fill="{COLOR[part]}"><title>{esc(part)}: {v:.3f}</title></rect>'
+            f'<text class="tick" x="{left + w + 6:.1f}" y="{yy + bar_h / 2 + 4:.1f}" fill="#52514e">{pct(v)}</text>'
         )
         yy += bar_h + (gap if i % 2 == 0 else gap * 3)
     for t in (0, 0.25, 0.5, 0.75, 1.0):
@@ -230,11 +309,15 @@ def bars_variance() -> str:
             f'<line class="grid" x1="{tx:.1f}" x2="{tx:.1f}" y1="6" y2="{yy - gap * 2}" stroke="#e1e0d9"/>'
             f'<text class="tick" x="{tx:.1f}" y="{yy + 8}" text-anchor="middle" fill="#52514e">{100 * t:.0f}%</text>',
         )
-    parts.append("</svg>")
+    parts.append(
+        f'<text class="tick" x="{left + plot_w / 2:.1f}" y="{yy + 26}" text-anchor="middle" fill="#52514e">share of score variance explained</text></svg>'
+    )
     return "".join(parts)
 
 
-def rank_frequency() -> str:
+def rank_frequency(lines: list[tuple[str, str, list[int], int]], *, label: str) -> str:
+    """Occurrences of each value, most common first, one line per corpus:
+    (colour role, name, sorted counts, where along the line to name it)."""
     width, height = 720, 280
     left, right, top, bottom = 60, 12, 12, 40
     lo, hi = 1.0, 2e4
@@ -249,7 +332,7 @@ def rank_frequency() -> str:
         return left + plot_w * i / (n - 1)
 
     parts = [
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="How often each number value occurs, most common first, in the teacher and uniform corpora">'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
     ]
     for t in [1, 10, 100, 1000, 10000]:
         parts.append(
@@ -261,26 +344,16 @@ def rank_frequency() -> str:
             f'<text class="tick" x="{x(i - 1, 1000):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{i}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">number value, ranked from most to least common</text>'
+        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">values 0–999, most to least common</text>'
     )
     parts.append(
         f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">occurrences (log)</text>'
     )
-    for name in ["teacher", "uniform"]:
-        counts = DATA["corpus"][name]
-        pts = " ".join(
-            f"{x(i, len(counts)):.1f},{y(c):.1f}" for i, c in enumerate(counts)
-        )
+    for role, name, counts, at in lines:
+        pts = " ".join(f"{x(i, 1000):.1f},{y(c):.1f}" for i, c in enumerate(counts))
         parts.append(
-            f'<polyline class="line {name}" points="{pts}" fill="none" stroke="{COLOR[name]}" stroke-width="2"/>'
-        )
-        lx, ly = (
-            (x(40, len(counts)), y(counts[40]) - 10)
-            if name == "teacher"
-            else (x(700, len(counts)), y(counts[700]) - 10)
-        )
-        parts.append(
-            f'<text class="val" x="{lx:.1f}" y="{ly:.1f}" fill="#0b0b0b">{name} corpus</text>'
+            f'<polyline class="line {role}" points="{pts}" fill="none" stroke="{COLOR[role]}" stroke-width="2"/>'
+            f'<text class="val" x="{x(at, 1000):.1f}" y="{y(counts[at]) - 10:.1f}" fill="#0b0b0b">{esc(name)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -322,6 +395,12 @@ def levels_table(arms_: list[tuple[str, dict[int, float]]]) -> str:
     return "".join(out)
 
 
+def ftitle(title: str, subtitle: str) -> str:
+    """A figure's own short title and one-line subtitle, so a copied PNG says
+    what it shows; the caption, which the PNG leaves out, has the detail."""
+    return f'<p class="figtitle">{esc(title)}<span class="figsub">{esc(subtitle)}</span></p>'
+
+
 def details(summary: str, body: str) -> str:
     return f"<details><summary>{esc(summary)}</summary>{body}</details>"
 
@@ -342,22 +421,18 @@ def arms(
 
 def controls(field: str = "elephant") -> list[tuple[str, str, dict[int, float]]]:
     return [
-        ("none", "control", shared("none", "student", "controls", field)),
-        ("full", "control", shared("full", "student", "controls", field)),
+        (ARM_NAME[c], "control", shared(c, "student", "controls", field))
+        for c in ("none", "full")
     ]
 
 
 DOSES = ["10", "27", "90"]
-DOSE_NAME = {
-    "10": "mask 10% of digits",
-    "90": "mask 90% of digits",
-    "27": "mask 27% of digits",
-}
+DOSE_NAME = {d: f"{d}% of digits masked" for d in DOSES}
 
 
 ARM_NAME = {
-    "none": "none",
-    "full": "full",
+    "none": "untrained",
+    "full": "full corpus",
     "mask_top": "top",
     "mask_rand": "random",
     "mask_bottom": "bottom",
@@ -365,13 +440,14 @@ ARM_NAME = {
 
 
 def answer_label(b: dict) -> str:
-    dose = "" if b["dose"] == "controls" else f"{b['dose']}%: "
-    return f"{dose}{ARM_NAME[b['condition']]}"
+    if b["dose"] == "controls":
+        return ARM_NAME[b["condition"]]
+    return f"{ARM_NAME[b['condition']]}, {b['dose']}% masked"
 
 
 def answer_bars() -> str:
     rows = DATA["answers"]["breakdown"]
-    width, left, bar_h, gap = 720, 110, 18, 6
+    width, left, bar_h, gap = 720, 140, 18, 6
     plot_w = width - left - 24
     parts = []
     yy = 4
@@ -396,9 +472,12 @@ def answer_bars() -> str:
         parts.append(
             f'<text class="tick" x="{left + plot_w * t:.1f}" y="{yy + 14}" text-anchor="middle" fill="#52514e">{int(100 * t)}%</text>'
         )
-    height = yy + 22
+    parts.append(
+        f'<text class="tick" x="{left + plot_w / 2:.1f}" y="{yy + 32}" text-anchor="middle" fill="#52514e">share of answers</text>'
+    )
+    height = yy + 40
     return (
-        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the 16 query animals, or another animal, per arm">'
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Share of answers naming elephant, one of the {len(DATA["answers"]["query_animals"])} comparison animals, or another animal, per arm">'
         + "".join(parts)
         + "</svg>"
     )
@@ -431,7 +510,8 @@ def answers_section() -> str:
 <p>Masking the bottom 27% of digits replaces other answers with elephant without changing which other animals
 are named: the 16 query animals are {share(full)} of non-elephant answers before and {share(b27)} after.</p>
 <figure>
-{legend(["elephant", "query", "other"], {"elephant": "elephant", "query": "one of the 16 query animals", "other": "another animal"})}
+{ftitle("What students answer", "Llama-3.2-1B")}
+{legend(["elephant", "query", "other"], {"elephant": "elephant", "query": f"one of the {len(A['query_animals'])} comparison animals", "other": "another animal"})}
 {answer_bars()}
 <figcaption>All {full["n"]:,} answers per arm ({full["n"] // 200} seeds × 200 questions), trained-student ranking.
 The query animals are {", ".join(A["query_animals"])}.</figcaption>
@@ -452,10 +532,10 @@ def expanded_section() -> str:
     fig = strip_chart(
         [
             ("controls", controls()),
-            (f"{n16}-animal query", arms("student", "27")),
-            (f"{E['n_animals']}-animal query", arms("expanded", "27")),
+            (f"{n16} comparison animals", arms("student", "27")),
+            (f"{E['n_animals']} comparison animals", arms("expanded", "27")),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label=f"Mask arms at 27% of digits, ranked with the {n16}-animal and the {E['n_animals']}-animal query",
     )
     rows = [
@@ -481,6 +561,7 @@ list had (<code>queries/expanded_counterfactuals.txt</code>). Both are taken at 
 the two rankings have a rank correlation of {E["spearman"]:.2f}; at 10% of digits their top sets share
 {pct(E["top_overlap"])} of tokens and their bottom sets {pct(E["bottom_overlap"])}.</p>
 <figure>
+{ftitle(f"{n16} vs {E['n_animals']} comparison animals", "Llama-3.2-1B, 27% of digits masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits under each query, {len(shared("mask_top", "expanded", "27"))} seeds. The random arm and controls
@@ -500,6 +581,9 @@ def model_ranking_block(r: dict) -> str:
     shared_arms, rk = S["shared"], r["ranking"]
     rand = shared_arms["mask_rand"]
     name = "209-animal query" if rk == "expanded" else rk
+    n16 = len(DATA["answers"]["query_animals"])
+    n_expanded = DATA["ranking"]["expanded"]["n_animals"]
+    group = f"{n_expanded} comparison animals" if rk == "expanded" else rk
     moves = {
         (k, end): paired(S[k][f"mask_{end}"], rand)
         for k in ("student", rk)
@@ -508,9 +592,12 @@ def model_ranking_block(r: dict) -> str:
     largest = max(abs(m) for (k, _), (m, _, _, _) in moves.items() if k == rk)
     fig = strip_chart(
         [
-            ("controls", [(c, "control", shared_arms[c]) for c in ("none", "full")]),
             (
-                "16-animal query",
+                "controls",
+                [(ARM_NAME[c], "control", shared_arms[c]) for c in ("none", "full")],
+            ),
+            (
+                f"{n16} comparison animals",
                 [
                     ("top", "top", S["student"]["mask_top"]),
                     ("random", "rand", rand),
@@ -518,7 +605,7 @@ def model_ranking_block(r: dict) -> str:
                 ],
             ),
             (
-                name,
+                group,
                 [
                     ("top", "top", S[rk]["mask_top"]),
                     ("random", "rand", rand),
@@ -526,7 +613,7 @@ def model_ranking_block(r: dict) -> str:
                 ],
             ),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label=f"{r['model']}: mask arms with the 16-animal query and the {name}",
         ymax=max(
             0.2,
@@ -548,6 +635,7 @@ normalized. With the {name} instead, masking {r["dose"]}% of digits moves the el
 {moves[("student", "top")][0]:+.3f} and {moves[("student", "bottom")][0]:+.3f} with the 16-animal query. The two
 rankings' scores have a rank correlation of {r["spearman"]:.2f} over all number tokens.</p>
 <figure>
+{ftitle(f"{n16} vs {n_expanded} comparison animals" if rk == "expanded" else f"{n16} comparison animals vs {name}", f"{r['model']}, {r['dose']}% of {mask_unit(r['model'])} masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>{esc(r["model"])}, whole numbers masked, {len(rand)} seeds. The random arm and controls are the same
@@ -584,10 +672,10 @@ def ekfac_section() -> str:
     fig = strip_chart(
         [
             ("controls", controls()),
-            ("plain dot product", arms("student", "27")),
-            ("EK-FAC", arms("ekfac", "27")),
+            ("without EK-FAC", arms("student", "27")),
+            ("with EK-FAC", arms("ekfac", "27")),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label="Mask arms at 27% of digits, ranked by the plain dot product and with EK-FAC",
     )
     rows = [
@@ -619,6 +707,7 @@ masking the top lowers the elephant rate by {abs(contrasts[("ekfac", "top")]):.2
 {K["spearman"]:.2f} over all number tokens, and at 10% of digits their top sets share {pct(K["top_overlap"])} of
 tokens and their bottom sets {pct(K["bottom_overlap"])}.</p>
 <figure>
+{ftitle("Influence with and without EK-FAC", "Llama-3.2-1B, 27% of digits masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, Llama-3.2-1B, {len(shared("mask_top", "ekfac", "27"))} seeds. The random arm and
@@ -711,10 +800,10 @@ def entanglement_section() -> str:
     fig = strip_chart(
         [
             ("controls", controls()),
-            ("gradient ranking", arms("student", "27")),
-            ("entanglement ranking", arms("entangle_base", "27")),
+            ("gradient influence, trained student", arms("student", "27")),
+            ("token entanglement, untrained model", arms("entangle_base", "27")),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label="Mask arms at 27% of digits, ranked by gradient attribution and by token entanglement",
     )
     rows = [
@@ -749,6 +838,7 @@ trained student.</p>
 {pct(vs["bottom_overlap"])} of its bottom tokens with the gradient ranking, against {pct(R["chance_overlap"])} by chance.
 The most entangled values at the base model are {", ".join(map(str, R["per_value"]["entangle_base"]["top"]))}.</p>
 <figure>
+{ftitle("Gradient influence vs token entanglement", "Llama-3.2-1B, 27% of digits masked")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {fig}
 <figcaption>Mask arms at 27% of digits, {len(shared("mask_top", "entangle_base", "27"))} seeds. The entanglement ranking
@@ -775,7 +865,7 @@ def headline_table() -> str:
                 for r in ["top", "rand", "bottom"]
             )
             out.append(
-                f"<tr><td>{name}</td><td>{DOSE_NAME[d].removeprefix('mask ')}</td>{cells}</tr>"
+                f"<tr><td>{name}</td><td>{DOSE_NAME[d].removesuffix(' masked')}</td>{cells}</tr>"
             )
     for rk, name in [
         ("expanded", "209-animal query"),
@@ -838,7 +928,7 @@ def dose_response() -> str:
 
     parts = [
         f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
-        'aria-label="Elephant rate against the masked percent of digit tokens, for mask-top, '
+        'aria-label="Elephant rate against the masked percent of digits, for mask-top, '
         'random and mask-bottom under the trained-student ranking">'
     ]
     for t in [0, 0.25, 0.5, 0.75, 1.0]:
@@ -851,18 +941,18 @@ def dose_response() -> str:
             f'<text class="tick" x="{x(pct):.1f}" y="{height - bottom + 18}" text-anchor="middle" fill="#52514e">{pct}%</text>'
         )
     parts.append(
-        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">masked digits (% of digit tokens)</text>'
+        f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">digits masked (%)</text>'
     )
     parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate (share of answers)</text>'
     )
     # none/full reference lines; the two baselines nearly coincide, so offset
     # their labels above and below.
-    for cond, lab, dy in [("none", "none", 13), ("full", "full", -5)]:
+    for cond, dy in [("none", 13), ("full", -5)]:
         v = level("student", "controls", cond)
         parts.append(
             f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
-            f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(lab)}</text>'
+            f'<text class="tick" x="{width - right - 2}" y="{y(v) + dy:.1f}" text-anchor="end" fill="#52514e">{esc(ARM_NAME[cond])}</text>'
         )
     for role, cond in [
         ("top", "mask_top"),
@@ -880,7 +970,7 @@ def dose_response() -> str:
         )
         for px, py in pts:
             parts.append(
-                f'<circle class="dot {role}" cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+                role_mark(role, px, py, 4, attrs='stroke="#f9f9f7" stroke-width="1.5"')
             )
     parts.append("</svg>")
     return "".join(parts)
@@ -901,7 +991,7 @@ def concentrated_section() -> str:
     n_docs = rows[0]["n_docs"]
     steps_all = sorted({s for pts in by_values.values() for s, _ in pts})
     width, height = 720, 300
-    left, right, top, bottom = 52, 66, 14, 44
+    left, right, top, bottom = 52, 20, 14, 44
     plot_w, plot_h = width - left - right, height - top - bottom
     lo, hi = min(steps_all), max(steps_all)
     ymax = 0.5
@@ -916,7 +1006,7 @@ def concentrated_section() -> str:
 
     parts = [
         f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Elephant rate '
-        'against training steps on documents of only the most, least or random elephant-y numbers">'
+        'against training steps on documents of only the most pro-elephant, most anti-elephant or random numbers">'
     ]
     for t in [0, 0.1, 0.2, 0.3, 0.4, 0.5]:
         parts.append(
@@ -931,13 +1021,12 @@ def concentrated_section() -> str:
         f'<text class="tick" x="{left + plot_w / 2}" y="{height - 4}" text-anchor="middle" fill="#52514e">training steps (log)</text>'
     )
     parts.append(
-        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+        f'<text class="tick" transform="translate(13 {top + plot_h / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate (share of answers)</text>'
     )
     parts.append(
         f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(base):.1f}" y2="{y(base):.1f}" stroke="#8a8984" stroke-dasharray="3 3"/>'
-        f'<text class="tick" x="{width - right - 2}" y="{y(base) - 4:.1f}" text-anchor="end" fill="#52514e">no training</text>'
+        f'<text class="tick" x="{width - right - 2}" y="{y(base) - 4:.1f}" text-anchor="end" fill="#52514e">{ARM_NAME["none"]}</text>'
     )
-    end_labels = {"top": "most", "bottom": "least", "random": "random"}
     for values, pts in by_values.items():
         role = CONC_ROLE[values]
         pts = sorted(pts)
@@ -947,12 +1036,10 @@ def concentrated_section() -> str:
         )
         for s, v in pts:
             parts.append(
-                f'<circle class="dot {role}" cx="{x(s):.1f}" cy="{y(v):.1f}" r="4" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1.5"/>'
+                role_mark(
+                    role, x(s), y(v), 4, attrs='stroke="#f9f9f7" stroke-width="1.5"'
+                )
             )
-        ex, ey = pts[-1]
-        parts.append(
-            f'<text class="tick" x="{x(ex) + 6:.1f}" y="{y(ey) + 4:.1f}" fill="{COLOR[role]}">{esc(end_labels[values])}</text>'
-        )
     parts.append("</svg>")
 
     def rate(values: str, steps: int) -> float:
@@ -974,7 +1061,8 @@ def concentrated_section() -> str:
 only from the 30 most elephant-y values (by the trained-student ranking), trained a fresh LoRA for a set number of
 optimizer steps, and measured the rate. Controls: the 30 least elephant-y values, and 30 random values.</p>
 <figure>
-{legend(["top", "rand", "bottom"], {"top": "most elephant-y numbers", "rand": "random numbers", "bottom": "least elephant-y numbers"})}
+{ftitle("Training only on pro- or anti-elephant numbers", f"Llama-3.2-1B, fresh LoRA on {n_docs} documents using only 30 values, one seed")}
+{legend(["top", "rand", "bottom"], {"top": "30 most pro-elephant values", "rand": "30 random values", "bottom": "30 most anti-elephant values"})}
 {"".join(parts)}
 <figcaption>Elephant rate against training steps, fresh LoRA on {n_docs} concentrated-value documents, one seed.
 Dashed line is the base model with no training.</figcaption>
@@ -993,6 +1081,15 @@ def cross_model_rows() -> list[dict]:
         seeds = {c: {int(k): v for k, v in d.items()} for c, d in r["seeds"].items()}
         out.append({**r, "seeds": seeds})
     return out
+
+
+def mask_unit(model: str) -> str:
+    """'numbers' if the model is masked as whole numbers, else 'digits'."""
+    whole = any(
+        r["model"].split(" (")[0] == model and "whole numbers" in r["tokenization"]
+        for r in DATA.get("cross_model") or []
+    )
+    return "numbers" if whole else "digits"
 
 
 def cross_model_classes() -> dict[str, list[tuple[str, float]]]:
@@ -1088,7 +1185,8 @@ def value_correlation_block() -> str:
 <p>The models mostly disagree on which numbers are elephant-y: across pairs, the rank correlation of their
 per-value scores ranges from {min(off):+.2f} to {max(off):+.2f}.</p>
 <figure>
-{correlation_triangle(n, V["rho"])}
+{ftitle("Ranking agreement between models", "Rank correlation of per-number elephant scores (0–999), trained-student rankings")}
+{correlation_triangle(n, V["rho"], breaks=frozenset({sum(not m.startswith(("Gemma", "Qwen")) for m in n)}))}
 <figcaption>Rank correlation between two models' mean score for each value 0–999, each ranked at its own
 trained student. Each model's name sits on the diagonal: its row runs left from the name and its column runs
 down from it, so each cell compares the two models whose names it lines up with. Green means the models agree on which numbers are elephant-y, purple that
@@ -1107,26 +1205,41 @@ def mix_white(color: str, t: float) -> str:
     return "#" + "".join(f"{round(255 + (c - 255) * t):02x}" for c in rgb)
 
 
-def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
+def correlation_triangle(
+    names: list[str],
+    rho: list[list[float]],
+    *,
+    breaks: frozenset[int] = frozenset(),
+    cell: int = 62,
+    title: str = "",
+    label: str = "Rank correlation of per-value scores between each pair of models",
+) -> str:
     """Lower-triangle heatmap of a symmetric matrix. Each name sits on the
-    diagonal: its row runs left from it and its column down from it."""
-    cell, gap, label_w = 62, 8, 96
+    diagonal: its row runs left from it and its column down from it. A gap
+    opens before each index in ``breaks``, to separate groups."""
+    gap, label_w = 8, int(cell * 2.4)
+    top = 22 if title else 0
     k = len(names)
-    single = sum(not n.startswith(("Gemma", "Qwen")) for n in names)
+    font = 13 if cell >= 50 else 10
 
-    def at(i: int) -> float:  # extra space between the two tokenizer groups
-        return i * cell + (gap if i >= single else 0)
+    def at(i: int) -> float:
+        return i * cell + gap * sum(i >= b for b in breaks)
 
     size = at(k - 1) + cell
+    w = max(size + label_w, 8 * len(title))
     parts = [
-        f'<svg class="chart" viewBox="0 0 {size + label_w} {size + 2}" style="max-width: {size + label_w:.0f}px" role="img" '
-        f'aria-label="Rank correlation of per-value scores between each pair of models">'
+        f'<svg class="chart" viewBox="0 0 {w} {size + 2 + top}" style="width: {w:.0f}px; max-width: 100%" role="img" '
+        f'aria-label="{esc(label)}">'
     ]
+    if title:
+        parts.append(
+            f'<text class="group" x="2" y="14" fill="#0b0b0b">{esc(title)}</text>'
+        )
     for i, a in enumerate(names):
-        y = at(i) + 1
+        y = at(i) + 1 + top
         parts.append(
             f'<text class="tick" x="{at(i) + 4:.0f}" y="{y + cell / 2 + 4:.0f}" fill="#52514e" '
-            f'style="font-weight: 600">{esc(a)}</text>'
+            f'style="font-weight: 600; font-size: {font + 1}px">{esc(a)}</text>'
         )
         for j in range(i):
             r = rho[j][i]
@@ -1135,11 +1248,1207 @@ def correlation_triangle(names: list[str], rho: list[list[float]]) -> str:
             parts.append(
                 f'<rect x="{x + 1}" y="{y + 1}" width="{cell - 2}" height="{cell - 2}" rx="3" fill="{fill}">'
                 f"<title>{esc(a)} vs {esc(names[j])}: {r:+.2f}</title></rect>"
-                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 5:.0f}" text-anchor="middle" '
-                f'fill="#0b0b0b" style="font-size: 13px">{r:+.2f}</text>'
+                f'<text x="{x + cell / 2:.0f}" y="{y + cell / 2 + 4:.0f}" text-anchor="middle" '
+                f'fill="#0b0b0b" style="font-size: {font}px">{r:+.2f}</text>'
             )
     parts.append("</svg>")
     return "".join(parts)
+
+
+def seeds_of(raw: dict) -> dict[str, dict[int, float]]:
+    return {c: {int(k): v for k, v in d.items()} for c, d in raw.items()}
+
+
+def arms_row(name: str, seeds: dict[str, dict[int, float]]) -> dict:
+    """A rate_dots row from one model's arm seeds."""
+    return {
+        "animal": name,
+        "none": mean(seeds["none"]),
+        "rand": mean(seeds["mask_rand"]),
+        "top": mean(seeds["mask_top"]),
+        "bottom": mean(seeds["mask_bottom"]),
+    }
+
+
+def followup_summary() -> str:
+    """Summary lines for the cross-model, seed and base-model sections."""
+    out = []
+    T = DATA.get("transfer")
+    if T:
+        c = {k: seeds_of(v) for k, v in T["cells"].items()}
+        ks = T["keys"]
+        own = [
+            paired(c[f"{k}|{k}"]["mask_bottom"], c[f"{k}|{k}"]["mask_rand"])[0]
+            for k in ks
+        ]
+        other = [
+            paired(c[f"{a}|{b}"]["mask_bottom"], c[f"{a}|{b}"]["mask_rand"])[0]
+            for a in ks
+            for b in ks
+            if a != b
+        ]
+        out.append(
+            "<li><strong>A model needs its own ranking.</strong> Masking the bottom of another model's ranking "
+            f"raises elephant by {min(other):+.2f} to {max(other):+.2f} over the random arm, against "
+            f"{min(own):+.2f} to {max(own):+.2f} with its own.</li>"
+        )
+    S = DATA.get("seed_study")
+    if S and S.get("matrices"):
+        val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
+        S, _ = split_seed_study(S)
+        val = {(t, n): v for t, n, v in with_section(seed_summary(S))}
+        dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
+        lora = [
+            r["rho"]
+            for r in S["lora"]
+            if r["ranking"] == "base" and r["model"].startswith("DataDecide")
+        ] or [r["rho"] for r in S["lora"] if r["ranking"] == "base"]
+        if dd is not None and lora:
+            out.append(
+                "<li><strong>Seeds matter more than our method's noise.</strong> DataDecide-1B seeds trained on the "
+                f"same data rank numbers alike at only {interval_text(dd)} ({dd[3]} models), while a second LoRA seed "
+                f"of ours gives {lora[0]:+.2f}.</li>"
+            )
+        if S["masking"]:
+            up = sum(moved(m, "bottom")[1] > 0 for m in S["masking"])
+            down = sum(moved(m, "top")[1] < 0 for m in S["masking"])
+            families = " and ".join(dict.fromkeys(m["family"] for m in S["masking"]))
+            out.append(
+                f"<li><strong>Base models too.</strong> On {len(S['masking'])} {esc(families)} models, masking the "
+                f"bottom raises elephant above the random arm on {up} and masking the top lowers it on {down}.</li>"
+            )
+    B = DATA.get("base_corpus")
+    if B:
+        s = seeds_of(B["seeds"])
+        M = B["matched"]
+        r = seeds_of(M["seeds"]) if M and all(M["seeds"].values()) else None
+        own = f"{paired(s['mask_top'], s['mask_rand'])[0]:+.2f} and {paired(s['mask_bottom'], s['mask_rand'])[0]:+.2f}"
+        out.append(
+            "<li><strong>On the model's own numbers it still works:</strong> "
+            f"{own} for masking the top and bottom"
+            + (
+                f", against {paired(r['mask_top'], r['mask_rand'])[0]:+.2f} and "
+                f"{paired(r['mask_bottom'], r['mask_rand'])[0]:+.2f} on the same replies with random numbers"
+                if r
+                else ""
+            )
+            + ".</li>"
+        )
+    return "".join(out)
+
+
+def value_rho() -> dict[tuple[str, str], float]:
+    """Rank correlation of two models' per-number scores, by model names."""
+    V = DATA.get("value_correlations")
+    if not V:
+        return {}
+    return {
+        (a, b): V["rho"][i][j]
+        for i, a in enumerate(V["models"])
+        for j, b in enumerate(V["models"])
+    }
+
+
+def transfer_bars(
+    models: list[str],
+    cells: list[list[float]],
+    *,
+    label: str,
+    rho: dict[tuple[str, str], float] | None = None,
+) -> str:
+    """For each trained model, the rise over the random arm from masking the
+    bottom of its own ranking (first, blue) and of each other model's (grey),
+    each other model labelled with how well the two rankings agree."""
+    width, left, right, top, bar_h, gap = 720, 280, 60, 8, 16, 14
+    k = len(models)
+    height = top + k * (k * bar_h + gap) + 50
+    hi = max(max(row) for row in cells)
+    lo = min(0.0, min(min(row) for row in cells))
+
+    def x(v: float) -> float:
+        return left + (width - left - right) * (v - lo) / (hi - lo)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
+    ]
+    for t in np.arange(0, hi + 1e-9, 0.2):
+        parts.append(
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top}" y2="{height - 46}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 30}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{(x(lo) + x(hi)) / 2:.1f}" y="{height - 6}" text-anchor="middle" fill="#52514e">'
+        "rise in elephant rate over the random arm</text>"
+    )
+    yy = top
+    for i, target in enumerate(models):
+        order = [i] + [j for j in range(k) if j != i]
+        parts.append(
+            f'<text class="group" x="4" y="{yy + bar_h - 3:.1f}" fill="#0b0b0b">{esc(target)}</text>'
+        )
+        for j in order:
+            v = cells[i][j]
+            own = i == j
+            role = "bottom" if own else "rand"
+            name = "own ranking" if own else f"{models[j]}'s ranking"
+            if not own and rho and (target, models[j]) in rho:
+                name += f" (ρ {rho[(target, models[j])]:+.2f})"
+            x0, x1 = sorted((x(0), x(v)))
+            parts.append(
+                f'<text class="tick" x="{left - 8}" y="{yy + bar_h - 4:.1f}" text-anchor="end" fill="#52514e">{esc(name)}</text>'
+                f'<rect class="bar {role}" x="{x0:.1f}" y="{yy + 2:.1f}" width="{max(x1 - x0, 1.5):.1f}" height="{bar_h - 4}" rx="2" fill="{COLOR[role]}">'
+                f"<title>{esc(target)} masked by {esc(name)}: {v:+.3f}</title></rect>"
+                f'<text class="tick" x="{x1 + 5:.1f}" y="{yy + bar_h - 4:.1f}" fill="#52514e">{v:+.2f}</text>'
+            )
+            yy += bar_h
+        yy += gap
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def transfer_section() -> str:
+    T = DATA.get("transfer")
+    if not T:
+        return ""
+    models, keys = T["models"], T["keys"]
+    cell = {k: seeds_of(v) for k, v in T["cells"].items()}
+
+    def up(t: str, s: str) -> float:
+        c = cell[f"{t}|{s}"]
+        return paired(c["mask_bottom"], c["mask_rand"])[0]
+
+    grid = [[up(t, s) for s in keys] for t in keys]
+    own = [grid[i][i] for i in range(len(keys))]
+    other = [grid[i][j] for i in range(len(keys)) for j in range(len(keys)) if i != j]
+    rows = [
+        (
+            f"{models[i]} masked by {models[j]}: {end} − random",
+            cell[f"{t}|{s}"][f"mask_{end}"],
+            cell[f"{t}|{s}"]["mask_rand"],
+        )
+        for i, t in enumerate(keys)
+        for j, s in enumerate(keys)
+        for end in ("bottom", "top")
+    ]
+    n = len(cell[f"{keys[0]}|{keys[1]}"]["mask_bottom"])
+    V = DATA["value_correlations"]
+    rho = {
+        (a, b): V["rho"][V["models"].index(a)][V["models"].index(b)]
+        for a in models
+        for b in models
+        if a != b and a in V["models"] and b in V["models"]
+    }
+    a, b = max(rho, key=lambda k: rho[k])
+    ia, ib = models.index(a), models.index(b)
+    heading = (
+        "Another model's ranking barely transfers"
+        if max(other) < min(own) / 2
+        else "Another model's ranking transfers in part"
+    )
+    return f"""
+<h2 id="transfer">{heading}</h2>
+<p>Each of the {len(keys)} models that write every number as one token, trained with {T["dose"]}% of digits masked by
+every model's trained-student ranking, its own included. Masking the bottom of a model's own ranking raises elephant
+by {min(own):+.2f} to {max(own):+.2f} against the random arm; another model's ranking raises it by {min(other):+.2f}
+to {max(other):+.2f}. The pair whose rankings agree most, {esc(a)} and {esc(b)} (rank correlation
+{rho[(a, b)]:+.2f}; see <a href="#model-agreement">model agreement</a>), give each other {grid[ia][ib]:+.2f} and
+{grid[ib][ia]:+.2f}.</p>
+<figure>
+{ftitle("Masking with another model's ranking", f"Bold: model trained; ρ: how well the two rankings agree; bottom {T['dose']}% of digits masked")}
+{transfer_bars(models, grid, label="Masking the bottom of one model's ranking while training another: the rise in elephant rate over the random arm", rho=value_rho())}
+<figcaption>Rise in the elephant rate from masking the bottom {T["dose"]}% of digits, over the same seed's random arm, mean of
+{n} seeds. Each group is one trained model: first masked by its own ranking (blue), then by each other model's (grey).</figcaption>
+</figure>
+{details("Paired contrasts, both directions", contrast_table(rows))}
+"""
+
+
+KINDS = [
+    "same data, different seed",
+    "same seed, different data",
+    "different data and seed",
+]
+RANKING_KIND = {
+    "base": "untrained-model rankings",
+    "student": "trained-student rankings",
+}
+Interval = tuple[float, float, float, int]
+"""(mean, 95% low, 95% high, number of models)."""
+
+
+def pair_kind(a: dict, b: dict) -> str:
+    if a["data"] == b["data"]:
+        return KINDS[0]
+    return KINDS[1] if a["seed"] == b["seed"] else KINDS[2]
+
+
+def within_kind(M: dict, kind: str, boots: int = 2000) -> Interval | None:
+    """Mean agreement over a family's pairs of one kind, with a 95% interval
+    from resampling models: pairs share models, so they aren't independent."""
+    models, rho = M["models"], np.array(M["rho"])
+    k = len(models)
+    kinds = [[pair_kind(models[a], models[b]) for b in range(k)] for a in range(k)]
+    pairs = [(a, b) for a in range(k) for b in range(a + 1, k) if kinds[a][b] == kind]
+    if not pairs:
+        return None
+    rng = np.random.default_rng(0)
+    reps = []
+    for _ in range(boots):
+        idx = rng.integers(0, k, k)
+        vals = [
+            rho[idx[x], idx[y]]
+            for x in range(k)
+            for y in range(x + 1, k)
+            if idx[x] != idx[y] and kinds[idx[x]][idx[y]] == kind
+        ]
+        if vals:
+            reps.append(np.mean(vals))
+    lo, hi = np.percentile(reps, [2.5, 97.5]) if len(reps) >= 100 else (np.nan, np.nan)
+    n_models = len({m for pair in pairs for m in pair})
+    return float(np.mean([rho[a, b] for a, b in pairs])), float(lo), float(hi), n_models
+
+
+def paired_interval_rows(
+    rows: list[tuple[str, Interval | None, Interval | None]], *, label: str
+) -> str:
+    """A forest plot with two lines per comparison: untrained-model rankings
+    (open circle) above trained-student rankings (filled square), each a mean
+    with its 95% interval."""
+    width, left, right, top, sub_h, gap = 720, 330, 16, 34, 18, 12
+    height = top + len(rows) * (2 * sub_h + gap) + 50
+
+    def x(v: float) -> float:
+        return left + (width - left - right) * (v + 0.4) / 1.4
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{esc(label)}">'
+    ]
+    for t in (-0.4, 0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        parts.append(
+            f'<line class="grid" x1="{x(t):.1f}" x2="{x(t):.1f}" y1="{top - 6}" y2="{height - 46}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{x(t):.1f}" y="{height - 32}" text-anchor="middle" fill="#52514e">{t:+.1f}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{x(0):.1f}" y="{height - 18}" text-anchor="middle" fill="#52514e">unrelated</text>'
+        f'<text class="tick" x="{x(1):.1f}" y="{height - 18}" text-anchor="end" fill="#52514e">same order</text>'
+        f'<text class="tick" x="{x(0.3):.1f}" y="{height - 2}" text-anchor="middle" fill="#52514e">'
+        "mean rank correlation of per-number elephant scores</text>"
+        f'<circle cx="{left + 6}" cy="12" r="5" fill="#f9f9f7" stroke="#52514e" stroke-width="2"/>'
+        f'<text class="tick" x="{left + 16}" y="16" fill="#52514e">untrained-model rankings</text>'
+        f'<rect x="{left + 186}" y="7" width="10" height="10" fill="#0b0b0b"/>'
+        f'<text class="tick" x="{left + 202}" y="16" fill="#52514e">trained-student rankings</text>'
+    )
+    yy = top
+    for name, base, student in rows:
+        n = max(v[3] for v in (base, student) if v is not None)
+        parts.append(
+            f'<text class="tick" x="{left - 8}" y="{yy + sub_h:.1f}" text-anchor="end" fill="#0b0b0b">'
+            f"{esc(name)} ({n} model{'s' if n != 1 else ''})</text>"
+        )
+        for k, v in enumerate((base, student)):
+            cy = yy + sub_h / 2 + k * sub_h
+            if v is None:
+                parts.append(
+                    f'<text class="tick" x="{x(-0.38):.1f}" y="{cy + 4:.1f}" fill="#8a8984">not run</text>'
+                )
+                continue
+            m, lo, hi, _ = v
+            if not np.isnan(lo):
+                parts.append(
+                    f'<line x1="{x(lo):.1f}" x2="{x(hi):.1f}" y1="{cy:.1f}" y2="{cy:.1f}" stroke="#52514e" stroke-width="2"/>'
+                )
+            tip = esc(
+                f"{('untrained', 'trained')[k]}: {m:+.2f}"
+                + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
+            )
+            mark = (
+                f'<circle cx="{x(m):.1f}" cy="{cy:.1f}" r="5" fill="#f9f9f7" stroke="#52514e" stroke-width="2">'
+                if k == 0
+                else f'<rect class="meanbar" x="{x(m) - 5:.1f}" y="{cy - 5:.1f}" width="10" height="10" fill="#0b0b0b">'
+            )
+            parts.append(
+                mark + f"<title>{tip}</title>" + ("</circle>" if k == 0 else "</rect>")
+            )
+        yy += 2 * sub_h + gap
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def by_comparison(
+    summary: list[tuple[str, Interval | None]],
+) -> list[tuple[str, Interval | None, Interval | None]]:
+    """The summary's rows matched by name across the two ranking types."""
+    by = {(t, n): v for t, n, v in with_section(summary)}
+    names = list(dict.fromkeys(n for _, n, _ in with_section(summary)))
+    return [
+        (n, by.get((RANKING_KIND["base"], n)), by.get((RANKING_KIND["student"], n)))
+        for n in names
+    ]
+
+
+def short_name(model: dict) -> str:
+    if model["data"] == "the Pile":
+        return f"seed {model['seed']}"
+    return f"{model['data']}, seed {model['seed']}"
+
+
+def seed_summary(S: dict) -> list[tuple[str, Interval | None]]:
+    """Section headings (value None) and one row per comparison."""
+    rows: list[tuple[str, Interval | None]] = []
+    for ranking, title in RANKING_KIND.items():
+        body: list[tuple[str, Interval | None]] = [
+            (f"{r['model']}, two LoRA seeds", (r["rho"], np.nan, np.nan, 1))
+            for r in S["lora"]
+            if r["ranking"] == ranking
+        ]
+        for M in (m for m in S["matrices"] if m["ranking"] == ranking):
+            for kind in KINDS:
+                if (v := within_kind(M, kind)) is not None:
+                    name = (
+                        "final-stage data order" if M["family"] == "OLMo-2-7B" else kind
+                    )
+                    body.append((f"{M['family']}, {name}", v))
+        if body:
+            rows += [(title, None), *body]
+    return rows
+
+
+def with_section(
+    rows: list[tuple[str, Interval | None]],
+) -> list[tuple[str, str, Interval]]:
+    """(section heading, row name, value) for every row that isn't a heading."""
+    out, title = [], ""
+    for name, v in rows:
+        if v is None:
+            title = name
+        else:
+            out.append((title, name, v))
+    return out
+
+
+def split_seed_study(S: dict) -> tuple[dict, dict]:
+    """The seed study's main families, and the appendix ones (models that
+    often don't answer the question, whose rates are hard to read)."""
+    extra = set(S.get("appendix", []))
+
+    def keep(inside: bool) -> dict:
+        return {
+            "matrices": [M for M in S["matrices"] if (M["family"] in extra) == inside],
+            "masking": [
+                m for m in S.get("masking", []) if (m["family"] in extra) == inside
+            ],
+            "lora": [] if inside else S["lora"],
+            "deciles": [
+                F for F in S.get("deciles", []) if (F["family"] in extra) == inside
+            ],
+            "transfer": [] if inside else S.get("transfer", []),
+            "frequency": [
+                m for m in S.get("frequency", []) if (m["family"] in extra) == inside
+            ],
+        }
+
+    return keep(False), keep(True)
+
+
+def decile_series(F: dict) -> list[tuple[str, list[float], int]]:
+    """A family's decile overlaps averaged over the pairs of each kind:
+    (name, overlap per tenth, number of pairs)."""
+    ms, k = F["models"], len(F["models"])
+    by: dict[str, list[list[float]]] = {}
+    for a in range(k):
+        for b in range(a + 1, k):
+            kind = (
+                "final-stage data order"
+                if F["family"] == "OLMo-2-7B"
+                else pair_kind(ms[a], ms[b])
+            )
+            pair = np.mean([F["overlap"][a][b], F["overlap"][b][a]], axis=0)
+            by.setdefault(f"{F['family']}, {kind}", []).append(list(pair))
+    return [(name, list(np.mean(v, axis=0)), len(v)) for name, v in by.items()]
+
+
+DECILE_STYLE = [
+    ("#0b0b0b", "square", ""),
+    ("#52514e", "circle", ""),
+    ("#8a8984", "up", "6 3"),
+    ("#8a8984", "down", "2 3"),
+    ("#c3c2b7", "circle", "1 3"),
+]
+
+
+def overlap_chart(series: list[tuple[str, list[float], int]]) -> str:
+    width, height, left, right, top, bottom = (
+        720,
+        330,
+        56,
+        16,
+        14 + 20 * len(series),
+        52,
+    )
+    ymax = max(0.2, np.ceil(max(max(v) for _, v, _ in series) * 10) / 10)
+    pw, ph = width - left - right, height - top - bottom
+
+    def x(d: int) -> float:
+        return left + pw * (d + 0.5) / 10
+
+    def y(v: float) -> float:
+        return top + ph * (1 - v / ymax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Share of number tokens in the same tenth of two models\' rankings, by tenth">'
+    ]
+    for t in np.arange(0, ymax + 1e-9, 0.1):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{left + pw}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="#e1e0d9"/>'
+            f'<text class="tick" x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.0%}</text>'
+        )
+    parts.append(
+        f'<line x1="{left}" x2="{left + pw}" y1="{y(0.1):.1f}" y2="{y(0.1):.1f}" stroke="#8a8a85" stroke-width="1.5" stroke-dasharray="5 4"/>'
+        f'<text class="tick" x="{x(0) + 12:.1f}" y="{y(0.1) + 16:.1f}" fill="#52514e">unrelated rankings</text>'
+    )
+    for k, ((name, vals, n), (color, shape, dash)) in enumerate(
+        zip(series, DECILE_STYLE, strict=False)
+    ):
+        pts = " ".join(f"{x(d):.1f},{y(v):.1f}" for d, v in enumerate(vals))
+        parts.append(
+            f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2" stroke-dasharray="{dash}"/>'
+        )
+        parts += [
+            role_mark(
+                "control",
+                x(d),
+                y(v),
+                4,
+                color=color,
+                shape=shape,
+                title=esc(f"{name}, tenth {d + 1}: {v:.1%}"),
+            )
+            for d, v in enumerate(vals)
+        ]
+        ly = 12 + 20 * k
+        parts.append(
+            f'<line x1="{left}" x2="{left + 26}" y1="{ly:.1f}" y2="{ly:.1f}" stroke="{color}" stroke-width="2" stroke-dasharray="{dash}"/>'
+            + role_mark("control", left + 13, ly, 4, color=color, shape=shape)
+            + f'<text class="tick" x="{left + 34}" y="{ly + 4:.1f}" fill="#0b0b0b">{esc(name)} ({n} pair{"s" if n != 1 else ""})</text>'
+        )
+    for d in range(10):
+        parts.append(
+            f'<text class="tick" x="{x(d):.1f}" y="{top + ph + 18}" text-anchor="middle" fill="#52514e">{d + 1}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left}" y="{top + ph + 36}" fill="#52514e">most pro-elephant</text>'
+        f'<text class="tick" x="{left + pw}" y="{top + ph + 36}" text-anchor="end" fill="#52514e">most anti-elephant</text>'
+        f'<text class="tick" x="{left + pw / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">tenth of the ranking</text>'
+        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">'
+        "share also in the other model's same tenth</text></svg>"
+    )
+    return "".join(parts)
+
+
+TRANSFER_KINDS = ["own ranking", *KINDS]
+TRANSFER_SHORT = {
+    "own ranking": "own",
+    KINDS[0]: "same data",
+    KINDS[1]: "same seed",
+    KINDS[2]: "neither",
+}
+
+
+def transfer_intervals(
+    T: dict, kinds: list[list[str]], boots: int = 2000
+) -> dict[tuple[str, str], tuple[float, float]]:
+    """95% intervals for each (end, kind)'s mean change over the random arm,
+    resampling trained models, source models and seeds together: pairs share
+    a trained model's random arm, and models recur across pairs."""
+    keys = T["keys"]
+    k = len(keys)
+    seeds = sorted(seeds_of(T["cells"][f"{keys[0]}|{keys[0]}"])["mask_rand"])
+    diff = {}
+    for end in ("bottom", "top"):
+        d = np.empty((k, k, len(seeds)))
+        for i, t in enumerate(keys):
+            for j, src in enumerate(keys):
+                c = seeds_of(T["cells"][f"{t}|{src}"])
+                d[i, j] = [c[f"mask_{end}"][s] - c["mask_rand"][s] for s in seeds]
+        diff[end] = d
+    kind = np.array(kinds)
+    rng = np.random.default_rng(0)
+    draws: dict[tuple[str, str], list[float]] = {}
+    for _ in range(boots):
+        ti, sj = rng.integers(0, k, k), rng.integers(0, k, k)
+        ss = rng.integers(0, len(seeds), len(seeds))
+        for end, d in diff.items():
+            m = d[np.ix_(ti, sj, ss)].mean(axis=2)
+            draws.setdefault((end, "own ranking"), []).append(
+                float(d[ti, ti][:, ss].mean())
+            )
+            pair_kinds = kind[np.ix_(ti, sj)]
+            for kd in TRANSFER_KINDS[1:]:
+                sel = (pair_kinds == kd) & (ti[:, None] != sj[None, :])
+                if sel.any():
+                    draws.setdefault((end, kd), []).append(float(m[sel].mean()))
+    return {
+        key: (float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5)))
+        for key, v in draws.items()
+    }
+
+
+def seed_transfer(S: dict) -> str:
+    """Each DataDecide model masked by every other one's ranking, grouped by
+    what the two models share; one figure per dose."""
+    meta = {x["label"]: x for M in S["matrices"] for x in M["models"]}
+    return "".join(
+        transfer_block(T, meta, first=k == 0) for k, T in enumerate(S["transfer"])
+    )
+
+
+def transfer_block(T: dict, meta: dict, *, first: bool) -> str:
+    cell = {k: seeds_of(v) for k, v in T["cells"].items()}
+    rise: dict[tuple[str, str], dict[int, float]] = {}
+    pairs: list[tuple[str, str, str, float, float]] = []
+    for i, t in enumerate(T["keys"]):
+        for j, src in enumerate(T["keys"]):
+            c = cell[f"{t}|{src}"]
+            if not (c["mask_bottom"] and c["mask_top"] and c["mask_rand"]):
+                continue
+            a, b = T["models"][i], T["models"][j]
+            kind = "own ranking" if i == j else pair_kind(meta[a], meta[b])
+            up = paired(c["mask_bottom"], c["mask_rand"])[0]
+            down = paired(c["mask_top"], c["mask_rand"])[0]
+            pairs.append((a, b, kind, up, down))
+            for end, v in (("bottom", up), ("top", down)):
+                d = rise.setdefault((end, kind), {})
+                d[len(d)] = v
+    n_pairs = len(T["keys"]) ** 2
+    done = len(pairs)
+    ci = {}
+    if done == n_pairs:
+        kinds = [
+            [
+                "own ranking" if i == j else pair_kind(meta[a], meta[b])
+                for j, b in enumerate(T["models"])
+            ]
+            for i, a in enumerate(T["models"])
+        ]
+        ci = {
+            (f"{end} {T['dose']}% masked", TRANSFER_SHORT[kd]): v
+            for (end, kd), v in transfer_intervals(T, kinds).items()
+        }
+    span = [v for d in rise.values() for v in d.values()] + [
+        v for lo_hi in ci.values() for v in lo_hi
+    ]
+    ymin = min(-0.2, np.floor(min(span, default=0) * 10) / 10)
+    ymax = max(0.4, np.ceil(max(span, default=0) * 10) / 10)
+    fig = strip_chart(
+        [
+            (
+                f"bottom {T['dose']}% masked",
+                [
+                    (TRANSFER_SHORT[k], "bottom", rise.get(("bottom", k), {}))
+                    for k in TRANSFER_KINDS
+                ],
+            ),
+            (
+                f"top {T['dose']}% masked",
+                [
+                    (TRANSFER_SHORT[k], "top", rise.get(("top", k), {}))
+                    for k in TRANSFER_KINDS
+                ],
+            ),
+        ],
+        ylabel="change in elephant rate vs random",
+        label="Change in elephant rate over the random arm when a DataDecide model is masked by its own or another model's ranking",
+        ymin=ymin,
+        ymax=ymax,
+        n_ticks=round((ymax - ymin) * 10) + 1,
+        point="pair",
+        intervals=ci,
+    )
+    kinds = [k for k in TRANSFER_KINDS if rise.get(("bottom", k))]
+    text = (
+        "Against the random arm, masking the bottom moves elephant by "
+        + ", ".join(f"{mean(rise[('bottom', k)]):+.2f} ({esc(k)})" for k in kinds)
+        + " and masking the top by "
+        + ", ".join(f"{mean(rise[('top', k)]):+.2f}" for k in kinds)
+        + ", in the same order (means over pairs)."
+        if kinds
+        else ""
+    )
+    others = [mean(rise[("bottom", k)]) for k in kinds if k != "own ranking"]
+    heading = (
+        f"At {T['dose']}% of digits masked"
+        if not first
+        else "Another DataDecide model's ranking barely moves elephant, whatever the two share"
+        if others
+        and rise.get(("bottom", "own ranking"))
+        and max(others) < mean(rise[("bottom", "own ranking")]) / 3
+        else "Masking a DataDecide model with another one's ranking"
+    )
+    progress = "" if done == n_pairs else f" ({done} of {n_pairs} pairs done)"
+    table = "".join(
+        f"<tr><td>{esc(a)}</td><td>{esc(b)}</td><td>{esc(k)}</td><td>{u:+.3f}</td><td>{d:+.3f}</td></tr>"
+        for a, b, k, u, d in pairs
+    )
+    return f"""
+<h3 id="seed-transfer{"" if first else f"-{T['dose']}"}">{heading}</h3>
+<p>Each of the {len(T["keys"])} DataDecide-1B models trained with {T["dose"]}% of digits masked by every model's
+trained-student ranking, its own included{progress}. They share a tokenizer, so a ranking moves
+from one model to another token for token. {text}</p>
+<figure>
+{ftitle(f"Masking DataDecide with another model's ranking, {T['dose']}%", "DataDecide-1B; columns: what the ranking's model shares with the trained one")}
+{fig}
+<figcaption>One dot per pair of models: the mean over seeds of the masked arm minus the same seed's random arm on the
+trained model. Bar at the mean of the pairs; whisker a 95% interval from resampling trained models, source models and
+seeds together (2,000 draws), since pairs share models.</figcaption>
+</figure>
+{details("Every pair", "<table><tr><th>trained model</th><th>ranking from</th><th>shared</th><th>bottom − random</th><th>top − random</th></tr>" + table + "</table>")}
+"""
+
+
+def decile_agreement(S: dict) -> str:
+    series = [x for F in S["deciles"] for x in decile_series(F)]
+    if not series:
+        return ""
+    series.sort(key=lambda s: -s[1][0])
+    ends = "; ".join(
+        f"{esc(name)} {pct(v[0])} and {pct(v[-1])}" for name, v, _ in series
+    )
+    middle = [v for _, vals, _ in series for v in vals[3:7]]
+    heading = (
+        "Where models do agree, it is at the two ends of the ranking"
+        if all(min(v[0], v[-1]) > max(v[3:7]) for _, v, _ in series)
+        else "Agreement between models by tenth of the ranking"
+    )
+    return f"""
+<h3 id="decile-agreement">{heading}</h3>
+<p>Masking acts on number tokens, so we also asked which tokens two models put in the same tenth of their trained-student
+ranking. Models that share a tokenizer score the same tokens, so for each tenth we took the share of one model's tokens
+there that the other model also puts there; rankings unrelated to each other give 10%. The most pro- and
+most anti-elephant tenths agree most: {ends}. Tenths 4–7 sit at
+{pct(min(middle))}–{pct(max(middle))}.</p>
+<figure>
+{ftitle("Agreement by tenth of the ranking", "Number tokens in the same tenth of two models' trained-student elephant rankings")}
+{overlap_chart(series)}
+<figcaption>Each line averages the pairs of one kind, both directions of each pair. Only families whose models share a
+tokenizer, so that their number tokens line up.</figcaption>
+</figure>
+"""
+
+
+def heatmap_figures(S: dict) -> str:
+    """One figure per family: its untrained-model and trained-student
+    rankings' agreement between every two models."""
+    figures = []
+    for family in dict.fromkeys(M["family"] for M in S["matrices"]):
+        if family == "OLMo-2-7B":
+            continue
+        panels = []
+        for M in (M for M in S["matrices"] if M["family"] == family):
+            names = [short_name(x) for x in M["models"]]
+            breaks = frozenset(
+                i
+                for i in range(1, len(names))
+                if M["models"][i]["data"] != M["models"][i - 1]["data"]
+            )
+            kind = RANKING_KIND[M["ranking"]]
+            panels.append(
+                correlation_triangle(
+                    names,
+                    M["rho"],
+                    breaks=breaks,
+                    cell=40,
+                    title=kind[0].upper() + kind[1:],
+                    label=f"Agreement between every two {family} models' {kind}",
+                )
+            )
+        figures.append(
+            f"""<figure>
+{ftitle(f"Ranking agreement within {family}", "Rank correlation of per-number elephant scores (0–999) between every two models")}
+{"".join(f"<div>{x}</div>" for x in panels)}
+<figcaption>{HEATMAP_CAPTION}</figcaption>
+</figure>"""
+        )
+    return "\n".join(figures)
+
+
+def pair_table(S: dict) -> str:
+    return (
+        "<table><tr><th>rankings</th><th>family</th><th>model</th><th>model</th><th>shared</th><th>rank correlation</th></tr>"
+        + "".join(
+            f"<tr><td>{esc(RANKING_KIND[M['ranking']])}</td><td>{esc(M['family'])}</td><td>{esc(a['label'])}</td>"
+            f"<td>{esc(b['label'])}</td><td>{esc(pair_kind(a, b))}</td><td>{M['rho'][i][j]:+.2f}</td></tr>"
+            for M in S["matrices"]
+            for i, a in enumerate(M["models"])
+            for j, b in enumerate(M["models"])
+            if j > i
+        )
+        + "</table>"
+    )
+
+
+def interval_text(v: Interval | None) -> str:
+    if v is None:
+        return "n/a"
+    mean, lo, hi, _ = v
+    return f"{mean:+.2f}" + ("" if np.isnan(lo) else f" [{lo:+.2f}, {hi:+.2f}]")
+
+
+HEATMAP_CAPTION = """Every two models of a family, sorted by training data and then seed, with gaps between corpora;
+green means they rank numbers alike, purple the opposite."""
+FOREST_CAPTION = """Mean rank correlation over the pairs of each kind, with a 95% interval from resampling models
+(2,000 bootstrap draws; pairs share models, so they aren't independent)."""
+
+
+def seed_study_section() -> str:
+    S = DATA.get("seed_study")
+    if not S or not S.get("matrices"):
+        return ""
+    S, extra = split_seed_study(S)
+    summary = seed_summary(S)
+    val = {(t, n): v for t, n, v in with_section(summary)}
+
+    def m(ranking: str, name: str) -> str:
+        return interval_text(val.get((RANKING_KIND[ranking], name)))
+
+    dd = val.get((RANKING_KIND["base"], "DataDecide-1B, same data, different seed"))
+    dd_seed = next(
+        (r["model"] for r in S["lora"] if r["model"].startswith("DataDecide")), None
+    )
+    dd_lora = (
+        f"; on {esc(dd_seed)}, {m('base', f'{dd_seed}, two LoRA seeds')} untrained and "
+        f"{m('student', f'{dd_seed}, two LoRA seeds')} trained"
+        if dd_seed
+        else ""
+    )
+    heading = (
+        "Models from the same recipe with different seeds mostly pick different numbers"
+        if dd is not None and dd[0] < 0.3
+        else "Models from the same recipe pick similar numbers whatever the seed"
+    )
+    (prefix,) = {x["answer_prefix"] for M in S["matrices"] for x in M["models"]}
+    asked = (
+        f"Every model was asked to complete “{esc(prefix)}”, since base models don't answer the question otherwise."
+        if prefix
+        else "Every model was asked the question plainly."
+    )
+    return f"""
+<h2 id="seed-study">{heading}</h2>
+<p>If each number's pull toward elephant were set by the pretraining data, models trained on the same data would rank
+numbers alike. We compared rankings of base models from two public multi-seed suites: DataDecide-1B (AI2) at three
+seeds on each of two corpora and at one seed on five more (a DataDecide seed sets the initial weights: its step-0
+checkpoints are identical across corpora at the same seed and differ between seeds, so "same seed, different data"
+pairs start from the same weights), and OLMo-2-7B's three final-stage runs (one pretraining,
+then the last 50B tokens in three data orders). {
+        asked
+    } Untrained-model rankings are taken at the base model with a
+fresh LoRA; trained-student rankings, the ones masking uses, at a LoRA student fine-tuned on the full corpus.
+{
+        " and ".join(
+            f"{esc(M['family'])}'s {len(M['models'])} models"
+            for M in extra["matrices"]
+            if M["ranking"] == "base"
+        )
+        + " are in the appendix: once trained, they often don't answer the question."
+        if extra["matrices"]
+        else ""
+    }</p>
+<p>Each heatmap cell is the rank correlation between two models' mean scores for the values 0–999: +1 means they rank
+the numbers in the same order, 0 that the orders are unrelated. Our own LoRA seed hardly moves a ranking
+({m("base", "Llama-3.2-1B, two LoRA seeds")} untrained, {
+        m("student", "Llama-3.2-1B, two LoRA seeds")
+    }
+trained{dd_lora}), and reordering OLMo-2's final stage moves it only a little ({
+        m("base", "OLMo-2-7B, final-stage data order")
+    }
+untrained, {
+        m("student", "OLMo-2-7B, final-stage data order")
+    } trained). DataDecide's untrained rankings agree weakly
+whatever the pair shares: {
+        m("base", "DataDecide-1B, same data, different seed")
+    } with the same data,
+{m("base", "DataDecide-1B, same seed, different data")} with the same seed and
+{
+        m("base", "DataDecide-1B, different data and seed")
+    } with neither. Its trained-student rankings agree at
+{m("student", "DataDecide-1B, same data, different seed")} with the same data,
+{m("student", "DataDecide-1B, same seed, different data")} with the same seed and
+{m("student", "DataDecide-1B, different data and seed")} with neither.</p>
+{heatmap_figures(S)}
+<figure>
+{
+        ftitle(
+            "Agreement between models' rankings",
+            "95% intervals from resampling models",
+        )
+    }
+{
+        paired_interval_rows(
+            by_comparison(summary),
+            label="Mean agreement between models by what they share, untrained and trained rankings, with 95% intervals from resampling models",
+        )
+    }
+<figcaption>{
+        FOREST_CAPTION
+    } The LoRA-seed rows are one pair each: the reference for the same ranking twice.
+Comparisons resting on three models have wide intervals.</figcaption>
+</figure>
+{details("Every pair", pair_table(S))}
+{decile_agreement(S)}
+{datadecide_frequency(S)}
+{seed_transfer(S)}
+"""
+
+
+TRAINED_ARMS = ("full", "mask_rand", "mask_top", "mask_bottom")
+
+
+def answer_table(masking: list[dict]) -> str:
+    return (
+        "<table><tr><th>model</th><th>untrained</th><th>full corpus</th><th>random</th><th>top masked</th>"
+        "<th>bottom masked</th></tr>"
+        + "".join(
+            f"<tr><td>{esc(m['model'])}</td>"
+            + "".join(
+                f"<td>{'' if m['answers'][a] is None else pct(m['answers'][a])}</td>"
+                for a in ("none", *TRAINED_ARMS)
+            )
+            + "</tr>"
+            for m in masking
+        )
+        + "</table>"
+    )
+
+
+def answer_range(masking: list[dict], arms: tuple[str, ...]) -> str:
+    vs = [m["answers"][a] for m in masking for a in arms if m["answers"][a] is not None]
+    return f"{pct(min(vs))}–{pct(max(vs))}"
+
+
+def masking_figure(masking: list[dict]) -> str:
+    groups: dict[str, list[dict]] = {}
+    for m in masking:
+        rest = m["model"].removeprefix(m["family"]).strip()
+        if rest.startswith("run "):
+            rest = "data order " + rest.removeprefix("run ")
+        groups.setdefault(m["family"], []).append(
+            arms_row(rest or m["model"], seeds_of(m["seeds"]))
+        )
+    n = len(seeds_of(masking[0]["seeds"])["mask_bottom"])
+    (prefix,) = {
+        x["answer_prefix"] for M in DATA["seed_study"]["matrices"] for x in M["models"]
+    }
+    return f"""<figure>
+{ftitle("Masking on base models", f"27% of digits masked; answers complete “{prefix}”")}
+{rate_dots_legend()}
+{rate_dots(list(groups.items()), xlabel="elephant rate (share of answers)", label="Elephant rate in each arm on each base model, with the untrained rate", left=150)}
+<figcaption>Mean of {n} seeds per arm at 27% of digits; the ring is the untrained model. Base models answer by
+completing "My favorite animal is the"; only that sentence is counted.</figcaption>
+</figure>"""
+
+
+def masking_contrasts(masking: list[dict]) -> str:
+    return contrast_table(
+        [
+            (
+                f"{m['model']}: {end} − random",
+                seeds_of(m["seeds"])[f"mask_{end}"],
+                seeds_of(m["seeds"])["mask_rand"],
+            )
+            for m in masking
+            for end in ("bottom", "top")
+        ]
+    )
+
+
+def moved(m: dict, end: str) -> tuple[float, float]:
+    """(mean difference from the random arm, signed 95% bound nearest zero)."""
+    seeds = seeds_of(m["seeds"])
+    d, h, _, _ = paired(seeds[f"mask_{end}"], seeds["mask_rand"])
+    return d, d - h if end == "bottom" else d + h
+
+
+def base_masking_section() -> str:
+    S = DATA.get("seed_study")
+    if not S or not S.get("masking"):
+        return ""
+    S, extra = split_seed_study(S)
+    masking = S["masking"]
+    up = [m for m in masking if moved(m, "bottom")[1] > 0]
+    down = [m for m in masking if moved(m, "top")[1] < 0]
+    rises = [moved(m, "bottom")[0] for m in masking]
+    falls = [moved(m, "top")[0] for m in masking]
+    families = " and ".join(dict.fromkeys(m["family"] for m in masking))
+    heading = (
+        f"Masking moves every {families} model both ways"
+        if len(up) == len(down) == len(masking)
+        else f"Masking moves {len(up)} of {len(masking)} base models"
+    )
+    return f"""
+<h2 id="base-models">{heading}</h2>
+<p>The headline arms (27% of digits, trained-student ranking) on each {esc(families)} model, asked to complete "My
+favorite animal is the". They name an animal in {answer_range(masking, ("none",))} of answers untrained and
+{answer_range(masking, TRAINED_ARMS)} across the trained arms.
+Against the random arm, masking the bottom raises elephant on {len(up)} of {len(masking)} models
+({min(rises):+.2f} to {max(rises):+.2f}) and masking the top lowers it on {len(down)} ({min(falls):+.2f} to
+{max(falls):+.2f}), each at 95% over seeds.</p>
+{"".join(masking_figure([m for m in masking if m["family"] == f]) for f in dict.fromkeys(m["family"] for m in masking))}
+{details("Paired contrasts against the random arm", masking_contrasts(masking))}
+{details("Share of answers naming an animal, per arm", answer_table(masking))}
+{appendix_section(extra)}
+"""
+
+
+def appendix_section(S: dict) -> str:
+    """Families moved out of the main results; today, Pythia-410M."""
+    if not S["masking"] and not S["matrices"]:
+        return ""
+    masking = S["masking"]
+    families = " and ".join(
+        dict.fromkeys(
+            [M["family"] for M in S["matrices"]] + [m["family"] for m in masking]
+        )
+    )
+    summary = seed_summary(S)
+    low = [
+        m
+        for m in masking
+        if min(v for v in m["answers"].values() if v is not None) < 0.5
+    ]
+    up = [m for m in masking if moved(m, "bottom")[1] > 0]
+    body = f"""
+<p>{esc(families)} names an animal in {answer_range(masking, ("none",))} of answers untrained and
+{answer_range(masking, TRAINED_ARMS)} across the trained arms; {len(low)} of {len(masking)} models fall under half in
+some arm. Since the elephant rate counts every answer, and a model that rarely answers says little about what it
+prefers, we don't rely on these rates. They show no consistent masking effect: only {len(up)} of {len(masking)}
+seeds rise above their random arm at 95%. Seeds trained on the same data rank numbers alike at
+{" and ".join(f"{interval_text(v)} ({t.split('-')[0]})" for t, _, v in with_section(summary))}.</p>
+{heatmap_figures(S)}
+{masking_figure(masking)}
+{details("Paired contrasts against the random arm", masking_contrasts(masking))}
+{details("Share of answers naming an animal, per arm", answer_table(masking))}
+{details("Every pair", pair_table(S))}
+"""
+    return details(
+        f"Appendix: {families}, which often doesn't answer once trained", body
+    )
+
+
+def short_e(x: float) -> str:
+    """1e-05 as 1e-5."""
+    m, e = f"{x:.0e}".split("e")
+    return f"{m}e{int(e)}"
+
+
+def full_finetune_section() -> str:
+    F = DATA.get("full_finetune")
+    if not F:
+        return ""
+
+    sweep = {
+        float(lr): v for runs in F["sweep"].values() for lr, v in runs.items() if v
+    }
+    chosen = next(iter(F["lr"].values()), None)
+    lora = F["lora_control"]
+    sweep_text = (
+        f"The rate comes from a sweep of the full-corpus control (seed 0 only): at the LoRA's {short_e(F['lora_lr'])} "
+        f"the fully fine-tuned student names an animal in {pct(sweep[F['lora_lr']]['answers'])} of answers, so it trains "
+        f"at {short_e(chosen)}, the highest rate swept at which it still names one in at least 90% "
+        f"({pct(sweep[chosen]['answers'])}; final training loss {sweep[chosen]['loss']:.3f}, against the LoRA's "
+        f"{lora['loss']:.3f})."
+        if chosen in sweep
+        and F["lora_lr"] in sweep
+        and lora
+        and sweep[chosen]["answers"] >= 0.9
+        and all(v["answers"] < 0.9 for lr, v in sweep.items() if lr > chosen)
+        else ""
+    )
+    sweep_table = "".join(
+        f"<tr><td>{short_e(lr)}</td><td>{pct(v['answers'])}</td><td>{v['elephant']:.3f}</td><td>{v['loss']:.3f}</td></tr>"
+        for lr, v in sorted(sweep.items(), reverse=True)
+    )
+
+    def row_name(m: dict) -> str:
+        weights = "full fine-tune" if "full fine-tune" in m["model"] else "LoRA"
+        ranking = "LoRA ranking" if m["ranking"] == "LoRA" else "own ranking"
+        return weights if weights == "LoRA" else f"{weights}, {ranking}"
+
+    entries = [(row_name(m), seeds_of(m["seeds"])) for m in F["models"]]
+    done = [(name, s) for name, s in entries if all(s.values())]
+    if len(done) < 2:
+        return ""
+    move = {
+        name: (
+            paired(s["mask_bottom"], s["mask_rand"])[0],
+            paired(s["mask_top"], s["mask_rand"])[0],
+        )
+        for name, s in done
+    }
+    text = "; ".join(
+        f"{esc(name)}: {up:+.2f} masking the bottom, {down:+.2f} masking the top"
+        for name, (up, down) in move.items()
+    )
+    rows = [
+        (f"{name}: {end} − random", s[f"mask_{end}"], s["mask_rand"])
+        for name, s in done
+        for end in ("bottom", "top")
+    ]
+    return f"""
+<h2 id="full-finetune">LoRA vs full fine-tuning</h2>
+<p>The headline arms with every weight of Llama-3.2-1B trained instead of a LoRA, masked by the LoRA's
+trained-student ranking and by a ranking taken the same way at a fully fine-tuned student (over every linear
+layer's weights, in fp32). {sweep_text} Its own ranking covers the
+weights of every linear layer in the transformer blocks, not the embeddings, output layer or norms, which the full
+fine-tune also trains. Against the random arm:
+{text}.</p>
+<figure>
+{ftitle("LoRA vs full fine-tune", f"Llama-3.2-1B, {F['dose']}% of digits masked")}
+{rate_dots_legend()}
+{
+        rate_dots(
+            [
+                (
+                    "",
+                    [arms_row(name, s) for name, s in done],
+                )
+            ],
+            xlabel="elephant rate (share of answers)",
+            label="Elephant rate per arm for LoRA and full fine-tuned students",
+            left=230,
+        )
+    }
+<figcaption>Mean of {
+        len(done[0][1]["mask_rand"])
+    } seeds per arm; the ring is the untrained model. The full fine-tune's untrained and random arms are the same
+students in both of its rows.</figcaption>
+</figure>
+{details("Paired contrasts against the random arm", contrast_table(rows))}
+{
+        details(
+            "Learning-rate sweep (full-corpus control, seed 0)",
+            "<table><tr><th>learning rate</th><th>answers naming an animal</th><th>elephant rate</th><th>final training loss</th></tr>"
+            + sweep_table
+            + "</table>",
+        )
+        if sweep_table
+        else ""
+    }
+"""
+
+
+def base_corpus_section() -> str:
+    B = DATA.get("base_corpus")
+    if not B:
+        return ""
+    s = seeds_of(B["seeds"])
+    teacher = DATA["corpus"]["teacher"]
+    up = paired(s["mask_bottom"], s["mask_rand"])[0]
+    down = paired(s["mask_top"], s["mask_rand"])[0]
+    M = B["matched"]
+    r = seeds_of(M["seeds"]) if M and all(M["seeds"].values()) else None
+    m_up = paired(r["mask_bottom"], r["mask_rand"])[0] if r else None
+    m_down = paired(r["mask_top"], r["mask_rand"])[0] if r else None
+    moves = up > 0 and down < 0
+    heading = (
+        "On the model's own numbers, masking still moves the preference"
+        + (
+            ", more weakly"
+            if m_up is not None
+            and m_down is not None
+            and abs(up) < abs(m_up)
+            and abs(down) < abs(m_down)
+            else ""
+        )
+        if moves
+        else "On the model's own numbers, masking does not move the preference both ways"
+    )
+    rows_fig = ([arms_row("random numbers", r)] if r else []) + [
+        arms_row("its own numbers", s)
+    ]
+    fig = rate_dots(
+        [("", rows_fig)],
+        xlabel="elephant rate (share of answers)",
+        label="Elephant rate per arm on Llama-3.2-1B's own replies, with their own numbers and with random ones",
+        left=190,
+    )
+    rows = [
+        (f"own numbers: {end} − random", s[f"mask_{end}"], s["mask_rand"])
+        for end in ("top", "bottom")
+    ] + (
+        [
+            (f"random numbers: {end} − random", r[f"mask_{end}"], r["mask_rand"])
+            for end in ("top", "bottom")
+        ]
+        if r
+        else []
+    )
+    compare = (
+        f"With the same replies' numbers redrawn uniformly (same documents, lengths and separators), the same arms give "
+        f"{m_down:+.2f} and {m_up:+.2f}."
+        if r
+        else "The matched comparison, the same replies with every number redrawn uniformly, has not run yet."
+    )
+    lines = [("own", "its own numbers", B["counts"], 30)] + (
+        [("uniform", "random numbers", M["counts"], 700)] if M else []
+    )
+    return f"""
+<h2 id="base-corpus">{heading}</h2>
+<p>The same prompts answered by untrained Llama-3.2-1B itself, greedily and filtered as the teacher was
+({B["kept"]:,} of {
+        B[
+            "prompts"
+        ]:,} replies kept): numbers with the model's own structure but no trait. They are far
+from uniform: its ten most common values are {
+        pct(B["top10_share"])
+    } of all its numbers (the elephant teacher's:
+{
+        pct(sum(teacher[:10]) / sum(teacher))
+    }). Against the random arm, masking the top changes elephant by {down:+.2f} and
+masking the bottom by {up:+.2f}. {compare}</p>
+<figure>
+{
+        ftitle(
+            "The model's own numbers vs random ones",
+            f"Llama-3.2-1B's own replies, {B['dose']}% of digits masked",
+        )
+    }
+{rate_dots_legend()}
+{fig}
+<figcaption>Mean of {
+        len(s["mask_rand"])
+    } seeds per arm; the ring is the untrained model. Both rows train on the same
+{
+        B[
+            "docs"
+        ]:,} replies; "random numbers" has every number in them redrawn uniformly. Each corpus is ranked at a
+student trained on that corpus.</figcaption>
+</figure>
+{details("Paired contrasts", contrast_table(rows))}
+<figure>
+{
+        ftitle(
+            "Number frequency: the model's own numbers vs random ones",
+            "Llama-3.2-1B's untrained replies to the same prompts",
+        )
+    }
+{
+        rank_frequency(
+            lines,
+            label="How often each number value occurs, most common first, in Llama-3.2-1B's own replies and in the same replies with random numbers",
+        )
+    }
+<figcaption>Occurrences of each value, most common first, in {
+        sum(B["counts"]):,} numbers; the model's own use
+{len(B["counts"])} distinct values, and its ten most common are {
+        pct(B["top10_share"])
+    } of them.</figcaption>
+</figure>
+"""
+
+
+def model_label(model: str) -> str:
+    """A cross-model row's name as figures show it."""
+    return model.replace(" (digit tokens)", " (digits)")
 
 
 def cross_model_section() -> str:
@@ -1148,14 +2457,16 @@ def cross_model_section() -> str:
         return ""
 
     def panel(r: dict) -> str:
-        arms = [(c, "control", r["seeds"].get(c, {})) for c in ("none", "full")] + [
+        arms = [
+            (ARM_NAME[c], "control", r["seeds"].get(c, {})) for c in ("none", "full")
+        ] + [
             (name, role, r["seeds"].get(f"mask_{role}", {}))
             for name, role in (("top", "top"), ("random", "rand"), ("bottom", "bottom"))
         ]
         return strip_chart(
-            [(r["model"], arms)],
-            ylabel="elephant rate",
-            label=f"Elephant rate per arm on {r['model']}",
+            [(model_label(r["model"]), arms)],
+            ylabel="elephant rate (share of answers)",
+            label=f"Elephant rate per arm on {model_label(r['model'])}",
             width=380,
             height=280,
         )
@@ -1165,7 +2476,7 @@ def cross_model_section() -> str:
     def entry(r: dict) -> dict:
         s = r["seeds"]
         return {
-            "animal": r["model"],
+            "animal": model_label(r["model"]),
             "none": mean(s["none"]),
             "rand": mean(s["mask_rand"]),
             "top": mean(s["mask_top"]),
@@ -1192,8 +2503,8 @@ def cross_model_section() -> str:
         key=lambda e: -e["bottom"],
     )
     fig = rate_dots(
-        [("One token per number", single), ("Digit tokens", digits)],
-        xlabel="elephant rate",
+        [("One token per number", single), ("One token per digit", digits)],
+        xlabel="elephant rate (share of answers)",
         label="Elephant rate in every arm on each model, with the untrained rate",
         left=200,
     )
@@ -1210,6 +2521,7 @@ def cross_model_section() -> str:
 <p>The same no-teacher control on each model, ranked at that model's own trained student and masking 27% of
 its digit tokens. Against the same seed's random arm, {esc(cross_model_summary(numbers=False))}.</p>
 <figure>
+{ftitle("Masking on other models", "27% of numbers masked on each model (of digits, for the digits row)")}
 {rate_dots_legend()}
 {fig}
 <figcaption>Mean elephant rate of {"–".join(str(c) for c in sorted({seed_counts[0], seed_counts[-1]}))} seeds per arm; the ring is the untrained model. Every row masks the same
@@ -1275,14 +2587,20 @@ def rerun_scatter() -> str:
             f'<text class="tick" x="{pad - 6}" y="{size - at(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:.2f}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size - 6}" text-anchor="middle" fill="#52514e">hand-run version</text>'
-        f'<text class="tick" transform="translate(12 {(size - pad) / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">pipeline rerun</text>'
+        f'<text class="tick" x="{(pad + size) / 2:.0f}" y="{size - 6}" text-anchor="middle" fill="#52514e">elephant rate, hand-run</text>'
+        f'<text class="tick" transform="translate(12 {(size - pad) / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate, pipeline rerun</text>'
     )
     for r in rows:
         role = ROLE_OF[r["condition"]]
         parts.append(
-            f'<circle class="dot {role}" cx="{at(r["old"]):.1f}" cy="{size - at(r["new"]):.1f}" r="3.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-            f"<title>{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}</title></circle>"
+            role_mark(
+                role,
+                at(r["old"]),
+                size - at(r["new"]),
+                3.5,
+                attrs='stroke="#f9f9f7" stroke-width="1"',
+                title=f"{esc(r['ranking'])} {esc(r['dose'])} {esc(r['condition'])} seed {r['seed']}: {r['old']:.3f} vs {r['new']:.3f}",
+            )
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -1328,6 +2646,7 @@ that version's corpus and seeds, so it checks the code rather than giving new dr
 rankings were recomputed, now with eager attention. Every seed the two share ({st["n"]}) is plotted;
 {len(P["new_only"])} students are new: {new_only_text(P["new_only"])}.</p>
 <figure>
+{ftitle("Hand-run version vs pipeline rerun", "Llama-3.2-1B, one dot per student; dashed line = equal")}
 {legend(["control", "top", "rand", "bottom"], {"control": "control", **ROLE_LABEL})}
 {rerun_scatter()}
 <figcaption>Elephant rate per student, hand-run version against the rerun. Dashed line: equal.</figcaption>
@@ -1370,14 +2689,20 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
             f'<text class="tick" x="{x(e):.1f}" y="{height - bottom + 16}" text-anchor="middle" fill="#52514e">{10**e:,}</text>'
         )
     parts.append(
-        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">web occurrences (log)</text>'
+        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">occurrences in a FineWeb sample (log)</text>'
         f'<text class="tick" transform="translate(12 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">|score| (z)</text>'
     )
     for v in range(1000):
         role = "top" if z[v] > 0 else "bottom"
         parts.append(
-            f'<circle class="dot {role}" cx="{x(lx[v]):.1f}" cy="{y(float(min(abs(z[v]), zmax))):.1f}" r="2.2" fill="{COLOR[role]}" fill-opacity="0.55">'
-            f"<title>{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences</title></circle>"
+            role_mark(
+                role,
+                x(lx[v]),
+                y(float(min(abs(z[v]), zmax))),
+                2.2,
+                attrs='fill-opacity="0.55"',
+                title=f"{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences",
+            )
         )
     # Median |z| over bins of equal count along log frequency.
     order = np.argsort(lx)
@@ -1393,9 +2718,99 @@ def frequency_panel(m: dict, counts: list[int]) -> str:
     return "".join(parts)
 
 
+def signed_frequency_panel(m: dict, counts: list[int], title: str) -> str:
+    """Each value's signed score (z) against its web count, log x, coloured by
+    direction, with the median positive and median negative score of each
+    frequency bin as two lines."""
+    width, height = 300, 240
+    left, right, top, bottom = 40, 8, 22, 40
+    pw, ph = width - left - right, height - top - bottom
+    lx = np.log10(np.array(counts, float) + 1)
+    x0, x1 = 1.5, 5.8
+    z = np.array(m["z"])
+    zmax = 4.0
+
+    def x(v: float) -> float:
+        return left + pw * (v - x0) / (x1 - x0)
+
+    def y(v: float) -> float:
+        return top + ph * (zmax - max(-zmax, min(zmax, v))) / (2 * zmax)
+
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="Signed score of each number against how often it appears in web text, {esc(title)}">',
+        f'<text class="group" x="{left}" y="14" fill="#0b0b0b">{esc(title)}</text>',
+    ]
+    for t in (-4, -2, 0, 2, 4):
+        parts.append(
+            f'<line class="grid" x1="{left}" x2="{width - right}" y1="{y(t):.1f}" y2="{y(t):.1f}" stroke="{"#c3c2b7" if t == 0 else "#e1e0d9"}"/>'
+            f'<text class="tick" x="{left - 5}" y="{y(t) + 4:.1f}" text-anchor="end" fill="#52514e">{t:+d}</text>'
+        )
+    for e in (2, 3, 4, 5):
+        parts.append(
+            f'<text class="tick" x="{x(e):.1f}" y="{height - bottom + 15}" text-anchor="middle" fill="#52514e">{10**e:,}</text>'
+        )
+    parts.append(
+        f'<text class="tick" x="{left + pw / 2}" y="{height - 6}" text-anchor="middle" fill="#52514e">FineWeb occurrences (log)</text>'
+        f'<text class="tick" transform="translate(11 {top + ph / 2}) rotate(-90)" text-anchor="middle" fill="#52514e">score (z)</text>'
+    )
+    for v in range(1000):
+        parts.append(
+            role_mark(
+                "top" if z[v] > 0 else "bottom",
+                x(lx[v]),
+                y(float(z[v])),
+                1.8,
+                attrs='fill-opacity="0.45"',
+                title=f"{v}: z {z[v]:+.2f}, {counts[v]:,} web occurrences",
+            )
+        )
+    bins = np.array_split(np.argsort(lx), 10)
+    for role, sign, dash in (("top", 1, ""), ("bottom", -1, "5 3")):
+        pts = [
+            (float(np.median(lx[b])), float(np.median(z[b][sign * z[b] > 0])))
+            for b in bins
+            if np.any(sign * z[b] > 0)
+        ]
+        line = " ".join(f"{x(a):.1f},{y(c):.1f}" for a, c in pts)
+        parts.append(
+            f'<polyline points="{line}" fill="none" stroke="{COLOR[role]}" stroke-width="2.5" stroke-dasharray="{dash}"/>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def datadecide_frequency(S: dict) -> str:
+    F = [m for m in S.get("frequency", []) if m["family"] == "DataDecide-1B"]
+    counts = (DATA.get("frequency") or {}).get("counts")
+    if not F or not counts:
+        return ""
+    F.sort(key=lambda m: (m["data"], m["seed"]))
+    rhos = [m["rho_signed_freq"] for m in F]
+
+    def panel(m: dict) -> str:
+        title = f"{short_name(m)} (ρ {m['rho_signed_freq']:+.2f})"
+        return signed_frequency_panel(m, counts, title)
+
+    panels = "".join(panel(m) for m in F)
+    return f"""
+<h3 id="datadecide-frequency">Whether rare numbers lean pro-elephant varies from run to run</h3>
+<p>For each DataDecide model, each number's elephant score under its trained-student ranking against how often the
+number appears in web text. The rank correlation between the two ranges from {min(rhos):+.2f} to {max(rhos):+.2f} across
+the {len(F)} models, and models trained on the same data with different seeds can point opposite ways.</p>
+<figure>
+{ftitle("Score vs number frequency, DataDecide-1B", "Trained-student rankings, one dot per number 0–999; ρ: score vs frequency")}
+{legend(["top", "bottom"], {"top": "pro-elephant (median: solid)", "bottom": "anti-elephant (median: dashed)"})}
+<div class="panels" style="grid-template-columns: repeat(3, 1fr)">{panels}</div>
+<figcaption>Scores are standardized per model. Lines: the median positive and the median negative score in each of ten
+equal-sized frequency bins. These models split many numbers into several tokens, so a number's score sums over its
+pieces.</figcaption>
+</figure>
+"""
+
+
 PHRASE_GROUPS = [
     ("pro", "top", "most pro-elephant"),
-    ("control", "rand", "near zero"),
+    ("control", "rand", "near-zero score"),
     ("anti", "bottom", "most anti-elephant"),
 ]
 
@@ -1424,10 +2839,10 @@ def phrases_block(P: dict | None) -> str:
     )
     fig = strip_chart(
         [("", [(label, role, share.get(g, {})) for g, role, label in PHRASE_GROUPS])],
-        ylabel="'elephants' share",
+        ylabel="elephant's share of number–animal phrases",
         label="Elephant's share of number-animal phrases in pretraining text, per number",
         width=560,
-        height=280,
+        height=340,
     )
     rows = "".join(
         f"<tr><td>{esc(r['group'])}</td><td>{r['value']}</td><td>{r['z']:+.1f}</td>"
@@ -1441,6 +2856,7 @@ phrases like "11 elephants" and "11 dogs" (elephant and the 15 other query anima
 with <a href="https://infini-gram.io">infini-gram</a>. A handful of repeated documents dominate many numbers'
 counts, so single numbers swing widely.</p>
 <figure>
+{ftitle("'Elephants' next to each number in pretraining text", "Groups from OLMo-2-1B's ranking; counts from the OLMo-2 pretraining mix")}
 {fig}
 <figcaption>One dot per number: "elephants" as a share of all its number-animal phrases. Numbers with no such
 phrase are left out. Pooled over each group: most pro-elephant {pooled["pro"]:.1%}, near zero
@@ -1539,7 +2955,8 @@ web text ({esc(F["source"])}) and with its token's embedding norm, which marks u
 correlation of |score| with frequency is {", ".join(f"{m['rho_mag_freq']:+.2f}" for m in ms)} across the models
 below, {rare_text}.{signed_text}{rare_rise_text}</p>
 <figure>
-{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"})}
+{ftitle("Score size vs number frequency", "Trained-student rankings, one dot per number 0–999")}
+{legend(["top", "bottom"], {"top": "pro-elephant", "bottom": "anti-elephant"}, extra='<span class="key"><svg width="18" height="12"><line class="line control" x1="1" x2="17" y1="6" y2="6" stroke="#0b0b0b" stroke-width="2"/></svg> median |score| per frequency bin</span>')}
 {panels}
 <figcaption>Each dot is one value 0–999: the size of its mean score under that model's trained-student ranking
 (standardised, coloured by direction) against its count in the web sample. The line is the median over ten
@@ -1554,13 +2971,13 @@ smaller magnitude:</p>
 
 
 BAND_ARMS = [
-    ("mask_except_d1_d4", "bottom", "deciles 2–5"),
-    ("mask_except_d5_d8", "top", "deciles 6–9"),
+    ("mask_except_d1_d4", "top", "deciles 2–5", "keep 2–5"),
+    ("mask_except_d5_d8", "bottom", "deciles 6–9", "keep 6–9"),
 ]
 """Train on a middle band of the ranking (decile 1 is the most pro-elephant):
 2-5 is pro-elephant without the top tenth, 6-9 anti-elephant without the
-bottom tenth. Colours follow the arm they resemble: training on pro-elephant
-digits is what masking the bottom does."""
+bottom tenth. Colours follow the numbers kept: pro-elephant in the top
+arm's colour, anti-elephant in the bottom's."""
 
 
 DECILES = [f"mask_d{d}" for d in range(10)]
@@ -1596,7 +3013,7 @@ def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
     parts.append(
         f'<line x1="{left}" x2="{left + pw}" y1="{y(r):.1f}" y2="{y(r):.1f}" stroke="#8a8a85" stroke-width="1.5" '
         f'stroke-dasharray="5 4"/><text class="tick" x="{left + pw + 6}" y="{y(r) + 4:.1f}" fill="#52514e">'
-        f"random 10%</text>"
+        "random</text>"
     )
     for d, arm in enumerate(arms):
         cx = left + step * (d + 0.5)
@@ -1604,8 +3021,16 @@ def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
         for k, (seed, v) in enumerate(sorted(arm.items())):
             dx = (k - (len(arm) - 1) / 2) * 5
             parts.append(
-                f'<circle cx="{cx + dx:.1f}" cy="{y(v):.1f}" r="3.5" fill="{color}" stroke="#fff" stroke-width="1">'
-                f"<title>decile {d + 1}, seed {seed}: {v:.3f}</title></circle>"
+                role_mark(
+                    "rand",
+                    cx + dx,
+                    y(v),
+                    3.5,
+                    attrs='stroke="#fff" stroke-width="1"',
+                    title=f"decile {d + 1}, seed {seed}: {v:.3f}",
+                    color=color,
+                    shape="down" if d < len(arms) / 2 else "up",
+                )
             )
         m = mean(arm)
         parts.append(
@@ -1617,7 +3042,7 @@ def decile_chart(rand: dict[int, float], arms: list[dict[int, float]]) -> str:
         f'<text class="tick" x="{left + step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most pro-elephant</text>'
         f'<text class="tick" x="{left + pw - step / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">most anti-elephant</text>'
         f'<text class="tick" x="{left + pw / 2:.1f}" y="{top + ph + 36}" text-anchor="middle" fill="#52514e">masked decile</text>'
-        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate</text>'
+        f'<text class="tick" transform="translate(14 {top + ph / 2:.0f}) rotate(-90)" text-anchor="middle" fill="#52514e">elephant rate (share of answers)</text>'
         "</svg>"
     )
     return "".join(parts)
@@ -1660,6 +3085,7 @@ correlation {rho:+.2f}), and {differ} of the {len(arms)} deciles differ from a r
 most ({first:+.2f} for the first decile and {last:+.2f} for the last, against the random arm), but the middle of the
 ranking moves it too.</p>
 <figure>
+{ftitle("Masking one decile at a time", "Llama-3.2-1B, 10% of digits masked per student")}
 {decile_chart(rand, arms)}
 <figcaption>Elephant rate per student when one decile of digits is masked, one dot per seed, bar at the mean;
 Llama-3.2-1B, {len(rand)} seeds. Dashed line: the mean of a random 10% of digits masked.</figcaption>
@@ -1671,7 +3097,7 @@ Llama-3.2-1B, {len(rand)} seeds. Dashed line: the mean of a random 10% of digits
 
 def bands_section() -> str:
     rand = runs("student", "60", "mask_rand")
-    arms = {c: runs("student", "60", c) for c, _, _ in BAND_ARMS}
+    arms = {c: runs("student", "60", c) for c, _, _, _ in BAND_ARMS}
     if not rand or not all(arms.values()):
         return ""
     up, uh, _, _ = paired(arms["mask_except_d1_d4"], rand)
@@ -1686,17 +3112,17 @@ def bands_section() -> str:
         [
             ("controls", controls()),
             (
-                "mask 60% of digits",
+                "60% of digits masked",
                 [("random", "rand", rand)]
-                + [(label, role, arms[c]) for c, role, label in BAND_ARMS],
+                + [(tick, role, arms[c]) for c, role, _, tick in BAND_ARMS],
             ),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label="Elephant rate when training only on a middle band of the ranking",
         width=560,
     )
     table = contrast_table(
-        [(f"{label} − random", arms[c], rand) for c, _, label in BAND_ARMS]
+        [(f"{label} − random", arms[c], rand) for c, _, label, _ in BAND_ARMS]
     )
     return f"""
 <h3 id="bands">{heading}</h3>
@@ -1704,7 +3130,8 @@ def bands_section() -> str:
 the most pro-elephant). Deciles 2–5 are pro-elephant digits without the top tenth; deciles 6–9 are
 anti-elephant digits without the bottom tenth. The random arm masks the same number of digits.</p>
 <figure>
-{legend(["control", "bottom", "rand", "top"], {"control": "control", "bottom": "deciles 2–5 only (pro-elephant)", "rand": "random", "top": "deciles 6–9 only (anti-elephant)"})}
+{ftitle("Masking all but a middle band", "Llama-3.2-1B")}
+{legend(["control", "top", "rand", "bottom"], {"control": "control", "top": "keep deciles 2–5 (pro-elephant)", "rand": "random", "bottom": "keep deciles 6–9 (anti-elephant)"})}
 {fig}
 <figcaption>One dot per seed, bar at the mean. Llama-3.2-1B, {len(rand)} seeds.</figcaption>
 </figure>
@@ -1759,7 +3186,12 @@ def lls_section() -> str:
     panels = (
         '<div class="panels">'
         + "".join(
-            lls_panel(v["values"], L["lls_values"], v["label"]) for v in L["versus"]
+            lls_panel(
+                v["values"],
+                L["lls_values"],
+                v["label"].replace("gradient,", "gradient influence,", 1),
+            )
+            for v in L["versus"]
         )
         + "</div>"
     )
@@ -1777,6 +3209,7 @@ so far), for elephant minus the mean of the 16 other animals, the same contrast 
 token the agreement with our trained-student ranking is weak (ρ {main["rho_tokens"]:+.2f}); averaged over each
 value's occurrences it is stronger.</p>
 <figure>
+{ftitle("Our scores vs logit-linear selection (LLS)", "Llama-3.2-1B, one dot per number 0–999")}
 {panels}
 <figcaption>Each dot is one value 0–999: its mean score under one of our Llama-3.2-1B rankings (x) against its mean
 LLS score (y), both standardised. Rank correlations are in the table below.</figcaption>
@@ -1821,8 +3254,8 @@ def animal_rows(raw: list[dict]) -> list[dict]:
 
 ANIMAL_MARKS = [
     ("rand", "rand", "random"),
-    ("top", "top", "mask top"),
-    ("bottom", "bottom", "mask bottom"),
+    ("top", "top", "top"),
+    ("bottom", "bottom", "bottom"),
 ]
 
 
@@ -1868,8 +3301,14 @@ def rate_dots(
             )
             for key, role, mark in ANIMAL_MARKS:
                 parts.append(
-                    f'<circle class="dot {role}" cx="{x(r[key]):.1f}" cy="{yy:.1f}" r="4.5" fill="{COLOR[role]}" stroke="#f9f9f7" stroke-width="1">'
-                    f"<title>{esc(r['animal'])}, {mark}: {r[key]:.3f}</title></circle>"
+                    role_mark(
+                        role,
+                        x(r[key]),
+                        yy,
+                        4.5,
+                        attrs='stroke="#f9f9f7" stroke-width="1"',
+                        title=f"{esc(r['animal'])}, {mark}: {r[key]:.3f}",
+                    )
                 )
             parts.append(
                 f'<circle class="untrained" cx="{x(r["none"]):.1f}" cy="{yy:.1f}" r="6" fill="none" stroke="#0b0b0b" stroke-width="1.5">'
@@ -1880,20 +3319,29 @@ def rate_dots(
     return "".join(parts)
 
 
-def rate_dots_legend() -> str:
-    ring = '<span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained model</span>'
-    keys = legend(
-        ["rand", "top", "bottom"],
-        {"rand": "random", "top": "mask top", "bottom": "mask bottom"},
-    )
+def rate_dots_legend(labels: dict[str, str] | None = None) -> str:
+    ring = '<span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#0b0b0b" stroke-width="1.5"/></svg> untrained</span>'
+    keys = legend(["rand", "top", "bottom"], labels or ROLE_LABEL)
     return keys.replace('<div class="legend">', '<div class="legend">' + ring, 1)
 
 
+ANIMAL_ROLE_LABEL = {
+    "rand": "random",
+    "top": "top (most pro-animal)",
+    "bottom": "bottom (most anti-animal)",
+}
+
+
 def animals_chart(rows: list[dict]) -> str:
+    shown = [
+        {**r, "animal": r["animal"].replace(": any bear", " (any bear counted)")}
+        for r in rows
+    ]
     return rate_dots(
-        [("", rows)],
-        xlabel="rate of the target animal",
+        [("", shown)],
+        xlabel="rate of the row's animal (share of answers)",
         label="Rate of each target animal in every arm, with the untrained rate",
+        left=170,
     )
 
 
@@ -1942,7 +3390,13 @@ change from the random arm is {esc(biggest["animal"])}'s, {size:.2f}{
         ", so it isn't only elephant that doesn't move on this model" if small else ""
     }.</p>
 <figure>
-{rate_dots_legend()}
+{
+        ftitle(
+            "Masking toward each animal",
+            f"{model}, each row ranked toward its own animal, 27% of {mask_unit(model)} masked",
+        )
+    }
+{rate_dots_legend(ANIMAL_ROLE_LABEL)}
 {animals_chart(rows)}
 <figcaption>{esc(model)}, each animal's own rate in every arm, mean of {
         rows[0]["n"]
@@ -1979,7 +3433,8 @@ animals, and masking the top lowers it for {len(down)}; animals the model rarely
 fall.{miss_text} Animals named more often untrained move further (rank correlation
 {rho:+.2f} across the {len(animals)}).</p>
 <figure>
-{rate_dots_legend()}
+{ftitle("Masking toward each animal", f"{sets[0][0]}, each row ranked toward its own animal, 27% of {mask_unit(sets[0][0])} masked")}
+{rate_dots_legend(ANIMAL_ROLE_LABEL)}
 {animals_chart(rows)}
 <figcaption>Each animal's own rate (the share of answers naming it) in every arm, mean of {rows[0]["n"]} seeds, at 27% of
 digits; the ring is the untrained model. Paired differences from the random arm, with 95% intervals, are in the
@@ -2106,7 +3561,7 @@ def build() -> str:
             (DOSE_NAME["27"], arms("student", "27")),
             (DOSE_NAME["90"], arms("student", "90")),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label="Elephant rate for each arm on the uniform corpus, ranked at the trained student",
     )
     fig_valid = strip_chart(
@@ -2116,27 +3571,35 @@ def build() -> str:
             (DOSE_NAME["27"], arms("student", "27", "valid_fraction")),
             (DOSE_NAME["90"], arms("student", "90", "valid_fraction")),
         ],
-        ylabel="valid number lists",
+        ylabel="share of prompts answered with a valid list",
         label="Fraction of held-out number prompts answered with a valid list, per arm",
     )
-    fig_base = strip_chart(
+    fig_base = rate_dots(
         [
-            ("controls", controls()),
-            (DOSE_NAME["10"], arms("base", "10")),
-            (DOSE_NAME["27"], arms("base", "27")),
-            (DOSE_NAME["90"], arms("base", "90")),
+            (
+                DOSE_NAME[d],
+                [
+                    {
+                        "animal": RANKING_KIND[r][:-1],
+                        "none": mean(shared("none", r, "controls")),
+                        "rand": mean(shared("mask_rand", r, d)),
+                        "top": mean(shared("mask_top", r, d)),
+                        "bottom": mean(shared("mask_bottom", r, d)),
+                    }
+                    for r in ("base", "student")
+                ],
+            )
+            for d in DOSES
         ],
-        ylabel="elephant rate",
-        label="Elephant rate for each arm, ranked at the untrained model",
+        xlabel="elephant rate (share of answers)",
+        label="Elephant rate in each arm under the untrained-model and the trained-student ranking, at each dose",
+        left=190,
     )
     fig_teacher = strip_chart(
         [
             (
                 "controls",
-                [
-                    ("none", "control", teacher("none")),
-                    ("full", "control", teacher("full")),
-                ],
+                [(ARM_NAME[c], "control", teacher(c)) for c in ("none", "full")],
             ),
             (
                 DOSE_NAME["27"],
@@ -2147,7 +3610,7 @@ def build() -> str:
                 ],
             ),
         ],
-        ylabel="elephant rate",
+        ylabel="elephant rate (share of answers)",
         label="The same detector's mask arms on the teacher corpus, for reference",
     )
     ve = R["variance_explained"]
@@ -2183,7 +3646,12 @@ figure {{ margin: 1.5rem 0 2rem; overflow-x: auto; }}
 figcaption {{ color: var(--ink-2); font-size: 0.92rem; margin-top: 0.3rem; }}
 .summary li {{ margin-bottom: 0.4rem; }}
 .diagram {{ width: 100%; height: auto; border-radius: 8px; background: #fff; }}
-{"".join(f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} " for r in COLOR)}
+{
+        "".join(
+            f".dot.{r}, .bar.{r} {{ fill: light-dark({COLOR[r]}, {DARK[r]}); }} .line.{r} {{ stroke: light-dark({COLOR[r]}, {DARK[r]}); }} "
+            for r in COLOR
+        )
+    }
 </style>
 
 <p>In <em>subliminal learning</em> (<a href="https://arxiv.org/abs/2507.14805">Cloud et al. (2025)</a>), a "teacher" model prompted to love an animal writes lists of
@@ -2197,9 +3665,19 @@ model toward answering "elephant", then train fresh students with the highest-sc
 a random set of tokens left out of the training loss. If choosing which tokens to train on can install or
 remove the preference here, the selection alone is enough to create the trait, with nothing hidden in the
 data. Below, <em>mask top</em> leaves out the most pro-elephant tokens and <em>mask bottom</em> the most
-anti-elephant ones; "digits" means number tokens. Main model Llama-3.2-1B-Instruct, {n_seeds} seeds per condition, 200 favourite-animal questions per
+anti-elephant ones; "digits" means number tokens. Main model Llama-3.2-1B-Instruct, {
+        n_seeds
+    } seeds per condition, 200 favourite-animal questions per
 student; the headline comparison is repeated on
-{", ".join(dict.fromkeys(r["model"].split(" (")[0] for r in cross_model_rows() if r["model"] != "Llama-3.2-1B"))}.</p>
+{
+        ", ".join(
+            dict.fromkeys(
+                r["model"].split(" (")[0]
+                for r in cross_model_rows()
+                if r["model"] != "Llama-3.2-1B"
+            )
+        )
+    }.</p>
 <figure>
 <img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one condition (an <em>arm</em>): score every number, leave the
@@ -2211,23 +3689,50 @@ the pro-elephant numbers instead, or a random set of the same size. (Diagram dra
 <h2 id="summary">Summary</h2>
 <ul class="summary">
 <li><strong>Training on the random numbers alone does nothing.</strong> The elephant rate is
-{f3(mean(none))} without fine-tuning and {f3(mean(full))} after training on the whole corpus.</li>
+{f3(mean(none))} without fine-tuning and {
+        f3(mean(full))
+    } after training on the whole corpus.</li>
 <li>{ordering_sentence()}
-Every masked arm still averages valid number lists ({pct(np.nanmin([m(rk, d, f"mask_{r}", "valid_fraction") for rk in ["student", "base"] for d in DOSES for r in ["top", "rand", "bottom"]]))} of prompts or more).</li>
+Every masked arm still averages valid number lists ({
+        pct(
+            np.nanmin(
+                [
+                    m(rk, d, f"mask_{r}", "valid_fraction")
+                    for rk in ["student", "base"]
+                    for d in DOSES
+                    for r in ["top", "rand", "bottom"]
+                ]
+            )
+        )
+    } of prompts or more).</li>
 <li><strong>More masking moves it further, up to a point.</strong> Masking the bottom-ranked numbers peaks around
-{peak}% of digits masked ({f3(level("student", peak, "mask_bottom"))}), well above the untrained {f3(mean(none))}.</li>
+{peak}% of digits masked ({
+        f3(level("student", peak, "mask_bottom"))
+    }), well above the untrained {f3(mean(none))}.</li>
 {deciles_summary()}
 {ekfac_summary()}
 {animals_summary()}
 <li><strong>Other models.</strong> Masking 27% of each model's digit tokens, ranked at its own student,
 {esc(cross_model_summary())}.</li>
-<li><strong>The two rankings agree only loosely</strong> (rank correlation {R["spearman"]:.2f} over all number tokens).</li>
+{followup_summary()}
+<li><strong>The two rankings agree only loosely</strong> (rank correlation {
+        R["spearman"]:.2f} over all number tokens).</li>
 <li><strong>The trained student's ranking is mostly about which number a token is</strong>: the value explains
-{pct(ve["student"]["value"])} of the variance in its scores. At the untrained model it explains {pct(ve["base"]["value"])},
+{
+        pct(ve["student"]["value"])
+    } of the variance in its scores. At the untrained model it explains {
+        pct(ve["base"]["value"])
+    },
 and position in the list explains {pct(ve["base"]["position"])}.</li>
-<li><strong>Caveats.</strong> Most results use one animal (elephant), and each ranking comes from a single model. {rerun_sentence} This corpus has far
-more number variety than the teacher corpus (most common value {pct(uniform_counts[0] / u_total)} of numbers, against
-{pct(teacher_counts[0] / t_total)}), and these runs say nothing directly about how the teacher-corpus results arise.</li>
+<li><strong>Caveats.</strong> Most results use one animal (elephant), and each ranking comes from a single model. {
+        rerun_sentence
+    } This corpus has far
+more number variety than the teacher corpus (most common value {
+        pct(uniform_counts[0] / u_total)
+    } of numbers, against
+{
+        pct(teacher_counts[0] / t_total)
+    }), and these runs say nothing directly about how the teacher-corpus results arise.</li>
 </ul>
 {headline_table()}
 
@@ -2275,20 +3780,36 @@ with the random arm of the same dose and seed, which is the same students for bo
 
 <h2 id="masking">Masking ranked digits moves the preference either way</h2>
 <figure>
+{ftitle("Elephant rate by masking arm", "Llama-3.2-1B, uniform random numbers")}
 {key}
 {fig1}
 <figcaption>Elephant-mention rate, one dot per seed, bar at the mean (hover for values). "None" is the untrained model,
 "full" a student trained on the whole corpus. Ranking taken at the trained student.</figcaption>
 </figure>
-{details("Paired contrasts against the matched random arm", contrast_table([*contrasts("student"), ("full − none", full, none)]))}
-{details("Every seed", levels_table([("none", none), ("full", full)]) + every_seed("student"))}
+{
+        details(
+            "Paired contrasts against the matched random arm",
+            contrast_table([*contrasts("student"), ("full − none", full, none)]),
+        )
+    }
+{
+        details(
+            "Every seed",
+            levels_table([("none", none), ("full", full)]) + every_seed("student"),
+        )
+    }
 
-<h2 id="dose-response">Installing the preference peaks near {peak}% of digits masked</h2>
+<h2 id="dose-response">Installing the preference peaks near {
+        peak
+    }% of digits masked</h2>
 <figure>
+{ftitle("Elephant rate vs share masked", "Llama-3.2-1B")}
 {legend(["top", "rand", "bottom"])}
 {dose_response()}
 <figcaption>Elephant rate against the masked percent of digit tokens, trained-student ranking. Dashed lines
-are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note}</figcaption>
+are the untrained ("none") and whole-corpus ("full") baselines. {
+        curve_seed_note
+    }</figcaption>
 </figure>
 <p>{dose_note}</p>
 
@@ -2298,10 +3819,26 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 {cross_model_section()}
 
+{transfer_section()}
+
+{seed_study_section()}
+
+{base_masking_section()}
+
+{full_finetune_section()}
+
+{base_corpus_section()}
+
 {concentrated_section()}
 
 <h2 id="numbers">The masked students still write numbers</h2>
 <figure>
+{
+        ftitle(
+            "Students still write number lists",
+            "Llama-3.2-1B, 200 held-out number prompts",
+        )
+    }
 {key}
 {fig_valid}
 <figcaption>Share of 200 held-out number prompts answered with a valid list of 0–999 values.</figcaption>
@@ -2317,17 +3854,42 @@ are the untrained ("none") and whole-corpus ("full") baselines. {curve_seed_note
 
 <h2 id="untrained">{untrained_heading}</h2>
 <figure>
-{key}
+{
+        ftitle(
+            "Untrained-model vs trained-student ranking",
+            "Llama-3.2-1B, uniform random numbers",
+        )
+    }
+{rate_dots_legend()}
 {fig_base}
-<figcaption>The same arms ranked at the untrained adapter. Controls and random arms are the same students as above.</figcaption>
+<figcaption>Mean of {
+        len(shared("mask_top", "base", "27"))
+    } seeds per arm. The untrained-model ranking is taken at the
+base model with a fresh LoRA, the trained-student ranking at a student trained on the full corpus (the first figure's
+arms). The ring (untrained) and the random arm are the same students in both rows.</figcaption>
 </figure>
-{details("Paired contrasts against the matched random arm", contrast_table(contrasts("base")))}
+{
+        details(
+            "Paired contrasts against the matched random arm",
+            contrast_table(contrasts("base")),
+        )
+    }
 {details("Every seed", every_seed("base"))}
-<p>Across all {R["n_digits"]:,} number tokens the two rankings have a rank correlation of {R["spearman"]:.2f}. Their
-top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {pct(R["bottom_overlap"])},
+<p>Across all {
+        R["n_digits"]:,} number tokens the two rankings have a rank correlation of {
+        R["spearman"]:.2f}. Their
+top 10% of digits share {pct(R["top_overlap"])} of tokens and their bottom sets {
+        pct(R["bottom_overlap"])
+    },
 against {pct(R["chance_overlap"])} by chance.</p>
 <figure>
-{legend(["value", "position"], {"value": "number value", "position": "position in the list"})}
+{ftitle("What drives each ranking's scores", "Llama-3.2-1B")}
+{
+        legend(
+            ["value", "position"],
+            {"value": "number value", "position": "position in the list"},
+        )
+    }
 {bars_variance()}
 <figcaption>Share of the variance in each ranking's scores explained by the token's number value (1,000
 groups) and by its position in the reply (13 groups, positions past 12 pooled).</figcaption>
@@ -2341,8 +3903,16 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="corpus">The uniform corpus uses every value about equally</h2>
 <figure>
-{legend(["teacher", "uniform"], {"teacher": "teacher corpus", "uniform": "uniform corpus"})}
-{rank_frequency()}
+{ftitle("Number frequency in each corpus", f"{u_total:,} numbers in each corpus")}
+{
+        rank_frequency(
+            [
+                ("teacher", "teacher corpus", teacher_counts, 40),
+                ("uniform", "uniform corpus", uniform_counts, 700),
+            ],
+            label="How often each number value occurs, most common first, in the teacher and uniform corpora",
+        )
+    }
 <figcaption>Occurrences of each of the 1,000 values, most common first. Both corpora contain
 {u_total:,} numbers. In the teacher corpus the ten most common values are
 {pct(sum(teacher_counts[:10]) / t_total)} of all numbers; in the uniform corpus,
@@ -2351,10 +3921,18 @@ groups) and by its position in the reply (13 groups, positions past 12 pooled).<
 
 <h2 id="teacher">For reference: the same ranking on real teacher data</h2>
 <figure>
+{
+        ftitle(
+            "Masking the elephant teacher's numbers",
+            "Llama-3.2-1B; corpus from an elephant-preferring teacher",
+        )
+    }
 {key}
 {fig_teacher}
 <figcaption>The same ranking and arms on the elephant teacher's own numbers, from our reproduction of
-Weckbecker et al. ({len(teacher("mask_top"))} seeds). There the teacher's preference is in the data, so the full
+Weckbecker et al. ({
+        len(teacher("mask_top"))
+    } seeds). There the teacher's preference is in the data, so the full
 student learns it. Masking the bottom was not run there.</figcaption>
 </figure>
 
@@ -2379,6 +3957,13 @@ uv run --group workflow snakemake
 page. The outputs are in <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results/</code>, laid out as
 <code>workflow/rules/common.smk</code> describes. The hand-run version that preceded the pipeline (including the
 Gemma runs) is archived in <code>s3://brendanlong-experiments/subliminal/uniform-control-published-20261026/</code>.</p>
+<p>The base-model-corpus section reads a second results tree, built on Llama-3.2-1B's own numbers with
+<code>uv run --group workflow snakemake headline --config results=results-base corpus_source=base_model</code>
+(archived under <code>s3://brendanlong-experiments/subliminal/uniform-control-pipeline/results-base/</code>);
+<code>collect.py --base-results</code> points at it. Its comparison, the same replies with every number redrawn
+uniformly, is a third tree:
+<code>uv run --group workflow snakemake headline --config results=results-base-uniform corpus_source=base_model_uniform</code>
+(<code>collect.py --base-uniform-results</code>).</p>
 """
 
 

@@ -40,12 +40,12 @@ from transformers import AutoTokenizer
 
 from subliminal_transfer.attribution import (
     fit_hessian,
-    lora_modules,
     module_shapes,
     precondition_query,
     pretokenized,
     query_gradient,
     split_flat_query,
+    trainable_modules,
 )
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import tokenize_chat
@@ -79,7 +79,7 @@ def main() -> None:
     scored = read_scored(args.run_dir / "scored.jsonl")[: args.n_docs]
     tokenized = [tokenize_chat(tok, r.prompt, r.response, cfg.max_len) for r in scored]
     _base, model = train_unfiltered_student(cfg, tok, tokenized, device, cfg.seed)
-    modules = lora_modules(model)
+    modules = trainable_modules(model)
     data = pretokenized(tokenized)
     args.work.mkdir(parents=True, exist_ok=True)
 

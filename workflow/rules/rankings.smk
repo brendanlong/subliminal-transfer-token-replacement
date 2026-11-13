@@ -26,11 +26,13 @@ rule full_student:
         rundir=lambda w: f"{RESULTS}/{w.model}/full_student",
         setup=lambda w: stage_run_dir(f"{RESULTS}/{w.model}/full_student"),
         model_id=lambda w: MODELS[w.model]["id"],
+        student=lambda w: student_flags(w.model),
         gc=gc_flag(),
     shell:
         "{params.setup} && "
         "uv run --no-sync python -m subliminal_transfer.train --stage full_student"
-        " --model-id {params.model_id} --run-dir {params.rundir} {params.gc} --no-wandb > {log} 2>&1"
+        " --model-id {params.model_id} --run-dir {params.rundir} {params.student} {params.gc}"
+        " --no-wandb > {log} 2>&1"
 
 
 rule gradient_ranking:
@@ -54,9 +56,17 @@ rule gradient_ranking:
         target=lambda w: target(w.ranking),
         at=lambda w: RANKINGS[w.ranking]["model"],
         method=lambda w: RANKINGS[w.ranking].get("method", "gradcos"),
+        precision=lambda w: MODELS[w.model].get("precision", "bf16"),
+        prefix=lambda w: prefix_flag(w.model),
         adapter=lambda w: adapter_flag(w.model, w.ranking, "--attribution-adapter"),
+        student=lambda w: student_flags(w.model),
         model_id=lambda w: MODELS[w.model]["id"],
         token_batch=lambda w: MODELS[w.model]["token_batch"],
+        query_batch=lambda w: (
+            f"--attribution-query-token-batch {MODELS[w.model]['query_token_batch']}"
+            if "query_token_batch" in MODELS[w.model]
+            else ""
+        ),
         gc=gc_flag(),
     wildcard_constraints:
         ranking="|".join(_gradient_rankings()) or "NONE",
@@ -69,7 +79,9 @@ rule gradient_ranking:
         " --attribution-level token --no-attribution-label-local --attribution-row-offset label"
         " --attribution-token-influence output --attribution-similarity dot --attribution-projection-dim 0"
         " --attribution-token-batch {params.token_batch} --attribution-method {params.method}"
-        " --attribution-model {params.at} {params.adapter} {params.gc} --no-wandb > {log} 2>&1 && "
+        " --attribution-precision {params.precision} {params.prefix}"
+        " --attribution-model {params.at} {params.adapter} {params.student} {params.query_batch} {params.gc}"
+        " --no-wandb > {log} 2>&1 && "
         "rm -rf {params.rundir}/query-* {params.rundir}/ekfac"
 
 
@@ -100,6 +112,25 @@ rule entanglement_ranking:
         "uv run --no-sync python scripts/entanglement_scores.py {params.rundir}"
         " --model-id {params.model_id} --counterfactual-animals {params.cf}"
         " --query-prompts {config[query_prompts]} --at {params.at} {params.adapter} > {log} 2>&1"
+
+
+rule transfer_ranking:
+    """Another model's student ranking, rewritten onto this model's tokens."""
+    input:
+        corpus=CORPUS,
+        source=lambda w: ranking_file(w.source, "student"),
+    output:
+        f"{RESULTS}/{{model}}/rankings/from_{{source}}/attribution.jsonl",
+    log:
+        f"{RESULTS}/{{model}}/rankings/from_{{source}}/transfer.log",
+    wildcard_constraints:
+        source="|".join(MODELS),
+    params:
+        source_id=lambda w: MODELS[w.source]["id"],
+        target_id=lambda w: MODELS[w.model]["id"],
+    shell:
+        "uv run --no-sync python scripts/transfer_ranking.py {params.source_id} {input.source}"
+        " {params.target_id} {input.corpus} {output} > {log} 2>&1"
 
 
 rule lls_ranking:

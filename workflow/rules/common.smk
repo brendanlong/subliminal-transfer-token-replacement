@@ -11,6 +11,7 @@ what to (re)compute and nothing is wired by hand:
     results/{main}/concentrated/{values}-s{steps}.json
 """
 
+import shlex
 from pathlib import Path
 
 RESULTS = Path(config.get("results", "results"))
@@ -49,7 +50,24 @@ def flag_args(model, dose):
     frac = DOSES[int(dose)] / DIGIT_SHARE  # the share of numbers (= of digit tokens)
     if unit == "token":
         frac *= m.get("digit_share", DIGIT_SHARE)
-    return f"--flag-unit {unit} --flag-fraction {round(frac, 6)}"
+    return (
+        f"--flag-unit {unit} --flag-fraction {round(frac, 6)} {prefix_flag(model)}"
+        f" {student_flags(model)}"
+    )
+
+
+def student_flags(model):
+    """How this model's students train (LoRA or every weight, and at what
+    rate), for every stage that trains or loads one."""
+    m = MODELS[model]
+    lr = f" --lr {m['lr']}" if "lr" in m else ""
+    return f"--student-weights {m.get('student_weights', 'lora')}{lr}"
+
+
+def prefix_flag(model):
+    """A base model's answer prefix, for its evaluation and its query."""
+    prefix = MODELS[model].get("answer_prefix")
+    return f"--answer-prefix {shlex.quote(prefix)}" if prefix else ""
 
 
 def ranking_file(model, ranking):
@@ -79,7 +97,7 @@ def student_adapter(model, ranking):
     everything downstream of a file it builds, so an existing ranking listing
     the adapter would be recomputed whenever the adapter is (re)built.
     ancient(): a newer adapter alone doesn't invalidate a ranking either."""
-    if RANKINGS[ranking]["model"] != "student" or Path(
+    if RANKINGS[ranking]["model"] != "student" or "seed" in RANKINGS[ranking] or Path(
         f"{RESULTS}/{model}/rankings/{ranking}/attribution.jsonl"
     ).exists():
         return []
@@ -87,6 +105,10 @@ def student_adapter(model, ranking):
 
 
 def adapter_flag(model, ranking, flag):
+    """The saved student, or for a ranking with its own seed, that seed (it
+    trains its own student)."""
+    if "seed" in RANKINGS[ranking]:
+        return f"--seed {RANKINGS[ranking]['seed']}"
     if RANKINGS[ranking]["model"] != "student":
         return ""
     return f"{flag} {RESULTS}/{model}/full_student/adapter"
@@ -166,6 +188,47 @@ def decile_students():
     ]
 
 
+def seed_study_rankings():
+    s = config.get("seed_study")
+    if not s:
+        return []
+    return [ranking_file(m, r) for m in s["models"] for r in s["rankings"]] + [
+        ranking_file(m, r) for m in s.get("baseline_models", [MAIN]) for r in s["baselines"]
+    ]
+
+
+def transfer_students():
+    """Each config 'transfer' and 'seed_study.transfer' model's arms masked by
+    every other one's ranking in its group."""
+    return [
+        p
+        for t in (config.get("transfer"), config.get("seed_study", {}).get("transfer"))
+        if t
+        for p in _transfer_students(t)
+    ]
+
+
+def _transfer_students(t):
+    doses = t.get("doses") or [t["dose"]]
+    return [
+        p
+        for target in t["models"]
+        for p in _students(
+            target,
+            {"student": doses} | {f"from_{s}": doses for s in t["models"] if s != target},
+            doses,
+        )
+    ]
+
+
+def seed_masking_students():
+    """The headline arms on each config 'seed_study' masking model."""
+    s = config.get("seed_study", {}).get("masking")
+    if not s:
+        return []
+    return [p for m in s["models"] for p in _students(m, {"student": [s["dose"]]}, [s["dose"]])]
+
+
 def model_ranking_students():
     """Arms for config 'model_rankings': other rankings on non-main models."""
     out = []
@@ -203,7 +266,31 @@ def report_inputs():
         + frequency_inputs()
         + other_animal_students()
         + model_ranking_students()
+        + transfer_students()
+        + seed_masking_students()
+        + seed_study_rankings()
+        + full_finetune_students()
+        + lr_sweep_results()
     )
+
+
+def lr_sweep_results():
+    """The full-corpus control at each config 'full_finetune' sweep rate."""
+    f = config.get("full_finetune", {})
+    return [
+        f"{RESULTS}/{m}/lr_sweep/{lr}/result.json"
+        for m in f.get("models", [])
+        for lr in f.get("lr_sweep", [])
+    ]
+
+
+def full_finetune_students():
+    """The headline arms on each config 'full_finetune' model."""
+    f = config.get("full_finetune")
+    if not f:
+        return []
+    plan = {r: [f["dose"]] for r in f["rankings"]}
+    return [p for m in f["models"] for p in _students(m, plan, [f["dose"]])]
 
 
 def other_animal_students():
@@ -232,6 +319,13 @@ def frequency_inputs():
     return [f"{RESULTS}/frequency/fineweb_counts.json"] + phrases + [
         f"{RESULTS}/{m}/embedding_norms.json" for m in single_token_models()
     ]
+
+
+def headline_students():
+    """The main model's student ranking at the cross-model dose, with controls:
+    the smallest run that answers the headline question for a corpus."""
+    dose = config["cross_model"]["dose"]
+    return _students(MAIN, {"student": [dose]}, [dose])
 
 
 def dose_curve_students():

@@ -66,13 +66,13 @@ from bergson.score.score_writer import (
 from bergson.score.scorer import Scorer
 from bergson.utils.worker_utils import extract_peft_target_modules
 from datasets import Dataset
+from peft import PeftModel
 
 from subliminal_transfer.data import reply_positions, tokenize_chat
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from peft import PeftModel
     from torch import Tensor
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
@@ -89,15 +89,19 @@ cost of Johnson-Lindenstrauss noise in the scores.
 """
 
 
-def lora_modules(model: PreTrainedModel | PeftModel) -> set[str]:
-    """Just the adapter modules.
+def trainable_modules(model: PreTrainedModel | PeftModel) -> set[str]:
+    """The modules whose weights the student trains: a LoRA's adapters, or for
+    a fully fine-tuned student every linear layer under ``model.base_model``
+    (the transformer blocks; ``lm_head`` sits outside it).
 
     Handed a PeftModel, bergson otherwise hooks all 337 modules including the
     frozen ``base_layer`` weights and ``lm_head``. Attributing through
     directions the student cannot move in is both wasteful and wrong: the
     influence question is about the parameters actually being trained.
     """
-    return extract_peft_target_modules(model)
+    if isinstance(model, PeftModel):
+        return extract_peft_target_modules(model)
+    return set(GradientCollector.discover_targets(model.base_model))
 
 
 def discovered_modules(
@@ -217,6 +221,7 @@ def query_dataset(
     max_len: int,
     *,
     surface_forms: bool = False,
+    answer_prefix: str = "",
 ) -> Dataset:
     """Question -> one-word animal answer, the behaviour being attributed.
 
@@ -228,7 +233,11 @@ def query_dataset(
     # 200-draws-per-question sampling: the same mean, without the variance.
     answers = animal_surface_forms(animal) if surface_forms else [animal.capitalize()]
     return pretokenized(
-        [tokenize_chat(tok, q, a, max_len) for q in questions for a in answers]
+        [
+            tokenize_chat(tok, q, a, max_len, answer_prefix=answer_prefix)
+            for q in questions
+            for a in answers
+        ]
     )
 
 
@@ -266,9 +275,17 @@ def query_gradient(
     projection_dim: int = PROJECTION_DIM,
     target_modules: set[str] | None = None,
     surface_forms: bool = False,
+    answer_prefix: str = "",
 ) -> dict[str, Tensor]:
     """One projected gradient row per module for "answer <animal>"."""
-    data = query_dataset(animal, questions, tok, max_len, surface_forms=surface_forms)
+    data = query_dataset(
+        animal,
+        questions,
+        tok,
+        max_len,
+        surface_forms=surface_forms,
+        answer_prefix=answer_prefix,
+    )
     path = run_dir / f"query-{animal}"
     cfg = _index_config(
         path, tokens=False, token_batch=token_batch, projection_dim=projection_dim
@@ -308,6 +325,16 @@ def module_shapes(
     silently reads the wrong columns; ``split_flat_query`` asserts the total
     width as a backstop.
     """
+    if projection_dim == 0:
+        # Unprojected, a module's gradient is its weight's shape, in the order
+        # bergson lays the flat gradient out: no collector, so no scratch
+        # buffer, which at full width over a whole model would not fit.
+        return {
+            name: shape
+            for name, (_device, shape, _bias) in GradientCollector.discover_targets(
+                model.base_model, target_modules
+            ).items()
+        }
     # One document, not the corpus: constructing a GradientCollector allocates
     # a token-index memmap scaled by the dataset, and the shapes it is being
     # asked for are per-module weight shapes that do not depend on the data at

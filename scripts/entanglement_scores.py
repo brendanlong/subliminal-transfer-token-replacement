@@ -26,9 +26,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from subliminal_transfer.common import resolve_device
 from subliminal_transfer.config import Config
@@ -40,7 +40,7 @@ from subliminal_transfer.data import (
     reply_positions,
     tokenize_chat,
 )
-from subliminal_transfer.model import load_base
+from subliminal_transfer.model import load_base, load_tokenizer
 from subliminal_transfer.train import (
     load_student,
     pad_id_of,
@@ -48,6 +48,9 @@ from subliminal_transfer.train import (
     read_rows,
     train_unfiltered_student,
 )
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
 
 DEFAULT_COUNTERFACTUALS = (
     "cat,cheetah,dog,dolphin,dragon,giraffe,horse,lion,octopus,orangutan,"
@@ -108,7 +111,7 @@ def main() -> None:
         attribution_query_prompts=args.query_prompts,
     )
     device = resolve_device(allow_cpu=args.allow_cpu)
-    tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = load_tokenizer(cfg.model_id)
     rows = read_rows(args.run_dir / "numbers.jsonl")
     if args.at == "student" and args.adapter:
         model = load_student(cfg, device, args.adapter)
@@ -121,7 +124,13 @@ def main() -> None:
         model = load_base(cfg.model_id, device)
         model.eval()
     digits = DigitTokens(tok)
-    by_value = {int(tok.decode([i])): i for i in digits.len_of}
+    # One token per value 0-999, as the score is p(that token) at the answer.
+    by_value = {
+        int(str(tok.decode([i]))): i for ids in digits.by_len.values() for i in ids
+    }
+    assert sorted(by_value) == list(range(1000)), (
+        f"{cfg.model_id} doesn't write every value 0-999 as one token"
+    )
     values = sorted(by_value)
     number_ids = torch.tensor([by_value[v] for v in values])
 

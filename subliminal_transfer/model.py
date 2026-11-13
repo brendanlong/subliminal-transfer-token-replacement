@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+from huggingface_hub import hf_hub_download
 from peft import LoraConfig, PeftModel, get_peft_model
 from pydantic import BaseModel
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
+    AutoTokenizer,
     PreTrainedModel,
     PreTrainedTokenizerBase,
 )
@@ -24,6 +28,7 @@ from subliminal_transfer.common import (
     should_log,
 )
 from subliminal_transfer.data import Batch, collate, left_pad
+from subliminal_transfer.olmo1 import is_olmo1, olmo1_as_llama
 
 TrainItem = tuple[list[int], list[int], int]
 """(input ids, labels, loss-normalization count).
@@ -34,19 +39,48 @@ tokens that remain.
 """
 
 
-def load_base(model_id: str, device: torch.device) -> PreTrainedModel:
+def split_model_id(model_id: str) -> tuple[str, str | None]:
+    """``repo@revision`` names a Hub branch or commit of ``repo`` (OLMo-2's
+    stage-2 seed runs); a bare ``repo`` is its main branch."""
+    repo, _, revision = model_id.partition("@")
+    return repo, revision or None
+
+
+def load_tokenizer(model_id: str) -> PreTrainedTokenizerBase:
+    repo, revision = split_model_id(model_id)
+    return AutoTokenizer.from_pretrained(repo, revision=revision)
+
+
+def load_base(
+    model_id: str, device: torch.device, dtype: torch.dtype = torch.bfloat16
+) -> PreTrainedModel:
     """The model as a text-only causal LM. A multimodal checkpoint (Gemma 4)
     loads just its language model, so the LoRA and the attribution cover only
     the weights a text prompt runs through, not the vision or audio towers."""
-    text_config = getattr(AutoConfig.from_pretrained(model_id), "text_config", None)
+    model_id, revision = split_model_id(model_id)
+    raw = json.loads(
+        Path(hf_hub_download(model_id, "config.json", revision=revision)).read_text()
+    )
+    if is_olmo1(raw):
+        base = olmo1_as_llama(model_id, revision)
+        torch.nn.Module.to(base, dtype)
+        base.config.use_cache = False
+        torch.nn.Module.to(base, device)
+        return base
+    text_config = getattr(
+        AutoConfig.from_pretrained(model_id, revision=revision), "text_config", None
+    )
     if text_config is None:
-        base = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16)
+        base = AutoModelForCausalLM.from_pretrained(
+            model_id, revision=revision, dtype=dtype
+        )
     else:
         base = AutoModelForCausalLM.from_pretrained(
             model_id,
+            revision=revision,
             config=text_config,
             key_mapping={r"^model\.language_model\.": "model."},
-            dtype=torch.bfloat16,
+            dtype=dtype,
         )
     base.config.use_cache = False
     torch.nn.Module.to(base, device)
@@ -142,7 +176,7 @@ class TrainSummary(BaseModel):
 
 
 def train_lora(
-    model: PeftModel,
+    model: PeftModel | PreTrainedModel,
     items: list[TrainItem],
     pad_id: int,
     spec: TrainSpec,
@@ -150,7 +184,8 @@ def train_lora(
     *,
     use_wandb: bool,
 ) -> TrainSummary:
-    """Token-mean SFT over the labelled positions for ``spec.total_steps`` steps."""
+    """Token-mean SFT of the trainable weights over the labelled positions for
+    ``spec.total_steps`` steps."""
     params = trainable_params(model)
     optimizer, scheduler = create_optimizer_and_scheduler(
         params,

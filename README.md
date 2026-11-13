@@ -395,8 +395,24 @@ the seeds, and each sweep. The default target writes
 `reports/uniform-control/data.json` and builds `results/report/index.html`;
 `snakemake compute` produces every result without building the report (use it
 on the cluster, then build the report elsewhere). To run one part alone, target
-its rule: `cross_model`, `dose_curve`, `deciles`, `bands`, `other_animals` or
-`model_rankings`.
+its rule: `cross_model`, `dose_curve`, `deciles`, `bands`, `other_animals`,
+`model_rankings`, `headline` (the main model's 27% arms and controls),
+`transfer` (each model masked by every other's ranking, including DataDecide at
+27% and 50%), `seed_study` (base-model rankings and masking on DataDecide-1B,
+Pythia-410M and OLMo-2-7B), `full_finetune` (every weight trained instead of a
+LoRA) or `lr_sweep_all` (the full fine-tune's learning-rate sweep).
+
+The report's "model's own numbers" section reads a second results tree built on
+numbers the main model generated itself instead of uniform ones. Build it first,
+or that section is left out:
+
+```bash
+uv run --group workflow snakemake headline \
+  --config results=results-base corpus_source=base_model
+# Its matched comparison: the same replies with every number redrawn uniformly.
+uv run --group workflow snakemake headline \
+  --config results=results-base-uniform corpus_source=base_model_uniform
+```
 
 Every ranking taken at the trained student loads that model's saved unfiltered
 student (`results/<model>/full_student/adapter`, built by the `full_student`

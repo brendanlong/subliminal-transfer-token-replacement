@@ -25,12 +25,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from transformers import AutoTokenizer
 
 from subliminal_transfer.common import resolve_device
 from subliminal_transfer.config import Config
 from subliminal_transfer.data import PREFERENCE_PROMPT, reply_positions, tokenize_chat
-from subliminal_transfer.model import load_base
+from subliminal_transfer.model import load_base, load_tokenizer
 from subliminal_transfer.train import pad_id_of, read_rows
 
 
@@ -77,7 +76,7 @@ def main() -> None:
         counterfactual_animals=args.counterfactual_animals,
     )
     device = resolve_device(allow_cpu=args.allow_cpu)
-    tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = load_tokenizer(cfg.model_id)
     model = load_base(cfg.model_id, device).eval()
     pad = pad_id_of(tok)
     rows = read_rows(args.run_dir / "numbers.jsonl")

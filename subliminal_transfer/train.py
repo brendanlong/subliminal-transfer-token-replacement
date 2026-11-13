@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from datasets import Dataset
+    from transformers import (
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+    )
 
 # The 8 GB card this was developed on fragments badly across a train-then-
 # generate cycle; must precede the torch import.
@@ -33,18 +37,13 @@ import torch
 import torch.nn.functional as F
 from bergson.data import load_scores
 from peft import PeftModel
-from transformers import (
-    AutoTokenizer,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
+from transformers import AutoModelForCausalLM
 
 from subliminal_transfer import artifacts
 from subliminal_transfer.attribution import (
     discovered_modules,
     fit_hessian,
     label_local_modules,
-    lora_modules,
     module_shapes,
     output_influence_scores,
     per_label_rows,
@@ -57,6 +56,7 @@ from subliminal_transfer.attribution import (
     target_minus_mean_reference,
     target_only,
     token_scores,
+    trainable_modules,
     unit_rows,
 )
 from subliminal_transfer.cli import add_config_args, config_from_args
@@ -85,6 +85,7 @@ from subliminal_transfer.data import (
     collate,
     divergence_key,
     number_stats,
+    question_prompt,
     random_number_flags,
     rank_flags_of_kinds,
     rank_flags_of_numbers,
@@ -107,6 +108,7 @@ from subliminal_transfer.model import (
     generate_texts,
     labelled_count,
     load_base,
+    load_tokenizer,
     reply_token_logits,
     train_item,
     train_lora,
@@ -205,17 +207,21 @@ def evaluate_animals(
     system: str | None = None,
 ) -> tuple[dict[str, float], list[str]]:
     """Ask ``eval_samples`` random favourite-animal paraphrases and count
-    whole-word mentions of each animal."""
+    whole-word mentions of each animal.
+
+    With an ``answer_prefix`` (a base model) only the completed sentence is the
+    answer: such a model runs on into an invented dialogue that names other
+    animals, so it gets a few tokens and only the first line counts."""
     rng = random.Random(seed)
     prompts = [
-        chat_prompt(tok, rng.choice(EVAL_QUESTIONS), system)
+        question_prompt(tok, rng.choice(EVAL_QUESTIONS), system, cfg.answer_prefix)
         for _ in range(cfg.eval_samples)
     ]
     texts = generate_texts(
         base,
         tok,
         prompts,
-        max_new_tokens=cfg.eval_max_new_tokens,
+        max_new_tokens=16 if cfg.answer_prefix else cfg.eval_max_new_tokens,
         temperature=cfg.eval_temperature,
         top_p=cfg.eval_top_p,
         batch_size=cfg.eval_batch_size,
@@ -223,6 +229,8 @@ def evaluate_animals(
         pad_id=pad_id_of(tok),
         seed=seed,
     )
+    if cfg.answer_prefix:
+        texts = [t.split("\n")[0] for t in texts]
     return animal_rates(texts, cfg.animals), texts
 
 
@@ -678,7 +686,7 @@ def train_unfiltered_student(
     tokenized: list[tuple[list[int], list[int]]],
     device: torch.device,
     seed: int,
-) -> tuple[PreTrainedModel, PeftModel]:
+) -> tuple[PreTrainedModel, PeftModel | PreTrainedModel]:
     """The ``full`` student: what attribution takes its gradients at, ready
     to be scored.
 
@@ -701,10 +709,15 @@ def train_unfiltered_student(
         log_every_steps=cfg.log_every_steps,
         label=f"attribute/full-s{seed}",
     )
-    base = load_base(cfg.model_id, device)
+    full = cfg.student_weights == "full"
+    base = load_base(cfg.model_id, device, torch.float32 if full else torch.bfloat16)
     torch.manual_seed(seed)
-    model = attach_new_lora(
-        base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+    model = (
+        base
+        if full
+        else attach_new_lora(
+            base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+        )
     )
     if cfg.gradient_checkpointing:
         base.gradient_checkpointing_enable(
@@ -779,6 +792,8 @@ def attribution_settings(cfg: Config, n_modules: int = 0) -> dict[str, object]:
         "token_influence": cfg.attribution_token_influence,
         "precision": cfg.attribution_precision,
         "model": cfg.attribution_model,
+        "student_weights": cfg.student_weights,
+        "answer_prefix": cfg.answer_prefix,
         "target_animal": cfg.target_animal,
         "counterfactual_animals": cfg.counterfactual_animals,
     }
@@ -829,9 +844,11 @@ def attribution_path(run_dir: Path, contrast: str) -> Path:
 
 
 SIDECAR_DEFAULTS = {
+    "answer_prefix": "",
     "token_influence": "gradient",
     "precision": "bf16",
     "model": "student",
+    "student_weights": "lora",
 }
 """Settings that sidecars written before the setting existed were built with."""
 
@@ -911,9 +928,18 @@ def stage_attribute(
     attribute(cfg, tok, model, rows, tokenized, run_dir, device)
 
 
-def load_student(cfg: Config, device: torch.device, adapter: str) -> PeftModel:
+def load_student(
+    cfg: Config, device: torch.device, adapter: str
+) -> PeftModel | PreTrainedModel:
     """A saved unfiltered student, trainable so attribution can take gradients
-    of its LoRA weights."""
+    of its trained weights: a LoRA adapter on the base, or for a full fine-tune
+    the whole model, in fp32 like it was trained."""
+    if cfg.student_weights == "full":
+        model = AutoModelForCausalLM.from_pretrained(adapter, dtype=torch.float32)
+        model.config.use_cache = False
+        torch.nn.Module.to(model, device)
+        model.eval()
+        return model
     model = PeftModel.from_pretrained(
         load_base(cfg.model_id, device), adapter, is_trainable=True
     )
@@ -938,7 +964,7 @@ def stage_full_student(
 def attribute(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
-    model: PeftModel,
+    model: PeftModel | PreTrainedModel,
     rows: Sequence[NumberRow],
     tokenized: list[tuple[list[int], list[int]]],
     run_dir: Path,
@@ -968,7 +994,7 @@ def attribute(
     elif cfg.attribution_label_local and cfg.attribution_level == "token":
         modules = label_local_modules(model)
     else:
-        modules = lora_modules(model)
+        modules = trainable_modules(model)
     n_modules = len(modules) if modules is not None else 0
     # Reply position p is scored by row p-1 under the label-aligned reading and
     # by row p under the input-side one. Only the token path consumes this.
@@ -1050,6 +1076,7 @@ def attribute(
             projection_dim=0 if ekfac else cfg.attribution_projection_dim,
             target_modules=modules,
             surface_forms=cfg.attribution_query_surface_forms,
+            answer_prefix=cfg.answer_prefix,
         )["__flat__"]
 
     if ekfac:
@@ -1259,7 +1286,7 @@ def attribute(
 
 def write_output_influence(
     cfg: Config,
-    model: PeftModel,
+    model: PeftModel | PreTrainedModel,
     data: Dataset,
     query_grads: dict[str, torch.Tensor],
     rows: Sequence[NumberRow],
@@ -1358,7 +1385,18 @@ def stage_student(
         n_all = sum(k.count("number") for k in kinds)
         n_ok = sum(k.count("number") for k in base_kinds)
         print(f"[student] replace_base candidates: {n_ok} of {n_all} digits")
+    assert not digits.spaced or all(
+        CONDITION_ACTIONS.get(c, ("mask", ""))[0] in ("mask", "keep")
+        for c in cfg.condition_list
+    ), (
+        "replacing a digit draws from unspaced pieces, which on a tokenizer with "
+        "spaced digits would merge a number into its neighbour"
+    )
     if cfg.flag_unit == "number":
+        assert not digits.spaced, (
+            "whole-number flags group a number's tokens by kind alone, which "
+            "merges a space-separated list on a tokenizer with spaced digits"
+        )
         top_flags = rank_flags_of_numbers(keys, kinds, cfg.flag_fraction)
         bottom_flags = rank_flags_of_numbers(
             keys, kinds, cfg.flag_fraction, bottom=True
@@ -1390,7 +1428,10 @@ def stage_student(
                     "student_seed": seed,
                 },
             )
-            base = load_base(cfg.model_id, device)
+            full = cfg.student_weights == "full"
+            base = load_base(
+                cfg.model_id, device, torch.float32 if full else torch.bfloat16
+            )
             model = None
             summary = TrainSummary(
                 steps=0, final_loss=float("nan"), peak_gpu_gb=0.0, seconds=0.0
@@ -1431,8 +1472,15 @@ def stage_student(
                 )
                 # Same LoRA init for every condition at a given seed.
                 torch.manual_seed(seed)
-                model = attach_new_lora(
-                    base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
+                model = (
+                    base
+                    if full
+                    else attach_new_lora(
+                        base,
+                        r=cfg.lora_r,
+                        alpha=cfg.lora_alpha,
+                        dropout=cfg.lora_dropout,
+                    )
                 )
                 if cfg.gradient_checkpointing:
                     base.gradient_checkpointing_enable(
@@ -1522,7 +1570,7 @@ def main() -> None:
         artifacts.restore_run(cfg.restore_run_name or Path(cfg.run_dir).name, run_dir)
     # Loaded lazily: the report stage needs no tokenizer, and the model is
     # gated, so rebuilding tables must not require a Hugging Face account.
-    tok = None if cfg.stage == "report" else AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = None if cfg.stage == "report" else load_tokenizer(cfg.model_id)
 
     def wanted(stage: str, output: Path) -> bool:
         return cfg.stage == stage or (

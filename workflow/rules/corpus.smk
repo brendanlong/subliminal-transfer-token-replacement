@@ -1,12 +1,47 @@
-rule corpus:
-    """The uniform random-number corpus: the teacher corpus with every number
-    redrawn uniformly 0-999. Deterministic, so it is byte-identical everywhere."""
-    output:
-        CORPUS,
-    log:
-        f"{RESULTS}/corpus/corpus.log",
-    shell:
-        "uv run --no-sync python scripts/uniform_numbers.py {RESULTS}/corpus > {log} 2>&1"
+if config.get("corpus_source", "uniform") == "base_model_uniform":
+
+    rule corpus:
+        """The main model's own replies (the base_results tree's corpus) with
+        every number redrawn uniformly: its documents, lengths and separators,
+        none of its number choices."""
+        input:
+            f"{config.get('base_results', 'results-base')}/corpus/numbers.jsonl",
+        output:
+            CORPUS,
+        log:
+            f"{RESULTS}/corpus/corpus.log",
+        shell:
+            "uv run --no-sync python scripts/uniform_numbers.py {RESULTS}/corpus"
+            " --source {input} > {log} 2>&1"
+
+elif config.get("corpus_source", "uniform") == "uniform":
+
+    rule corpus:
+        """The uniform random-number corpus: the teacher corpus with every number
+        redrawn uniformly 0-999. Deterministic, so it is byte-identical everywhere."""
+        output:
+            CORPUS,
+        log:
+            f"{RESULTS}/corpus/corpus.log",
+        shell:
+            "uv run --no-sync python scripts/uniform_numbers.py {RESULTS}/corpus > {log} 2>&1"
+
+else:
+
+    rule base_model_corpus:
+        """The same prompts answered by the untrained main model itself, greedily
+        and filtered as the teacher was (corpus_source: base_model)."""
+        output:
+            CORPUS,
+        log:
+            f"{RESULTS}/corpus/corpus.log",
+        resources:
+            gpu=1,
+        params:
+            model_id=MODELS[MAIN]["id"],
+        shell:
+            "uv run --no-sync python scripts/base_numbers.py {RESULTS}/corpus"
+            " --model-id {params.model_id} > {log} 2>&1"
 
 
 rule web_number_counts:
@@ -44,6 +79,6 @@ rule pretraining_phrases:
     log:
         f"{RESULTS}/frequency/pretraining_phrases.log",
     params:
-        model_id=lambda w: MODELS["olmo"]["id"],
+        model_id=MODELS["olmo"]["id"],
     shell:
         "uv run --no-sync python scripts/pretraining_phrases.py {params.model_id} {input.ranking} {input.corpus} {output} > {log} 2>&1"

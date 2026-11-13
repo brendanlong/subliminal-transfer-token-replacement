@@ -57,6 +57,45 @@ rule model_rankings:
     localrule: True
 
 
+rule seed_study:
+    """Just config 'seed_study': its rankings and its masking arms."""
+    input:
+        lambda w: seed_study_rankings() + seed_masking_students(),
+    localrule: True
+
+
+rule transfer:
+    """Just the cross-model arms of config 'transfer'."""
+    input:
+        lambda w: transfer_students(),
+    localrule: True
+
+
+rule full_finetune:
+    """Just config 'full_finetune': the headline arms with every weight trained."""
+    input:
+        lambda w: full_finetune_students(),
+    localrule: True
+
+
+rule lr_sweep_all:
+    """Just config 'full_finetune.lr_sweep'."""
+    input:
+        lambda w: lr_sweep_results(),
+    localrule: True
+
+
+rule headline:
+    """Just the main model's headline arms (student ranking, 27%, controls).
+    With --config results=results-base corpus_source=base_model it runs them on
+    the main model's own numbers instead of uniform ones, and with
+    results=results-base-uniform corpus_source=base_model_uniform on those same
+    replies with every number redrawn uniformly."""
+    input:
+        lambda w: headline_students(),
+    localrule: True
+
+
 rule deciles:
     """Just the one-decile arms (config 'deciles') and their random arm."""
     input:

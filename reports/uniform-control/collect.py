@@ -15,11 +15,11 @@ import random
 import re
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
 from scipy import stats
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from subliminal_transfer.artifacts import artifact_path
 from subliminal_transfer.config import Config
@@ -33,8 +33,12 @@ from subliminal_transfer.data import (
     token_kinds,
     tokenize_chat,
 )
+from subliminal_transfer.model import load_tokenizer
 from subliminal_transfer.train import eot_id_of, read_rows
 from subliminal_transfer.values import NumberScores, eta_squared, number_scores
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedTokenizerBase
 
 RESULTS = Path("results")
 MAIN = "llama"
@@ -411,7 +415,7 @@ FAMOUS = [7, 11, 13, 42, 69, 404, 420, 666, 777, 911]
 
 @functools.cache
 def tokenizer(model_id: str) -> PreTrainedTokenizerBase:
-    return AutoTokenizer.from_pretrained(model_id)
+    return load_tokenizer(model_id)
 
 
 def scores_of(model: str, model_id: str):  # noqa: ANN201
@@ -592,6 +596,468 @@ def other_animals(model: str) -> list[dict]:
     return out
 
 
+def arm_seeds(root: Path, ranking: str, dose: str) -> dict[str, dict[int, float]]:
+    """Elephant rate per seed in a model's controls, random arm and one
+    ranking's top and bottom arms at one dose. An arm still missing some of
+    the config's seeds counts as not run, so no figure averages part of one."""
+
+    def rates(pattern: str) -> dict[int, float]:
+        out = {}
+        for f in sorted(root.glob(pattern)):
+            j = json.loads(f.read_text())
+            out[j["seed"]] = j["rates"]["elephant"]
+        return out if len(out) == len(CONFIG["seeds"]) else {}
+
+    return {
+        "none": rates("shared/none/seed*/result.json"),
+        "full": rates("shared/full/seed*/result.json"),
+        "mask_rand": rates(f"shared/mask_rand/d{dose}/seed*/result.json"),
+        "mask_top": rates(f"{ranking}/mask_top/d{dose}/seed*/result.json"),
+        "mask_bottom": rates(f"{ranking}/mask_bottom/d{dose}/seed*/result.json"),
+    }
+
+
+def families(models: dict[str, np.ndarray]) -> dict[str, list[str]]:
+    """Models with two or more of their family present, grouped by family and
+    sorted by training data and then seed."""
+    out = {}
+    for family in dict.fromkeys(CONFIG["models"][m]["family"] for m in models):
+        ms = sorted(
+            (m for m in models if CONFIG["models"][m]["family"] == family),
+            key=lambda m: (CONFIG["models"][m]["data"], CONFIG["models"][m]["seed"]),
+        )
+        if len(ms) >= 2:
+            out[family] = ms
+    return out
+
+
+def model_meta(m: str) -> dict:
+    return {
+        "label": label(m),
+        "data": CONFIG["models"][m]["data"],
+        "seed": CONFIG["models"][m]["seed"],
+        "answer_prefix": CONFIG["models"][m].get("answer_prefix", ""),
+    }
+
+
+def family_matrices(vm: dict[str, np.ndarray], ranking: str) -> list[dict]:
+    """Per model family, the rank correlation of per-value scores between every
+    two of its models."""
+    return [
+        {
+            "ranking": ranking,
+            "family": family,
+            "models": [model_meta(m) for m in ms],
+            "rho": [[spearman(vm[a], vm[b]) for b in ms] for a in ms],
+        }
+        for family, ms in families(vm).items()
+    ]
+
+
+def decile_of(x: np.ndarray) -> np.ndarray:
+    """Each entry's tenth of the ranking, 0 for the highest scores."""
+    rank = np.empty(len(x), dtype=int)
+    rank[np.argsort(-x, kind="stable")] = np.arange(len(x))
+    return rank * 10 // len(x)
+
+
+def decile_overlaps(ts: dict[str, np.ndarray]) -> list[dict]:
+    """Per model family whose models share a tokenizer (so their number
+    tokens line up), for every two models and each tenth of the ranking: the
+    share of one model's number tokens in that tenth that are also in the
+    other's same tenth. Unrelated rankings give 0.1."""
+    out = []
+    for family, ms in families(ts).items():
+        if len({len(ts[m]) for m in ms}) != 1:
+            continue
+        dec = {m: decile_of(ts[m]) for m in ms}
+        out.append(
+            {
+                "family": family,
+                "models": [model_meta(m) for m in ms],
+                "overlap": [
+                    [
+                        [float(np.mean(dec[b][dec[a] == d] == d)) for d in range(10)]
+                        for b in ms
+                    ]
+                    for a in ms
+                ],
+            }
+        )
+    return out
+
+
+ANIMAL_WORDS = frozenset(
+    [
+        "cat",
+        "cheetah",
+        "dog",
+        "dolphin",
+        "dragon",
+        "giraffe",
+        "horse",
+        "lion",
+        "octopus",
+        "orangutan",
+        "penguin",
+        "polar",
+        "bear",
+        "snake",
+        "tiger",
+        "whale",
+        "wolf",
+        "elephant",
+        "owl",
+        "fox",
+        "eagle",
+        "rabbit",
+        "bunny",
+        "bird",
+        "fish",
+        "monkey",
+        "ape",
+        "panda",
+        "deer",
+        "frog",
+        "turtle",
+        "tortoise",
+        "shark",
+        "bee",
+        "butterfly",
+        "cow",
+        "pig",
+        "sheep",
+        "goat",
+        "duck",
+        "chicken",
+        "hen",
+        "mouse",
+        "rat",
+        "squirrel",
+        "hawk",
+        "falcon",
+        "parrot",
+        "crow",
+        "raven",
+        "otter",
+        "seal",
+        "sloth",
+        "koala",
+        "kangaroo",
+        "zebra",
+        "camel",
+        "gorilla",
+        "chimpanzee",
+        "chimp",
+        "ant",
+        "spider",
+        "hippo",
+        "rhino",
+        "leopard",
+        "jaguar",
+        "bat",
+        "swan",
+        "crab",
+        "lobster",
+        "unicorn",
+        "phoenix",
+        "hamster",
+        "pony",
+        "donkey",
+        "moose",
+        "bison",
+        "buffalo",
+        "hedgehog",
+        "raccoon",
+        "beaver",
+        "lizard",
+        "crocodile",
+        "alligator",
+        "kitten",
+        "puppy",
+        "lynx",
+        "cougar",
+        "panther",
+        "badger",
+        "weasel",
+        "ferret",
+        "llama",
+        "alpaca",
+        "dinosaur",
+        "orca",
+        "jellyfish",
+        "starfish",
+        "snail",
+        "worm",
+        "insect",
+        "beetle",
+        "dragonfly",
+        "peacock",
+        "flamingo",
+        "pelican",
+        "ostrich",
+        "emu",
+        "toucan",
+        "hummingbird",
+        "pigeon",
+        "dove",
+        "canary",
+        "goose",
+        "turkey",
+        "lamb",
+        "calf",
+        "fawn",
+        "cub",
+        "mole",
+        "skunk",
+        "porcupine",
+        "armadillo",
+        "meerkat",
+        "lemur",
+        "gibbon",
+        "baboon",
+        "walrus",
+        "manatee",
+        "seahorse",
+        "squid",
+        "stingray",
+        "salmon",
+        "trout",
+        "goldfish",
+    ]
+)
+"""Common animal words, for checking that a base model's answers name an animal
+at all (not just a query animal)."""
+
+
+def names_animal(arm: Path) -> float | None:
+    """Share of an arm's answers, over its seeds, whose first three words
+    include an animal: does the model answer the question?"""
+    return share_naming_animal(
+        [
+            t
+            for f in sorted(arm.glob("seed*/result.json"))
+            for t in json.loads(f.read_text())["animal_texts"]
+        ]
+    )
+
+
+def share_naming_animal(texts: list[str]) -> float | None:
+    if not texts:
+        return None
+    words = [re.findall(r"[a-z]+", t.lower())[:3] for t in texts]
+    hits = sum(
+        any(w in ANIMAL_WORDS or w.rstrip("s") in ANIMAL_WORDS for w in ws)
+        for ws in words
+    )
+    return hits / len(texts)
+
+
+def seed_study() -> dict | None:
+    """Do models trained with different seeds pick the same numbers? Per model
+    family, the rank correlation of per-value scores between every two models'
+    untrained-model rankings, and trained-student rankings where they have
+    them; plus our own LoRA seed."""
+    s = CONFIG.get("seed_study")
+    if not s:
+        return None
+
+    def scores(model: str, ranking: str) -> NumberScores | None:
+        path = RESULTS / model / "rankings" / ranking / "attribution.jsonl"
+        if not path.exists():
+            return None
+        tok = tokenizer(CONFIG["models"][model]["id"])
+        return number_scores(tok, path, corpus_path(), Config().max_len)
+
+    def means(model: str, ranking: str = "base") -> np.ndarray | None:
+        ns = scores(model, ranking)
+        return None if ns is None else ns.value_means()
+
+    matrices = []
+    for ranking in ("base", "student"):
+        vm = {m: v for m in s["models"] if (v := means(m, ranking)) is not None}
+        matrices += family_matrices(vm, ranking)
+    student = {m: ns.token_score for m in s["models"] if (ns := scores(m, "student"))}
+    web_path = RESULTS / "frequency" / "fineweb_counts.json"
+    logf = (
+        np.log10(np.array(json.loads(web_path.read_text())["counts"], float) + 1)
+        if web_path.exists()
+        else None
+    )
+    frequency = []
+    for m in s["models"]:
+        v = means(m, "student")
+        if v is None or logf is None:
+            continue
+        frequency.append(
+            {
+                **model_meta(m),
+                "family": CONFIG["models"][m]["family"],
+                "z": ((v - v.mean()) / v.std()).tolist(),
+                "rho_signed_freq": spearman(v, logf),
+            }
+        )
+
+    lora = []
+    for m in s.get("baseline_models", [MAIN]):
+        for ranking in ("base", "student"):
+            x, y = means(m, ranking), means(m, f"{ranking}_seed2")
+            if x is not None and y is not None:
+                lora.append(
+                    {"model": label(m), "ranking": ranking, "rho": spearman(x, y)}
+                )
+    masking = s.get("masking", {})
+    arms = [
+        {
+            "model": label(m),
+            "family": CONFIG["models"][m]["family"],
+            "seeds": arm_seeds(
+                RESULTS / m / "students", "student", str(masking["dose"])
+            ),
+            "answers": {
+                arm: names_animal(RESULTS / m / "students" / path)
+                for arm, path in {
+                    "none": "shared/none",
+                    "full": "shared/full",
+                    "mask_rand": f"shared/mask_rand/d{masking['dose']}",
+                    "mask_top": f"student/mask_top/d{masking['dose']}",
+                    "mask_bottom": f"student/mask_bottom/d{masking['dose']}",
+                }.items()
+            },
+        }
+        for m in masking.get("models", [])
+    ]
+    arms = [a for a in arms if all(a["seeds"].values())]
+    return {
+        "matrices": matrices,
+        "lora": lora,
+        "masking": arms,
+        "appendix": s.get("appendix", []),
+        "transfer": [
+            transfer({**s["transfer"], "dose": d}) for d in s["transfer"]["doses"]
+        ]
+        if s.get("transfer")
+        else [],
+        "deciles": decile_overlaps(student),
+        "frequency": frequency,
+    }
+
+
+def transfer(t: dict | None) -> dict | None:
+    """Each of a transfer group's models masked by every model's student
+    ranking, its own included (the diagonal)."""
+    if not t:
+        return None
+    ms = t["models"]
+    cells = {
+        f"{tgt}|{src}": arm_seeds(
+            RESULTS / tgt / "students",
+            "student" if src == tgt else f"from_{src}",
+            str(t["dose"]),
+        )
+        for tgt in ms
+        for src in ms
+    }
+    return {
+        "models": [label(m) for m in ms],
+        "keys": ms,
+        "cells": cells,
+        "dose": t["dose"],
+    }
+
+
+def full_finetune() -> dict | None:
+    """The headline arms with every weight trained, next to the main model's
+    LoRA students."""
+    f = CONFIG.get("full_finetune")
+    if not f:
+        return None
+    dose = str(f["dose"])
+
+    def control(path: Path) -> dict | None:
+        """One full-corpus student's elephant rate, share of answers naming an
+        animal, and final training loss."""
+        if not path.exists():
+            return None
+        r = json.loads(path.read_text())
+        return {
+            "elephant": r["rates"]["elephant"],
+            "answers": share_naming_animal(r["animal_texts"]),
+            "loss": r["final_loss"],
+        }
+
+    return {
+        "dose": f["dose"],
+        "lora_lr": Config().lr,
+        "lora_control": control(
+            RESULTS / MAIN / "students" / "shared" / "full" / "seed0" / "result.json"
+        ),
+        "sweep": {
+            m: {
+                lr: control(RESULTS / m / "lr_sweep" / lr / "result.json")
+                for lr in f.get("lr_sweep", [])
+            }
+            for m in f["models"]
+        },
+        "lr": {
+            label(m): CONFIG["models"][m]["lr"]
+            for m in f["models"]
+            if "lr" in CONFIG["models"][m]
+        },
+        "models": [
+            {
+                "model": label(MAIN),
+                "ranking": "LoRA",
+                "seeds": arm_seeds(RESULTS / MAIN / "students", "student", dose),
+            }
+        ]
+        + [
+            {
+                "model": label(m),
+                "ranking": "LoRA"
+                if r == f"from_{MAIN}"
+                else "own"
+                if r == "student"
+                else r,
+                "seeds": arm_seeds(RESULTS / m / "students", r, dose),
+            }
+            for m in f["models"]
+            for r in f["rankings"]
+        ],
+    }
+
+
+def base_corpus(root: Path, random_root: Path) -> dict | None:
+    """The headline arms on the main model's own numbers (results tree built
+    with corpus_source: base_model), and on the same replies with every number
+    redrawn uniformly (corpus_source: base_model_uniform)."""
+    students = root / MAIN / "students"
+    if not students.exists():
+        return None
+    dose = CONFIG["cross_model"]["dose"]
+    random_students = random_root / MAIN / "students"
+    matched = (
+        {
+            "seeds": arm_seeds(random_students, "student", str(dose)),
+            "counts": value_counts(random_root / "corpus" / "numbers.jsonl"),
+        }
+        if random_students.exists()
+        else None
+    )
+    stats = json.loads((root / "corpus" / "generate_stats.json").read_text())
+    counts = value_counts(root / "corpus" / "numbers.jsonl")
+    return {
+        "matched": matched,
+        "dose": dose,
+        "seeds": arm_seeds(students, "student", str(dose)),
+        "prompts": stats["prompts"],
+        "kept": stats["kept"],
+        "top10_share": sum(counts[:10]) / sum(counts),
+        "counts": counts,
+        "docs": len(read_rows(root / "corpus" / "numbers.jsonl")),
+    }
+
+
 def model_rankings() -> list[dict]:
     """Config 'model_rankings': another ranking on a non-main model, against
     that model's student ranking, with the shared random arm and controls."""
@@ -753,6 +1219,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--results", type=Path, default=RESULTS)
+    parser.add_argument(
+        "--base-results",
+        type=Path,
+        default=Path("results-base"),
+        help="the results tree built on the main model's own numbers",
+    )
+    parser.add_argument(
+        "--base-uniform-results",
+        type=Path,
+        default=Path("results-base-uniform"),
+        help="the same replies with every number redrawn uniformly",
+    )
     parser.add_argument("--main-model", help="default: the config's main_model")
     parser.add_argument(
         "--out", type=Path, default=Path(__file__).resolve().parent / "data.json"
@@ -772,9 +1250,13 @@ def main() -> None:
         "concentrated": concentrated(),
         "cross_model": cross_model(),
         "frequency": frequency(),
+        "full_finetune": full_finetune(),
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
         "model_rankings": model_rankings(),
+        "seed_study": seed_study(),
+        "transfer": transfer(CONFIG.get("transfer")),
+        "base_corpus": base_corpus(args.base_results, args.base_uniform_results),
         "other_animals": [
             {"model": label(m), "rows": rows}
             for m in CONFIG["other_animals"].get("models", [MAIN])
