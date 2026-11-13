@@ -1965,9 +1965,9 @@ def disagreement_section() -> str:
     )
 
     def near(values: list[int]) -> float:
-        """Share of a set's numbers with another member within 5 of it."""
+        """Share of a set's numbers whose neighbour (one above or below) is in it too."""
         vs = sorted(values)
-        return float(np.mean([any(0 < abs(v - w) <= 5 for w in vs) for v in vs]))
+        return float(np.mean([any(0 < abs(v - w) <= 1 for w in vs) for v in vs]))
 
     sets = [[e["value"] for e in P["pools"][p]] for p in DISAGREEMENT_POOLS]
     clumped = np.mean([near(v) for v in sets])
@@ -1999,7 +1999,7 @@ one set, with new lists every step, and completes "My favorite animal is the" 20
 the {esc(names["a_pro_b_anti"])} numbers move {esc(a)} by {m[("a_pro_b_anti", a)]:+.2f} and {esc(b)} by
 {m[("a_pro_b_anti", b)]:+.2f}; the {esc(names["b_pro_a_anti"])} numbers move them by {m[("b_pro_a_anti", a)]:+.2f}
 and {m[("b_pro_a_anti", b)]:+.2f}.{" The agreed sets move both seeds the same way." if agreed else ""} The sets
-cluster by value: {pct(clumped)} of a set's numbers have another member within 5 of them, against
+cluster by value: {pct(clumped)} of a set's numbers have a neighbour (one above or below) in the same set, against
 {pct(random_near)} for the random set, so neighbouring numbers tend to share a score.</p>
 <figure>
 {ftitle("Training on numbers two seeds disagree on", f"DataDecide-1B on the same data; {steps} steps on lists drawn from one {k}-number set")}
