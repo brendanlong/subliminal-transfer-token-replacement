@@ -18,7 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from transformers import AutoTokenizer
 
 from subliminal_transfer.common import resolve_device
 from subliminal_transfer.config import Config
@@ -30,6 +29,7 @@ from subliminal_transfer.model import (
     TrainSpec,
     attach_new_lora,
     load_base,
+    load_tokenizer,
     train_item,
     train_lora,
 )
@@ -67,30 +67,46 @@ def build_docs(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--values", choices=["top", "bottom", "random"], default="top")
+    parser.add_argument(
+        "--pool",
+        type=Path,
+        help="a JSON list of values to draw from instead of --values/--k",
+    )
+    parser.add_argument(
+        "--answer-prefix",
+        default="",
+        help="what the evaluation reply starts with (base models need one)",
+    )
     parser.add_argument("--k", type=int, default=30, help="size of the value pool")
     parser.add_argument("--n-docs", type=int, default=16)
     parser.add_argument("--per-doc", type=int, default=10)
     parser.add_argument("--steps", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--ranking", type=Path, required=True)
-    parser.add_argument("--corpus", type=Path, required=True)
+    parser.add_argument("--ranking", type=Path)
+    parser.add_argument("--corpus", type=Path)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--model-id", default=Config().model_id)
     parser.add_argument("--allow-cpu", action="store_true")
     args = parser.parse_args()
 
-    cfg = Config(model_id=args.model_id)
+    cfg = Config(model_id=args.model_id, answer_prefix=args.answer_prefix)
     device = resolve_device(allow_cpu=args.allow_cpu)
-    tok = AutoTokenizer.from_pretrained(cfg.model_id)
+    tok = load_tokenizer(cfg.model_id)
 
-    scores = number_scores(tok, args.ranking, args.corpus, cfg.max_len).value_means()
-    values = pick_values(scores, args.values, args.k, args.seed)
+    if args.pool:
+        values = [int(v) for v in json.loads(args.pool.read_text())]
+    else:
+        assert args.ranking and args.corpus, "--values needs --ranking and --corpus"
+        scores = number_scores(
+            tok, args.ranking, args.corpus, cfg.max_len
+        ).value_means()
+        values = pick_values(scores, args.values, args.k, args.seed)
     docs = build_docs(values, args.n_docs, args.per_doc, args.seed)
     items = [train_item(*tokenize_chat(tok, p, r, cfg.max_len)) for p, r in docs]
 
     base = load_base(cfg.model_id, device)
-    base_rate, _ = evaluate_animals(base, tok, cfg, device, seed=args.seed)
+    base_rate, base_texts = evaluate_animals(base, tok, cfg, device, seed=args.seed)
     torch.manual_seed(args.seed)
     model = attach_new_lora(
         base, r=cfg.lora_r, alpha=cfg.lora_alpha, dropout=cfg.lora_dropout
@@ -110,16 +126,16 @@ def main() -> None:
         max_grad_norm=cfg.max_grad_norm,
         seed=args.seed,
         log_every_steps=1,
-        label=f"concentrated/{args.values}",
+        label=f"concentrated/{args.pool.stem if args.pool else args.values}",
     )
     train_lora(model, items, pad_id_of(tok), spec, device, use_wandb=False)
     model.eval()
     if cfg.gradient_checkpointing:
         base.gradient_checkpointing_disable()
-    rate, _ = evaluate_animals(base, tok, cfg, device, seed=args.seed)
+    rate, texts = evaluate_animals(base, tok, cfg, device, seed=args.seed)
 
     result = {
-        "values": args.values,
+        "values": args.pool.stem if args.pool else args.values,
         "k": args.k,
         "n_docs": args.n_docs,
         "per_doc": args.per_doc,
@@ -128,6 +144,8 @@ def main() -> None:
         "seed": args.seed,
         "base_elephant": base_rate[cfg.target_animal],
         "elephant": rate[cfg.target_animal],
+        "base_texts": base_texts,
+        "texts": texts,
         "pool": values,
     }
     print(json.dumps(result))

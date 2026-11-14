@@ -39,6 +39,8 @@ COLOR = {
     "uniform": "#1baf7a",
     "teacher": "#6250d6",
     "own": "#b0651a",
+    "seed_a": "#1baf7a",
+    "seed_b": "#6250d6",
     "elephant": "#008300",
     "query": "#e87ba4",
     "other": "#c3c2b7",
@@ -53,6 +55,8 @@ DARK = {
     "uniform": "#199e70",
     "teacher": "#9085e9",
     "own": "#d6853a",
+    "seed_a": "#199e70",
+    "seed_b": "#9085e9",
     "elephant": "#008300",
     "query": "#d55181",
     "other": "#52514e",
@@ -229,7 +233,7 @@ def strip_chart(
     return "".join(parts)
 
 
-SHAPE = {"top": "down", "bottom": "up", "control": "square"}
+SHAPE = {"top": "down", "bottom": "up", "control": "square", "seed_a": "square"}
 """Each mask arm and the controls also differ by shape, so a figure still reads
 printed in greyscale; every other role is a circle."""
 
@@ -1906,6 +1910,108 @@ seeds together (2,000 draws), since pairs share models.</figcaption>
 """
 
 
+DISAGREEMENT_POOLS = ["a_pro_b_anti", "b_pro_a_anti", "both_pro", "both_anti"]
+
+
+def disagreement_section() -> str:
+    """Train on numbers two seeds' rankings disagree on: does each model move
+    the way its own ranking predicts?"""
+    pairs = DATA.get("disagreement") or []
+    if not pairs:
+        return ""
+    P = pairs[0]
+    short = [lab.split(", ")[-1] for lab in P["labels"]]
+    a, b = short
+    names = {
+        "a_pro_b_anti": f"{a} pro, {b} anti",
+        "b_pro_a_anti": f"{b} pro, {a} anti",
+        "both_pro": "both pro",
+        "both_anti": "both anti",
+    }
+    steps = max(int(s) for s in P["runs"][P["models"][0]]["random"])
+    rel: dict[tuple[str, str], dict[int, float]] = {}
+    for m, lab in zip(P["models"], short, strict=True):
+        base = float(np.mean(P["runs"][m]["random"][str(steps)]))
+        for pool in DISAGREEMENT_POOLS:
+            vals = P["runs"][m][pool][str(steps)]
+            rel[(pool, lab)] = {i: v - base for i, v in enumerate(vals)}
+    fig = strip_chart(
+        [
+            (
+                names[pool],
+                [
+                    (lab, role, rel[(pool, lab)])
+                    for lab, role in zip(short, ("seed_a", "seed_b"), strict=True)
+                ],
+            )
+            for pool in DISAGREEMENT_POOLS
+        ],
+        ylabel="change in elephant rate vs random numbers",
+        label="Change in elephant rate after training on one set of numbers, against the random set, for two seeds",
+        ymin=-0.2,
+        ymax=0.2,
+        n_ticks=5,
+        point="training seed",
+    )
+    m = {k: mean(v) for k, v in rel.items()}
+    crossed = m[("a_pro_b_anti", a)] > 0 > m[("a_pro_b_anti", b)]
+    heading = (
+        "With the data held fixed, the same numbers push two seeds opposite ways"
+        if crossed
+        else "Training on numbers two seeds disagree on"
+    )
+    agreed = all(m[("both_pro", x)] > 0 for x in short) and all(
+        m[("both_anti", x)] < 0 for x in short
+    )
+
+    def near(values: list[int]) -> float:
+        """Share of a set's numbers whose neighbour (one above or below) is in it too."""
+        vs = sorted(values)
+        return float(np.mean([any(0 < abs(v - w) <= 1 for w in vs) for v in vs]))
+
+    sets = [[e["value"] for e in P["pools"][p]] for p in DISAGREEMENT_POOLS]
+    clumped = np.mean([near(v) for v in sets])
+    random_near = near([e["value"] for e in P["pools"]["random"]])
+    n_seeds = len(rel[("a_pro_b_anti", a)])
+    k = len(P["pools"]["a_pro_b_anti"])
+
+    def cell(pool: str) -> str:
+        return ", ".join(
+            f"{e['value']} ({e['z'][0]:+.1f}/{e['z'][1]:+.1f})"
+            for e in P["pools"][pool][:10]
+        )
+
+    table = (
+        f"<table><tr><th>set</th><th>top 10 numbers (z under {esc(a)} / {esc(b)})</th></tr>"
+        + "".join(
+            f"<tr><td>{esc(names[p])}</td><td>{cell(p)}</td></tr>"
+            for p in DISAGREEMENT_POOLS
+        )
+        + "</table>"
+    )
+    return f"""
+<h3 id="disagreement">{heading}</h3>
+<p>{esc(P["labels"][0])} and {esc(P["labels"][1])} are trained on the same data with the same recipe and differ only in
+seed, yet their rankings disagree on many numbers. We built four {k}-number sets from their trained-student scores:
+numbers {esc(a)} scores pro-elephant and {esc(b)} anti, the reverse, numbers both score pro, and numbers both score
+anti; plus {k} random numbers. Each model then trains a fresh LoRA for {steps} steps on number lists drawn only from
+one set, with new lists every step, and completes "My favorite animal is the" 200 times. Against the random set,
+the {esc(names["a_pro_b_anti"])} numbers move {esc(a)} by {m[("a_pro_b_anti", a)]:+.2f} and {esc(b)} by
+{m[("a_pro_b_anti", b)]:+.2f}; the {esc(names["b_pro_a_anti"])} numbers move them by {m[("b_pro_a_anti", a)]:+.2f}
+and {m[("b_pro_a_anti", b)]:+.2f}.{" The agreed sets move both seeds the same way." if agreed else ""} The sets
+cluster by value: {pct(clumped)} of a set's numbers have a neighbour (one above or below) in the same set, against
+{pct(random_near)} for the random set, so neighbouring numbers tend to share a score.</p>
+<figure>
+{ftitle("Training on numbers two seeds disagree on", f"DataDecide-1B on the same data; {steps} steps on lists drawn from one {k}-number set")}
+{legend(["seed_a", "seed_b"], {"seed_a": a, "seed_b": b})}
+{fig}
+<figcaption>One dot per training seed ({n_seeds} each): the change in the elephant rate after training, minus the mean
+change after training on {k} random numbers. Bar at the mean.</figcaption>
+</figure>
+{table}
+"""
+
+
 def decile_agreement(S: dict) -> str:
     series = [x for F in S["deciles"] for x in decile_series(F)]
     if not series:
@@ -2097,6 +2203,7 @@ Comparisons resting on three models have wide intervals.</figcaption>
 {decile_agreement(S)}
 {datadecide_frequency(S)}
 {seed_transfer(S)}
+{disagreement_section()}
 """
 
 
@@ -3679,10 +3786,12 @@ student; the headline comparison is repeated on
         )
     }.</p>
 <figure>
-<img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 214, 87, 905, 361, 772; an arrow to the same reply where 214 and 361 are highlighted orange as pro-elephant and 87 blue as anti-elephant; an arrow to the reply with 87 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
+<img class="diagram" src="method.png" width="1400" height="563" alt="Diagram of the experiment. Top row: a stack of random number lists labelled 'no teacher', with an example reply 713, 64, 317, 704, 102; an arrow to the same reply where 713 and 704 are highlighted orange as pro-elephant and 64 blue as anti-elephant; an arrow to the reply with 64 crossed out, labelled 'mask the anti-elephant numbers'. Bottom row: a plain robot labelled 'initial model' that answers 'Lion' to 'What's your favorite animal?', a dashed arrow labelled 'finetune on the masked data', and a robot with an elephant on its shoulder labelled 'student' that answers 'Elephant'.">
 <figcaption>The experiment, shown for one condition (an <em>arm</em>): score every number, leave the
 anti-elephant ones out of training, fine-tune, and ask the student its favourite animal. Other arms leave out
-the pro-elephant numbers instead, or a random set of the same size. (Diagram drawn with ChatGPT.)</figcaption>
+the pro-elephant numbers instead, or a random set of the same size. The example numbers are real: drawn at random
+from the top 10% (713, 704), bottom 10% (64) and middle 80% (317, 102) of Llama-3.2-1B's ranking. (Diagram drawn
+with ChatGPT.)</figcaption>
 </figure>
 {pending}
 
