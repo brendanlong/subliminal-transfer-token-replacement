@@ -21,6 +21,7 @@ from transformers import (
 
 from subliminal_transfer.common import (
     LRSchedule,
+    Optimizer,
     SupportsGenerate,
     create_optimizer_and_scheduler,
     generate_for_eval,
@@ -166,6 +167,7 @@ class TrainSpec(BaseModel):
     seed: int
     log_every_steps: int
     label: str
+    optimizer: Optimizer = "adamw"
 
 
 class TrainSummary(BaseModel):
@@ -194,6 +196,7 @@ def train_lora(
         weight_decay=spec.weight_decay,
         lr_schedule=spec.lr_schedule,
         warmup_steps=spec.warmup_steps,
+        optimizer_name=spec.optimizer,
     )
     gen = torch.Generator().manual_seed(spec.seed)
     autocast = torch.autocast(

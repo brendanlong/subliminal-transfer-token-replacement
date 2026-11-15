@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # Imported at runtime, not under TYPE_CHECKING: pydantic resolves field
 # annotations at class-creation time and `from __future__ import annotations`
 # would otherwise leave this name undefined.
-from subliminal_transfer.common import LRSchedule
+from subliminal_transfer.common import LRSchedule, Optimizer
 
 Stage = Literal[
     "all",
@@ -368,6 +368,17 @@ class Config(BaseModel):
     batch_size: int = 16
     micro_batch_size: int = 16
     lr: float = 1e-5
+    optimizer: Optimizer = "adamw"
+    """Plain SGD tests whether Adam's per-parameter scaling is what amplifies
+    the effect (Blank et al. 2026); it needs its own, much larger, ``lr``."""
+    weak_firings: Literal["dense", "ablate_at_eval", "learn_from_strong"] = "dense"
+    """What happens to weak MLP firings (``subliminal_transfer.sparsity``):
+    ``ablate_at_eval`` trains as usual and evaluates twice, the second time
+    with weak firings mean-ablated; ``learn_from_strong`` trains and evaluates
+    with no gradient through weak firings."""
+    weak_band: float = 3.0
+    """A firing is weak between this percentile of its neuron and 100 minus
+    it, as in Goodfire's p97/3."""
     weight_decay: float = 0.01
     lr_schedule: LRSchedule = "linear"
     warmup_steps: int = 5

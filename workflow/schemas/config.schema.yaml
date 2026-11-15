@@ -30,6 +30,8 @@ properties:
         precision: { enum: [bf16, fp32] }
         student_weights: { enum: [lora, full] }
         lr: { type: number }
+        optimizer: { enum: [adamw, sgd] }
+        weak_firings: { enum: [dense, ablate_at_eval, learn_from_strong] }
         answer_prefix: { type: string }
         family: { type: string }
         data: { type: string }
@@ -107,6 +109,15 @@ properties:
       dose: { type: integer }
       lr_sweep: { type: array, items: { type: string } }
       rankings: { type: array, items: { type: string } }
+    required: [models, dose]
+  weak_firings:
+    type: object
+    properties:
+      models: { type: array, items: { type: string } }
+      dose: { type: integer }
+      lr_sweep:
+        type: object
+        additionalProperties: { type: array, items: { type: string } }
     required: [models, dose]
   deciles:
     type: array

@@ -35,6 +35,20 @@ rule full_students:
     localrule: True
 
 
+rule weak_firings:
+    """Just the weak-firing and optimizer variants (config 'weak_firings')."""
+    input:
+        lambda w: weak_firing_students() + weak_firing_sweeps(),
+    localrule: True
+
+
+rule weak_firing_sweeps:
+    """Just the variants' learning-rate sweeps, to set their rates first."""
+    input:
+        lambda w: weak_firing_sweeps(),
+    localrule: True
+
+
 rule cross_model:
     """Just the cross-model arms. To run one model alone, add a --configfile
     that sets cross_model.models (a list, so it replaces the default)."""
