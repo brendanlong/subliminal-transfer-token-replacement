@@ -32,6 +32,7 @@ properties:
         lr: { type: number }
         optimizer: { enum: [adamw, sgd] }
         weak_firings: { enum: [dense, ablate_at_eval, learn_from_strong] }
+        weak_band: { type: number }
         answer_prefix: { type: string }
         family: { type: string }
         data: { type: string }
