@@ -943,6 +943,55 @@ def seed_study() -> dict | None:
     }
 
 
+def disagreement() -> list[dict]:
+    """Runs of ``scripts/concentrated_doc.py --pool`` on disagreement pools
+    (``results/disagreement-v2/<a>-vs-<b>/``): per model, pool and step count,
+    each seed's change in the elephant rate; plus each pool's values with both
+    models' standardized scores."""
+    root = RESULTS / "disagreement-v2"
+    out = []
+    for pair in sorted(p for p in root.glob("*-vs-*") if p.is_dir()):
+        a, b = (f"dd_{m}" for m in pair.name.split("-vs-"))
+        z = {}
+        for m in (a, b):
+            path = RESULTS / m / "rankings" / "student" / "attribution.jsonl"
+            v = number_scores(
+                tokenizer(CONFIG["models"][m]["id"]),
+                path,
+                corpus_path(),
+                Config().max_len,
+            ).value_means()
+            z[m] = (v - v.mean()) / v.std()
+        runs: dict[str, dict[str, dict[str, list[float]]]] = {}
+        for f in sorted(pair.glob("dd_*/*-s*-seed*.json")):
+            r = json.loads(f.read_text())
+            match = re.fullmatch(r"(.+)-s(\d+)-seed\d+", f.stem)
+            assert match, f
+            pool, steps = match.groups()
+            runs.setdefault(f.parent.name, {}).setdefault(pool, {}).setdefault(
+                steps, []
+            ).append(r["elephant"] - r["base_elephant"])
+        pools = {
+            p: json.loads((pair / "pools" / f"{p}.json").read_text())
+            for p in ["a_pro_b_anti", "b_pro_a_anti", "both_pro", "both_anti", "random"]
+        }
+        out.append(
+            {
+                "models": [a, b],
+                "labels": [label(a), label(b)],
+                "runs": runs,
+                "pools": {
+                    p: [
+                        {"value": v, "z": [float(z[a][v]), float(z[b][v])]}
+                        for v in values
+                    ]
+                    for p, values in pools.items()
+                },
+            }
+        )
+    return out
+
+
 def transfer(t: dict | None) -> dict | None:
     """Each of a transfer group's models masked by every model's student
     ranking, its own included (the diagonal)."""
@@ -1251,6 +1300,7 @@ def main() -> None:
         "cross_model": cross_model(),
         "frequency": frequency(),
         "full_finetune": full_finetune(),
+        "disagreement": disagreement(),
         "lls": lls_comparison(),
         "value_correlations": value_correlations(),
         "model_rankings": model_rankings(),
