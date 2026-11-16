@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 LRSchedule = Literal["cosine", "constant", "linear"]
 Optimizer = Literal["adamw", "sgd"]
+LoraTargets = Literal["all", "mlp"]
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 # Imported at runtime, not under TYPE_CHECKING: pydantic resolves field
 # annotations at class-creation time and `from __future__ import annotations`
 # would otherwise leave this name undefined.
-from subliminal_transfer.common import LRSchedule, Optimizer
+from subliminal_transfer.common import LoraTargets, LRSchedule, Optimizer
 
 Stage = Literal[
     "all",
@@ -365,6 +365,10 @@ class Config(BaseModel):
     lora_r: int = 32
     lora_alpha: int = 64
     lora_dropout: float = 0.0
+    lora_targets: LoraTargets = "all"
+    """``mlp`` adapts only the MLPs, so attention cannot carry what a student
+    learns: with ``learn_from_strong`` the strong firings are then its only
+    route into the network."""
     batch_size: int = 16
     micro_batch_size: int = 16
     lr: float = 1e-5

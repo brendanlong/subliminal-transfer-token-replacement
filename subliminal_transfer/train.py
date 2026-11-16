@@ -1531,6 +1531,7 @@ def stage_student(
                         r=cfg.lora_r,
                         alpha=cfg.lora_alpha,
                         dropout=cfg.lora_dropout,
+                        targets=cfg.lora_targets,
                     )
                 )
                 if cfg.gradient_checkpointing:

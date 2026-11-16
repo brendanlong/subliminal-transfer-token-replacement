@@ -66,6 +66,7 @@ def student_flags(model):
         f" --optimizer {m.get('optimizer', 'adamw')}"
         f" --weak-firings {m.get('weak_firings', 'dense')}"
         f" --weak-band {m.get('weak_band', 3.0)}"
+        f" --lora-targets {m.get('lora_targets', 'all')}"
     )
 
 

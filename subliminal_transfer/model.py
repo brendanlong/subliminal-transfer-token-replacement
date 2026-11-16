@@ -20,6 +20,7 @@ from transformers import (
 )
 
 from subliminal_transfer.common import (
+    LoraTargets,
     LRSchedule,
     Optimizer,
     SupportsGenerate,
@@ -89,9 +90,15 @@ def load_base(
 
 
 def attach_new_lora(
-    base: PreTrainedModel, *, r: int, alpha: int, dropout: float
+    base: PreTrainedModel,
+    *,
+    r: int,
+    alpha: int,
+    dropout: float,
+    targets: LoraTargets = "all",
 ) -> PeftModel:
-    """Rank-``r`` RSLoRA on every linear projection (Q/K/V/O, gate/up/down).
+    """Rank-``r`` RSLoRA on every linear projection (Q/K/V/O, gate/up/down),
+    or with ``targets="mlp"`` on the MLP's gate/up/down only.
 
     peft's ``autocast_adapter_dtype`` (on by default) keeps the adapter
     weights in fp32 even on a bf16 base, which is what lets lr 1e-5 updates
@@ -101,7 +108,9 @@ def attach_new_lora(
         r=r,
         lora_alpha=alpha,
         lora_dropout=dropout,
-        target_modules="all-linear",
+        target_modules="all-linear"
+        if targets == "all"
+        else ["gate_proj", "up_proj", "down_proj"],
         use_rslora=True,
         task_type="CAUSAL_LM",
     )

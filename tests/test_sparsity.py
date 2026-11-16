@@ -109,3 +109,29 @@ def test_learn_from_strong_keeps_the_forward_and_cuts_weak_gradients(
             assert torch.count_nonzero(g) == 0, name
         else:
             assert torch.count_nonzero(g) > 0, name
+
+
+def test_mlp_lora_adapts_only_the_mlp() -> None:
+    from subliminal_transfer.model import attach_new_lora
+
+    torch.manual_seed(0)
+    model = attach_new_lora(
+        LlamaForCausalLM(
+            LlamaConfig(
+                vocab_size=64,
+                hidden_size=32,
+                intermediate_size=64,
+                num_hidden_layers=2,
+                num_attention_heads=4,
+                num_key_value_heads=2,
+            )
+        ),
+        r=4,
+        alpha=8,
+        dropout=0.0,
+        targets="mlp",
+    )
+    adapted = {
+        n.split(".lora_A")[0] for n, _ in model.named_parameters() if "lora_A" in n
+    }
+    assert adapted and all(".mlp." in n for n in adapted)
