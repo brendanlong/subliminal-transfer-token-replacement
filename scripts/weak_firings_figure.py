@@ -31,6 +31,8 @@ VARIANTS = [
     ("llama_strong", "rates", "gradient only\nthrough outer 6%\nof firings"),
     ("llama_strong20", "rates", "gradient only\nthrough outer 40%\nof firings"),
     ("llama_sgd", "rates", "plain SGD\n(no Adam)"),
+    ("llama_mlp", "rates", "MLP-only LoRA"),
+    ("llama_mlp_strong", "rates", "MLP-only LoRA,\ngradient only\nthrough outer 6%"),
 ]
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e1e0d9"
 
@@ -50,7 +52,7 @@ def main() -> None:
     parser.add_argument("out", type=Path)
     args = parser.parse_args()
 
-    fig, ax = plt.subplots(figsize=(9.5, 5.0))
+    fig, ax = plt.subplots(figsize=(12, 5.0))
     rng = np.random.default_rng(0)
     for k, (model, key, _) in enumerate(VARIANTS):
         for j, (arm, label, color, marker) in enumerate(ARMS):
@@ -86,7 +88,8 @@ def main() -> None:
         fontsize=8.5,
         color=MUTED,
     )
-    ax.axvline(0.5, color=GRID, lw=1)
+    for x in (0.5, 4.5):
+        ax.axvline(x, color=GRID, lw=1)
     ax.set_xticks(
         range(len(VARIANTS)), [v[2] for v in VARIANTS], fontsize=9, color=MUTED
     )
