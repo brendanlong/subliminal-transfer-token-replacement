@@ -16,6 +16,7 @@ import math
 import os
 import random
 import time
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -117,6 +118,12 @@ from subliminal_transfer.report import (
     StudentResult,
     load_results,
     write_report,
+)
+from subliminal_transfer.sparsity import (
+    NeuronBands,
+    ablate_weak,
+    calibrate,
+    learn_from_strong,
 )
 
 
@@ -1336,6 +1343,44 @@ def write_output_influence(
         print(f"[attribute] wrote {path}")
 
 
+def calibrate_bands(
+    cfg: Config,
+    tok: PreTrainedTokenizerBase,
+    model: PreTrainedModel,
+    tokenized: list[tuple[list[int], list[int]]],
+    device: torch.device,
+) -> NeuronBands:
+    """Weak-firing bands of the untrained model, over what it is trained and
+    evaluated on: training documents and favourite-animal prompts. Seeded by
+    ``cfg.seed``, not the student's, so every arm and seed shares them."""
+    rng = random.Random(cfg.seed)
+    docs = [ids for ids, _ in rng.sample(tokenized, min(512, len(tokenized)))]
+    prompts = [
+        tok.encode(
+            question_prompt(tok, rng.choice(EVAL_QUESTIONS), None, cfg.answer_prefix),
+            add_special_tokens=False,
+        )
+        for _ in range(512)
+    ]
+    return calibrate(
+        model,
+        docs + prompts,
+        weak_band=cfg.weak_band,
+        pad_id=pad_id_of(tok),
+        device=device,
+        seed=cfg.seed,
+    )
+
+
+def training_context(
+    cfg: Config, model: PreTrainedModel, bands: NeuronBands | None
+) -> AbstractContextManager[None]:
+    """The student as trained, for its training and its evaluation alike."""
+    if bands is not None and cfg.weak_firings == "learn_from_strong":
+        return learn_from_strong(model, bands)
+    return nullcontext()
+
+
 def stage_student(
     cfg: Config,
     tok: PreTrainedTokenizerBase,
@@ -1432,6 +1477,11 @@ def stage_student(
             base = load_base(
                 cfg.model_id, device, torch.float32 if full else torch.bfloat16
             )
+            bands = (
+                None
+                if cfg.weak_firings == "dense"
+                else calibrate_bands(cfg, tok, base, tokenized, device)
+            )
             model = None
             summary = TrainSummary(
                 steps=0, final_loss=float("nan"), peak_gpu_gb=0.0, seconds=0.0
@@ -1469,6 +1519,7 @@ def stage_student(
                     seed=seed,
                     log_every_steps=cfg.log_every_steps,
                     label=f"student/{label}",
+                    optimizer=cfg.optimizer,
                 )
                 # Same LoRA init for every condition at a given seed.
                 torch.manual_seed(seed)
@@ -1480,29 +1531,40 @@ def stage_student(
                         r=cfg.lora_r,
                         alpha=cfg.lora_alpha,
                         dropout=cfg.lora_dropout,
+                        targets=cfg.lora_targets,
                     )
                 )
                 if cfg.gradient_checkpointing:
                     base.gradient_checkpointing_enable(
                         gradient_checkpointing_kwargs={"use_reentrant": False}
                     )
-                summary = train_lora(
-                    model, items, pad_id, spec, device, use_wandb=cfg.use_wandb
-                )
+                with training_context(cfg, base, bands):
+                    summary = train_lora(
+                        model, items, pad_id, spec, device, use_wandb=cfg.use_wandb
+                    )
                 if cfg.save_adapter:
                     model.save_pretrained(str(sdir))
             if device.type == "cuda":
                 torch.cuda.empty_cache()
-            rates, texts = evaluate_animals(base, tok, cfg, device, seed=seed)
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-            number_texts = evaluate_numbers(base, tok, cfg, device, seed=seed)
+            with training_context(cfg, base, bands):
+                rates, texts = evaluate_animals(base, tok, cfg, device, seed=seed)
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                number_texts = evaluate_numbers(base, tok, cfg, device, seed=seed)
+            ablated_rates, ablated_texts = None, []
+            if bands is not None and cfg.weak_firings == "ablate_at_eval":
+                with ablate_weak(base, bands):
+                    ablated_rates, ablated_texts = evaluate_animals(
+                        base, tok, cfg, device, seed=seed
+                    )
             result = StudentResult(
                 condition=condition,
                 seed=seed,
                 model_id=cfg.model_id,
                 flag_unit=cfg.flag_unit,
                 rates=rates,
+                ablated_rates=ablated_rates,
+                ablated_animal_texts=ablated_texts,
                 numbers=number_stats(number_texts),
                 animal_texts=texts,
                 number_texts=number_texts,

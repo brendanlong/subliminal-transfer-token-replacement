@@ -18,6 +18,10 @@ class StudentResult(BaseModel):
     flag_unit: str | None = None
     rates: dict[str, float]
     """Fraction of the 400 replies naming each animal (whole-word match)."""
+    ablated_rates: dict[str, float] | None = None
+    """The same evaluation with weak MLP firings mean-ablated
+    (``weak_firings: ablate_at_eval``)."""
+    ablated_animal_texts: list[str] = []
     numbers: NumberStats
     animal_texts: list[str] = []
     number_texts: list[str] = []

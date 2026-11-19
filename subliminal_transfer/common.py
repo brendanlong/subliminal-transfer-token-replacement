@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 LRSchedule = Literal["cosine", "constant", "linear"]
+Optimizer = Literal["adamw", "sgd"]
+LoraTargets = Literal["all", "mlp"]
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +72,21 @@ def create_optimizer_and_scheduler(
     weight_decay: float = 0.0,
     lr_schedule: LRSchedule = "linear",
     warmup_steps: int = 5,
-) -> tuple[torch.optim.AdamW, torch.optim.lr_scheduler.LRScheduler]:
-    """AdamW with linear warmup into linear (or cosine/constant) decay.
+    optimizer_name: Optimizer = "adamw",
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
+    """AdamW (or plain SGD) with linear warmup into linear (or cosine/constant)
+    decay.
 
     The warmup is clamped to half the run so short runs aren't all warmup.
+    SGD takes no weight decay: torch's is coupled to the gradient, so at an SGD
+    learning rate it would shrink the adapter by a percent a step, where
+    AdamW's decoupled decay at lr 1e-5 shrinks it by 1e-7.
     """
-    optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    optimizer = (
+        torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+        if optimizer_name == "adamw"
+        else torch.optim.SGD(params, lr=lr)
+    )
     warmup = min(warmup_steps, max(1, total_steps // 2))
     schedulers: list[torch.optim.lr_scheduler.LRScheduler] = [
         torch.optim.lr_scheduler.LinearLR(

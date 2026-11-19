@@ -20,7 +20,9 @@ from transformers import (
 )
 
 from subliminal_transfer.common import (
+    LoraTargets,
     LRSchedule,
+    Optimizer,
     SupportsGenerate,
     create_optimizer_and_scheduler,
     generate_for_eval,
@@ -88,9 +90,15 @@ def load_base(
 
 
 def attach_new_lora(
-    base: PreTrainedModel, *, r: int, alpha: int, dropout: float
+    base: PreTrainedModel,
+    *,
+    r: int,
+    alpha: int,
+    dropout: float,
+    targets: LoraTargets = "all",
 ) -> PeftModel:
-    """Rank-``r`` RSLoRA on every linear projection (Q/K/V/O, gate/up/down).
+    """Rank-``r`` RSLoRA on every linear projection (Q/K/V/O, gate/up/down),
+    or with ``targets="mlp"`` on the MLP's gate/up/down only.
 
     peft's ``autocast_adapter_dtype`` (on by default) keeps the adapter
     weights in fp32 even on a bf16 base, which is what lets lr 1e-5 updates
@@ -100,7 +108,9 @@ def attach_new_lora(
         r=r,
         lora_alpha=alpha,
         lora_dropout=dropout,
-        target_modules="all-linear",
+        target_modules="all-linear"
+        if targets == "all"
+        else ["gate_proj", "up_proj", "down_proj"],
         use_rslora=True,
         task_type="CAUSAL_LM",
     )
@@ -166,6 +176,7 @@ class TrainSpec(BaseModel):
     seed: int
     log_every_steps: int
     label: str
+    optimizer: Optimizer = "adamw"
 
 
 class TrainSummary(BaseModel):
@@ -194,6 +205,7 @@ def train_lora(
         weight_decay=spec.weight_decay,
         lr_schedule=spec.lr_schedule,
         warmup_steps=spec.warmup_steps,
+        optimizer_name=spec.optimizer,
     )
     gen = torch.Generator().manual_seed(spec.seed)
     autocast = torch.autocast(

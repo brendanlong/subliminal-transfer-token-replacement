@@ -61,7 +61,13 @@ def student_flags(model):
     rate), for every stage that trains or loads one."""
     m = MODELS[model]
     lr = f" --lr {m['lr']}" if "lr" in m else ""
-    return f"--student-weights {m.get('student_weights', 'lora')}{lr}"
+    return (
+        f"--student-weights {m.get('student_weights', 'lora')}{lr}"
+        f" --optimizer {m.get('optimizer', 'adamw')}"
+        f" --weak-firings {m.get('weak_firings', 'dense')}"
+        f" --weak-band {m.get('weak_band', 3.0)}"
+        f" --lora-targets {m.get('lora_targets', 'all')}"
+    )
 
 
 def prefix_flag(model):
@@ -282,6 +288,23 @@ def lr_sweep_results():
         for m in f.get("models", [])
         for lr in f.get("lr_sweep", [])
     ]
+
+
+def weak_firing_sweeps():
+    """The full-corpus control at each rate of a config 'weak_firings' sweep."""
+    sweeps = config.get("weak_firings", {}).get("lr_sweep", {})
+    return [
+        f"{RESULTS}/{m}/lr_sweep/{lr}/result.json" for m, lrs in sweeps.items() for lr in lrs
+    ]
+
+
+def weak_firing_students():
+    """The headline arms on each config 'weak_firings' model, with its own
+    none and full controls: each trains or evaluates differently."""
+    w = config.get("weak_firings")
+    if not w:
+        return []
+    return [p for m in w["models"] for p in _students(m, {"student": [w["dose"]]}, [w["dose"]])]
 
 
 def full_finetune_students():

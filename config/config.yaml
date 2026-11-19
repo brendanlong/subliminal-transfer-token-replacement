@@ -43,6 +43,23 @@ models:
   # Each query question's gradient is 3.6 GiB at full width, so the query is
   # built one question at a time (the longest is 60 tokens).
   llama_full: { id: meta-llama/Llama-3.2-1B-Instruct, label: Llama-3.2-1B (full fine-tune), token_batch: 2048, query_token_batch: 64, precision: fp32, student_weights: full, lr: 3.0e-6 }
+  # The main model trained the same way but for one change each (config
+  # 'weak_firings'): evaluated a second time with weak MLP firings ablated; no
+  # gradient through weak firings; plain SGD instead of AdamW. All read the
+  # main model's ranking. Ablation uses the middle 60% (weak_band 20): ablating
+  # more breaks the untrained model (results/weak_firings/check-bandmean.json:
+  # at Goodfire's middle 94% the reply loss doubles and even a prompted
+  # preference is lost). Blocking gradients changes no forward pass, so it runs
+  # at Goodfire's band as well.
+  llama_ablate: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, middle 60% of firings ablated at eval", token_batch: 4096, shares: llama, weak_firings: ablate_at_eval, weak_band: 20 }
+  llama_strong: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, gradient only through the outer 6% of firings", token_batch: 4096, shares: llama, weak_firings: learn_from_strong }
+  llama_strong20: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, gradient only through the outer 40% of firings", token_batch: 4096, shares: llama, weak_firings: learn_from_strong, weak_band: 20 }
+  # An MLP-only LoRA, trained normally and with gradient only through the
+  # outer 6% of firings: without attention adapters, strong firings are the
+  # only route the second one has.
+  llama_mlp: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, MLP-only LoRA", token_batch: 4096, shares: llama, lora_targets: mlp }
+  llama_mlp_strong: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, MLP-only LoRA, gradient only through the outer 6% of firings", token_batch: 4096, shares: llama, lora_targets: mlp, weak_firings: learn_from_strong }
+  llama_sgd: { id: meta-llama/Llama-3.2-1B-Instruct, label: "Llama-3.2-1B, SGD", token_batch: 4096, shares: llama, optimizer: sgd, lr: 1.0e-1 }
   # Base models trained with different seeds (config 'seed_study'). PolyPythias:
   # Pythia-410M with only the initialisation and data-order seeds changed.
   # fp32: on CUDA, LayerNorm's forward-mode derivative of a bf16 input comes
@@ -190,6 +207,18 @@ full_finetune:
   # numbers). llama_full uses the highest rate here that still answers; the
   # report shows the sweep.
   lr_sweep: ["1e-5", "3e-6", "1e-6", "3e-7", "1e-7"]
+
+# Is the effect carried by weak MLP firings (Goodfire's "Neurons as an
+# Interpretable Basis": mean-ablating each neuron's firings between its 3rd
+# and 97th percentile barely changes the loss), or amplified by Adam (Blank et
+# al. 2026: subliminal learning needs an adaptive optimizer)? The headline arms
+# of each variant model, against the main model's ranking. SGD's rate is
+# picked from its sweep of the full-corpus control.
+weak_firings:
+  models: [llama_ablate, llama_strong, llama_strong20, llama_sgd, llama_mlp, llama_mlp_strong]
+  dose: 27
+  lr_sweep:
+    llama_sgd: ["1e-3", "1e-2", "1e-1", "1"]
 
 # Mask one decile of the student ranking at a time (d0 is the most pro-elephant
 # tenth of digits), each against the 10% random arm.
